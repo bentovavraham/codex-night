@@ -138,7 +138,16 @@ CREATE TABLE IF NOT EXISTS "session" (
     "expire" timestamp(6) NOT NULL
 ) WITH (OIDS=FALSE);
 DO $$ BEGIN
-    ALTER TABLE "session" ADD CONSTRAINT "session_pkey" PRIMARY KEY ("sid") NOT DEFERRABLE INITIALLY IMMEDIATE;
-EXCEPTION WHEN duplicate_object THEN NULL;
+    -- A duplicate PRIMARY KEY raises invalid_table_definition (42P16),
+    -- not duplicate_object. Use a presence check instead so re-running the
+    -- schema is a no-op.
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'session_pkey'
+          AND conrelid = '"session"'::regclass
+    ) THEN
+        ALTER TABLE "session" ADD CONSTRAINT "session_pkey"
+            PRIMARY KEY ("sid") NOT DEFERRABLE INITIALLY IMMEDIATE;
+    END IF;
 END $$;
 CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
