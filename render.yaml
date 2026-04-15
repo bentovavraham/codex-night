@@ -13,3 +13,5 @@ services:
         sync: false    # set in the Render dashboard (use internal URL)
       - key: SESSION_SECRET
         generateValue: true
+      - key: SEED_TOKEN
+        generateValue: true   # required for /api/admin/* endpoints; view in dashboard

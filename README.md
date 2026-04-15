@@ -30,14 +30,41 @@ Demo credentials (from `db/seed.js`):
 3. Create a **Web Service** from the repo with:
    - **Build:** `npm install`
    - **Start:** `node server.js`
-   - **Env vars:** `DATABASE_URL` (internal URL), `SESSION_SECRET`, `NODE_ENV=production`
+   - **Env vars:**
+     - `DATABASE_URL` (internal URL)
+     - `SESSION_SECRET` (long random string)
+     - `SEED_TOKEN` (long random string — used to trigger first-run seeding)
+     - `NODE_ENV=production`
 
    Or apply `render.yaml` as an Infrastructure-as-Code blueprint.
-4. From a shell with the **external** `DATABASE_URL`, run:
+
+4. **Migrations run automatically on every server startup** (schema.sql is
+   idempotent), so as soon as the Web Service is deployed, tables exist.
+
+5. **Seed the DB without a shell** by hitting the token-gated admin endpoints
+   from your browser / `curl`. Replace `TOKEN` with the value of your
+   `SEED_TOKEN` env var and `HOST` with your Render URL:
+
    ```bash
-   npm run migrate
-   npm run seed
+   # Check what's in the DB
+   curl -H "x-seed-token: TOKEN" https://HOST/api/admin/status
+
+   # Seed the placeholder QB codes (no-op if any codes already present)
+   curl -X POST -H "x-seed-token: TOKEN" https://HOST/api/admin/seed-qb-codes
+
+   # Create your first admin user
+   curl -X POST -H "x-seed-token: TOKEN" -H "Content-Type: application/json" \
+        -d '{"name":"You","email":"you@example.com","password":"pickSomething","role":"admin"}' \
+        https://HOST/api/admin/create-user
+
+   # (Later) reset a password
+   curl -X POST -H "x-seed-token: TOKEN" -H "Content-Type: application/json" \
+        -d '{"email":"you@example.com","new_password":"newOne"}' \
+        https://HOST/api/admin/reset-password
    ```
+
+   These endpoints only respond when `SEED_TOKEN` is set, and only to requests
+   that present the matching token.
 
 ## QB Chart of Accounts
 
