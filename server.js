@@ -2,6 +2,7 @@
 
 try { require('dotenv').config(); } catch (_) { /* optional */ }
 
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
@@ -16,6 +17,7 @@ const projectRoutes = require('./routes/projects');
 const budgetRoutes = require('./routes/budget');
 const contractRoutes = require('./routes/contracts');
 const invoiceRoutes = require('./routes/invoices');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 app.disable('x-powered-by');
@@ -57,6 +59,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/projects', budgetRoutes);        // nested under /projects/:id/budget
 app.use('/api', contractRoutes);                // /projects/:id/contracts and /contracts/:id
 app.use('/api', invoiceRoutes);                 // /projects/:id/invoices and /invoices/:id
+app.use('/api/admin', adminRoutes);
 
 // --- Static SPA ---
 app.use(express.static(path.join(__dirname, 'public')));
@@ -71,7 +74,26 @@ app.use((err, req, res, _next) => {
   res.status(err.status || 500).json({ error: err.message || 'Internal error' });
 });
 
+// Auto-apply schema.sql on startup. Schema is idempotent (CREATE TABLE IF
+// NOT EXISTS), so this is safe on every boot. Skippable via SKIP_MIGRATIONS=1.
+async function applyMigrationsOnStartup() {
+  if (process.env.SKIP_MIGRATIONS === '1') {
+    console.log('SKIP_MIGRATIONS=1 — skipping migrations.');
+    return;
+  }
+  try {
+    const sql = fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
+    await pool.query(sql);
+    console.log('Schema migrations applied.');
+  } catch (err) {
+    console.error('Startup migration failed:', err);
+    // Don't crash the server — health check will surface the DB issue.
+  }
+}
+
 const port = Number(process.env.PORT) || 3000;
-app.listen(port, () => {
-  console.log(`ActiveAcq server listening on :${port} (${isProd ? 'prod' : 'dev'})`);
+applyMigrationsOnStartup().finally(() => {
+  app.listen(port, () => {
+    console.log(`ActiveAcq server listening on :${port} (${isProd ? 'prod' : 'dev'})`);
+  });
 });
