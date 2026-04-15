@@ -69,10 +69,25 @@ function NewContractModal({ projectId, onClose, onSaved }) {
   const [total, setTotal] = React.useState('');
   const [date, setDate] = React.useState('');
   const [ref, setRef] = React.useState('');
-  const [file, setFile] = React.useState('');
+  const [fileRef, setFileRef] = React.useState(null); // { file_reference, filename, download_url }
+  const [uploading, setUploading] = React.useState(false);
   const [status, setStatus] = React.useState('draft');
   const [lines, setLines] = React.useState([{ qb_code_id: '', amount: '' }]);
   const [err, setErr] = React.useState(null);
+
+  // When only one allocation line exists, keep its amount synced to total.
+  React.useEffect(() => {
+    if (lines.length === 1 && total && (!lines[0].amount || Number(lines[0].amount) === 0)) {
+      setLines([{ ...lines[0], amount: String(Number(total)) }]);
+    }
+  }, [total]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function onFile(f) {
+    setErr(null); setUploading(true);
+    try { setFileRef(await api.uploadFile(f)); }
+    catch (e) { setErr(e.message); }
+    finally { setUploading(false); }
+  }
 
   React.useEffect(() => {
     api.getQbCodes().then((r) => setCodes(r.flat || [])).catch((e)=>setErr(e.message));
@@ -98,7 +113,7 @@ function NewContractModal({ projectId, onClose, onSaved }) {
       await api.createContract(projectId, {
         vendor_name: vendor, description, total_value: Number(total),
         contract_date: date || null, reference_number: ref || null, status,
-        file_reference: file || null, lines: cleaned,
+        file_reference: fileRef?.file_reference || null, lines: cleaned,
       });
       onSaved();
     } catch (e) { setErr(e.message); }
@@ -115,7 +130,12 @@ function NewContractModal({ projectId, onClose, onSaved }) {
           <div className="form-grid">
             <div>
               <label>Vendor</label>
-              <input value={vendor} onChange={(e)=>setVendor(e.target.value)} />
+              <SmartSearch
+                value={vendor}
+                onChange={(v) => setVendor(v)}
+                fetcher={(q) => api.searchVendors(q)}
+                placeholder="Search QB vendors or type a new one"
+              />
             </div>
             <div>
               <label>Reference number</label>
@@ -138,8 +158,15 @@ function NewContractModal({ projectId, onClose, onSaved }) {
               </select>
             </div>
             <div>
-              <label>File reference (placeholder)</label>
-              <input value={file} onChange={(e)=>setFile(e.target.value)} placeholder="SharePoint URL (future)" />
+              <label>Contract PDF</label>
+              <Dropzone
+                file={fileRef ? { filename: fileRef.filename, download_url: fileRef.download_url } : null}
+                onFile={onFile}
+                onClear={() => setFileRef(null)}
+                busy={uploading}
+                accept="application/pdf"
+                label="Drop contract PDF, or click to browse"
+              />
             </div>
             <div className="full">
               <label>Description</label>
@@ -227,6 +254,10 @@ function ContractDetail({ contractId, onClose }) {
           {data.description && <>
             <div className="hint" style={{ marginTop: 10 }}>Description</div>
             <div>{data.description}</div>
+          </>}
+          {data.file_reference && <>
+            <div className="hint" style={{ marginTop: 10 }}>Attachment</div>
+            <div><a href={`/api/files/${encodeURIComponent(data.file_reference)}`} target="_blank">View contract PDF</a></div>
           </>}
         </div>
         <div>

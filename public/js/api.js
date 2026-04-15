@@ -62,4 +62,25 @@ window.api = {
   rejectInvoice:     (id)               => request('POST', `/api/invoices/${id}/reject`),
   markPushed:        (id)               => request('POST', `/api/invoices/${id}/mark-pushed`),
   markPaid:          (id, paid_date)    => request('POST', `/api/invoices/${id}/mark-paid`, { paid_date }),
+
+  // File upload / extraction
+  uploadFile: async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/api/files', { method: 'POST', credentials: 'same-origin', body: form });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    return payload;
+  },
+  extractInvoice: async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/api/invoices/extract', { method: 'POST', credentials: 'same-origin', body: form });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    return payload;
+  },
+
+  searchVendors:    (q='')              => request('GET', `/api/vendors${q ? '?q=' + encodeURIComponent(q) : ''}`),
+  searchCustomers:  (q='')              => request('GET', `/api/customers${q ? '?q=' + encodeURIComponent(q) : ''}`),
 };
