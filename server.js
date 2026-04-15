@@ -18,6 +18,9 @@ const budgetRoutes = require('./routes/budget');
 const contractRoutes = require('./routes/contracts');
 const invoiceRoutes = require('./routes/invoices');
 const adminRoutes = require('./routes/admin');
+const uploadRoutes = require('./routes/uploads');
+const vendorRoutes = require('./routes/vendors');
+const customerRoutes = require('./routes/customers');
 
 const app = express();
 app.disable('x-powered-by');
@@ -60,6 +63,9 @@ app.use('/api/projects', budgetRoutes);        // nested under /projects/:id/bud
 app.use('/api', contractRoutes);                // /projects/:id/contracts and /contracts/:id
 app.use('/api', invoiceRoutes);                 // /projects/:id/invoices and /invoices/:id
 app.use('/api/admin', adminRoutes);
+app.use('/api/files', uploadRoutes);            // POST uploads, GET :reference downloads
+app.use('/api/vendors', vendorRoutes);
+app.use('/api/customers', customerRoutes);
 
 // --- Static SPA ---
 app.use(express.static(path.join(__dirname, 'public')));

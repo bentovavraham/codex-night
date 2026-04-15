@@ -5,6 +5,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../db/pool');
+const { insertRealCodes } = require('../db/qb-codes');
 
 const router = express.Router();
 
@@ -18,80 +19,58 @@ function requireToken(req, res, next) {
   next();
 }
 
-// Placeholder codes — replace when real chart of accounts arrives. Kept in
-// sync with db/seed.js so either path seeds the same data.
-const PLACEHOLDER_QB_CODES = [
-  { code: '5000', name: 'Pre-Development', children: [
-    { code: '5100', name: 'Due Diligence' },
-    { code: '5200', name: 'Legal / Closing Costs' },
-    { code: '5300', name: 'Surveys & Inspections' },
-  ]},
-  { code: '6000', name: 'Direct Construction Costs', children: [
-    { code: '6100', name: 'Labor', children: [
-      { code: '6110', name: 'General Labor' },
-      { code: '6120', name: 'Subcontracted Labor' },
-    ]},
-    { code: '6200', name: 'Materials', children: [
-      { code: '6210', name: 'Lumber & Framing' },
-      { code: '6220', name: 'Finishes' },
-      { code: '6230', name: 'Fixtures' },
-    ]},
-    { code: '6300', name: 'Equipment Rental' },
-    { code: '6400', name: 'Site Work' },
-  ]},
-  { code: '7000', name: 'Soft Costs', children: [
-    { code: '7100', name: 'Architecture & Engineering' },
-    { code: '7200', name: 'Permits & Fees' },
-    { code: '7300', name: 'Insurance' },
-  ]},
-  { code: '8000', name: 'Financing', children: [
-    { code: '8100', name: 'Loan Fees' },
-    { code: '8200', name: 'Interest Reserve' },
-  ]},
-  { code: '9000', name: 'Contingency' },
-];
-
 // GET /api/admin/status — quick visibility into what's in the DB.
 router.get('/status', requireToken, async (_req, res, next) => {
   try {
     const r = await pool.query(`
       SELECT
-        (SELECT COUNT(*) FROM qb_codes)::int AS qb_codes,
-        (SELECT COUNT(*) FROM users)::int AS users,
-        (SELECT COUNT(*) FROM projects)::int AS projects,
+        (SELECT COUNT(*) FROM qb_codes)::int   AS qb_codes,
+        (SELECT COUNT(*) FROM users)::int      AS users,
+        (SELECT COUNT(*) FROM projects)::int   AS projects,
         (SELECT COUNT(*) FROM budget_lines)::int AS budget_lines,
-        (SELECT COUNT(*) FROM contracts)::int AS contracts,
-        (SELECT COUNT(*) FROM invoices)::int AS invoices
+        (SELECT COUNT(*) FROM contracts)::int  AS contracts,
+        (SELECT COUNT(*) FROM invoices)::int   AS invoices,
+        (SELECT COUNT(*) FROM vendors)::int    AS vendors,
+        (SELECT COUNT(*) FROM customers)::int  AS customers
     `);
     res.json(r.rows[0]);
   } catch (err) { next(err); }
 });
 
-// POST /api/admin/seed-qb-codes — seed placeholder codes if table is empty.
-router.post('/seed-qb-codes', requireToken, async (_req, res, next) => {
+// POST /api/admin/replace-qb-codes
+// Body: { force: true } — required. Wipes ALL projects + all QB codes and
+// re-seeds from the real chart in db/qb-codes.js.
+//
+// Use this to swap from placeholder codes (or from an older snapshot) to the
+// real chart. It cascades: projects → budgets, contracts, invoices all go.
+// Users and vendors/customers are preserved.
+router.post('/replace-qb-codes', requireToken, async (req, res, next) => {
   const client = await pool.connect();
   try {
+    if (req.body?.force !== true) {
+      return res.status(400).json({
+        error: 'This wipes all projects, budgets, contracts, and invoices. Send { "force": true } to confirm.',
+      });
+    }
     await client.query('BEGIN');
-    const existing = await client.query('SELECT COUNT(*)::int AS n FROM qb_codes');
-    if (existing.rows[0].n > 0) {
-      await client.query('ROLLBACK');
-      return res.json({ seeded: false, message: `Already ${existing.rows[0].n} codes present.` });
-    }
-    async function insert(node, parentId, level) {
-      const r = await client.query(
-        `INSERT INTO qb_codes (code, name, parent_id, level)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
-         RETURNING id`,
-        [node.code, node.name, parentId, level]
-      );
-      const id = r.rows[0].id;
-      for (const c of node.children || []) await insert(c, id, level + 1);
-    }
-    for (const top of PLACEHOLDER_QB_CODES) await insert(top, null, 0);
+
+    // Projects cascade to members, budget_lines (and their logs), contracts
+    // (and their lines), invoices — see schema.sql FK ON DELETE CASCADE.
+    const delProjects = await client.query('DELETE FROM projects RETURNING id');
+    // Budget logs cascade via budget_lines; the only remaining direct FK
+    // into qb_codes is through budget_lines and contract_lines which are
+    // already gone. Safe to drop codes.
+    const delCodes = await client.query('DELETE FROM qb_codes RETURNING id');
+
+    const inserted = await insertRealCodes(client);
+
     await client.query('COMMIT');
-    const count = await pool.query('SELECT COUNT(*)::int AS n FROM qb_codes');
-    res.json({ seeded: true, count: count.rows[0].n });
+    res.json({
+      replaced: true,
+      projects_deleted: delProjects.rows.length,
+      codes_deleted: delCodes.rows.length,
+      codes_inserted: inserted,
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     next(err);
@@ -99,6 +78,50 @@ router.post('/seed-qb-codes', requireToken, async (_req, res, next) => {
     client.release();
   }
 });
+
+// POST /api/admin/import-vendors
+// Body: { vendors: [{ name, qb_id? }, ...], replace?: boolean }
+// Upserts by name. If replace=true, deletes all vendors first.
+router.post('/import-vendors', requireToken, async (req, res, next) => {
+  return bulkImport(req, res, next, 'vendors');
+});
+
+// POST /api/admin/import-customers — same shape as import-vendors.
+router.post('/import-customers', requireToken, async (req, res, next) => {
+  return bulkImport(req, res, next, 'customers');
+});
+
+async function bulkImport(req, res, next, table) {
+  const bodyKey = table; // { vendors: [...] } or { customers: [...] }
+  const rows = Array.isArray(req.body?.[bodyKey]) ? req.body[bodyKey] : null;
+  if (!rows) return res.status(400).json({ error: `${bodyKey} array required in body` });
+  const replace = req.body?.replace === true;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (replace) await client.query(`DELETE FROM ${table}`);
+    let inserted = 0;
+    for (const row of rows) {
+      const name = (row?.name || '').trim();
+      if (!name) continue;
+      await client.query(
+        `INSERT INTO ${table} (name, qb_id) VALUES ($1, $2)
+         ON CONFLICT (name) DO UPDATE SET qb_id = COALESCE(EXCLUDED.qb_id, ${table}.qb_id)`,
+        [name, row.qb_id || null]
+      );
+      inserted++;
+    }
+    await client.query('COMMIT');
+    const count = await pool.query(`SELECT COUNT(*)::int AS n FROM ${table}`);
+    res.json({ imported: inserted, total: count.rows[0].n, replaced: replace });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
+}
 
 // POST /api/admin/create-user — create or reset a user account.
 // Body: { name, email, password, role? }
@@ -126,7 +149,6 @@ router.post('/create-user', requireToken, async (req, res, next) => {
 });
 
 // POST /api/admin/reset-password — convenience for when you forget the admin pw.
-// Body: { email, new_password }
 router.post('/reset-password', requireToken, async (req, res, next) => {
   try {
     const { email, new_password } = req.body || {};
@@ -140,6 +162,31 @@ router.post('/reset-password', requireToken, async (req, res, next) => {
     if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
     res.json({ ok: true, user: result.rows[0] });
   } catch (err) { next(err); }
+});
+
+// (Old /seed-qb-codes endpoint kept for backwards compat: it now also
+// loads the real codes, but refuses if any are present.)
+router.post('/seed-qb-codes', requireToken, async (_req, res, next) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query('SELECT COUNT(*)::int AS n FROM qb_codes');
+    if (existing.rows[0].n > 0) {
+      await client.query('ROLLBACK');
+      return res.json({
+        seeded: false,
+        message: `Already ${existing.rows[0].n} codes present. Use /replace-qb-codes with {force:true} to overwrite.`,
+      });
+    }
+    const inserted = await insertRealCodes(client);
+    await client.query('COMMIT');
+    res.json({ seeded: true, count: inserted });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
 });
 
 module.exports = router;

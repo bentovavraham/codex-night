@@ -72,7 +72,12 @@ window.ProjectList = function ProjectList({ onOpen }) {
                 <div className="form-grid">
                   <div className="full">
                     <label>Name</label>
-                    <input autoFocus required value={name} onChange={(e)=>setName(e.target.value)} />
+                    <SmartSearch
+                      value={name}
+                      onChange={(v) => setName(v)}
+                      fetcher={(q) => api.searchCustomers(q)}
+                      placeholder="Type to search QB customers, or enter a new project name"
+                    />
                   </div>
                   <div className="full">
                     <label>Description</label>

@@ -110,6 +110,27 @@ CREATE TABLE IF NOT EXISTS invoices (
 CREATE INDEX IF NOT EXISTS idx_invoices_contract ON invoices(contract_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
 
+-- Vendors: seeded from a QuickBooks export. Used for smart-search on the
+-- contract vendor field. Kept as a separate table rather than free-text so
+-- we can link to QB IDs once real QB integration lands.
+CREATE TABLE IF NOT EXISTS vendors (
+    id SERIAL PRIMARY KEY,
+    qb_id VARCHAR(64),
+    name VARCHAR(255) NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_vendors_name ON vendors (LOWER(name));
+
+-- Customers from QuickBooks map to projects in this app. Seeded from a QB
+-- export and used for smart-search on the New Project form.
+CREATE TABLE IF NOT EXISTS customers (
+    id SERIAL PRIMARY KEY,
+    qb_id VARCHAR(64),
+    name VARCHAR(255) NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_customers_name ON customers (LOWER(name));
+
 -- Session store used by connect-pg-simple
 CREATE TABLE IF NOT EXISTS "session" (
     "sid" varchar NOT NULL COLLATE "default",

@@ -65,7 +65,10 @@ window.Invoices = function Invoices({ projectId }) {
           <tbody>
             {invoices.map((i) => (
               <tr key={i.id}>
-                <td>{i.invoice_number}</td>
+                <td>
+                  {i.invoice_number}
+                  {i.file_reference && <> · <a href={`/api/files/${encodeURIComponent(i.file_reference)}`} target="_blank" title="View PDF">📄</a></>}
+                </td>
                 <td>{i.vendor_name}</td>
                 <td>{fmt.date(i.invoice_date)}</td>
                 <td className="num">{fmt.moneyPrecise(i.amount)}</td>
@@ -107,20 +110,55 @@ function NewInvoiceModal({ projectId, contracts, onClose, onSaved }) {
   const [date, setDate] = React.useState('');
   const [vendor, setVendor] = React.useState('');
   const [description, setDescription] = React.useState('');
-  const [file, setFile] = React.useState('');
+  const [fileRef, setFileRef] = React.useState(null);
+  const [uploading, setUploading] = React.useState(false);
+  const [extractNote, setExtractNote] = React.useState(null);
   const [err, setErr] = React.useState(null);
 
   React.useEffect(() => {
     if (!contractId) { setContext(null); return; }
     api.getContract(contractId).then((c) => {
+      const remaining = Number(c.remaining_amount);
       setContext({
         total: Number(c.total_value),
         invoiced: Number(c.invoiced_amount),
-        remaining: Number(c.remaining_amount),
+        remaining,
       });
       if (!vendor) setVendor(c.vendor_name);
+      // Default invoice amount to the remaining contract balance on first
+      // pick — the common case is a single-invoice contract.
+      if (!amount || Number(amount) === 0) setAmount(String(remaining));
     }).catch((e)=>setErr(e.message));
-  }, [contractId]);
+  }, [contractId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function onFile(f) {
+    setErr(null); setExtractNote(null); setUploading(true);
+    try {
+      const resp = await api.extractInvoice(f);
+      setFileRef({
+        file_reference: resp.file_reference,
+        filename: resp.filename,
+        download_url: resp.download_url,
+      });
+      if (resp.extract_error) {
+        setExtractNote(`File saved, but extraction failed: ${resp.extract_error}. Please fill in the fields manually.`);
+      } else if (resp.extracted) {
+        const e = resp.extracted;
+        if (e.invoice_number && !invoiceNumber) setInvoiceNumber(e.invoice_number);
+        if (e.vendor_name && !vendor) setVendor(e.vendor_name);
+        if (e.amount && (!amount || Number(amount) === 0 || Number(amount) === context?.remaining)) {
+          setAmount(String(e.amount));
+        }
+        if (e.invoice_date && !date) setDate(e.invoice_date);
+        if (e.summary) {
+          // Append (don't overwrite) so user comments survive.
+          setDescription((d) => d ? `${d}\n\n${e.summary}` : e.summary);
+        }
+        setExtractNote('Fields pre-filled from PDF — review before saving.');
+      }
+    } catch (e) { setErr(e.message); }
+    finally { setUploading(false); }
+  }
 
   const overspend = context && Number(amount) > context.remaining;
 
@@ -137,7 +175,7 @@ function NewInvoiceModal({ projectId, contracts, onClose, onSaved }) {
         amount: Number(amount),
         invoice_date: date || null,
         description: description || null,
-        file_reference: file || null,
+        file_reference: fileRef?.file_reference || null,
       });
       onSaved();
     } catch (e) { setErr(e.message); }
@@ -167,6 +205,18 @@ function NewInvoiceModal({ projectId, contracts, onClose, onSaved }) {
                 Remaining: <strong>{fmt.money(context.remaining)}</strong>
               </div>
             )}
+            <div className="full">
+              <label>Invoice PDF — drop to auto-fill fields</label>
+              <Dropzone
+                file={fileRef ? { filename: fileRef.filename, download_url: fileRef.download_url } : null}
+                onFile={onFile}
+                onClear={() => setFileRef(null)}
+                busy={uploading}
+                accept="application/pdf"
+                label={uploading ? 'Extracting with Claude…' : 'Drop invoice PDF — Claude will pre-fill fields'}
+              />
+              {extractNote && <div className="hint" style={{ marginTop: 6 }}>{extractNote}</div>}
+            </div>
             <div>
               <label>Invoice number</label>
               <input value={invoiceNumber} onChange={(e)=>setInvoiceNumber(e.target.value)} />
@@ -181,15 +231,17 @@ function NewInvoiceModal({ projectId, contracts, onClose, onSaved }) {
             </div>
             <div>
               <label>Vendor</label>
-              <input value={vendor} onChange={(e)=>setVendor(e.target.value)} />
+              <SmartSearch
+                value={vendor}
+                onChange={(v) => setVendor(v)}
+                fetcher={(q) => api.searchVendors(q)}
+                placeholder="Vendor"
+              />
             </div>
             <div className="full">
-              <label>Description</label>
-              <textarea rows={2} value={description} onChange={(e)=>setDescription(e.target.value)} />
-            </div>
-            <div className="full">
-              <label>File reference (placeholder)</label>
-              <input value={file} onChange={(e)=>setFile(e.target.value)} placeholder="SharePoint URL (future)" />
+              <label>Description / notes</label>
+              <textarea rows={4} value={description} onChange={(e)=>setDescription(e.target.value)}
+                        placeholder="A summary will be auto-generated from the uploaded PDF" />
             </div>
           </div>
           {overspend && <div className="error" style={{ marginTop: 10 }}>

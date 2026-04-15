@@ -1,9 +1,54 @@
 const express = require('express');
+const multer = require('multer');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const projects = require('./projects');
+const storage = require('../lib/storage');
+const { extractInvoice } = require('../lib/extract');
 
 const router = express.Router();
+
+const pdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
+
+// POST /api/invoices/extract
+// multipart/form-data with a "file" field (PDF). Stores the PDF via the
+// storage module, calls Claude Opus 4.6 to extract invoice fields, and
+// returns both the file reference and the extracted fields.
+router.post('/extract', requireAuth, pdfUpload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'file field required' });
+    if (!/pdf$/i.test(req.file.mimetype) && !/\.pdf$/i.test(req.file.originalname)) {
+      return res.status(400).json({ error: 'Only PDFs are supported for extraction' });
+    }
+
+    // Save first — even if extraction fails, user still has the uploaded PDF.
+    const saved = await storage.save(req.file.buffer, {
+      filename: req.file.originalname || 'invoice.pdf',
+      mimeType: req.file.mimetype || 'application/pdf',
+    });
+
+    let extracted = null;
+    let extract_error = null;
+    try {
+      extracted = await extractInvoice(req.file.buffer);
+    } catch (err) {
+      console.error('Invoice extraction failed:', err.message);
+      extract_error = err.message;
+    }
+
+    res.status(201).json({
+      file_reference: saved.reference,
+      download_url: `/api/files/${encodeURIComponent(saved.reference)}`,
+      filename: saved.filename,
+      size: saved.size,
+      extracted,
+      extract_error,
+    });
+  } catch (err) { next(err); }
+});
 
 async function getInvoiceWithProject(invoiceId) {
   const r = await pool.query(

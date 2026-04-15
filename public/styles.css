@@ -179,3 +179,37 @@ tr.row-over td { background: var(--danger-bg) !important; }
 
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .toolbar .spacer { flex: 1; }
+
+/* Smart-search combobox */
+.combo { position: relative; }
+.combo input { width: 100%; }
+.combo-list {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 40;
+  margin: 2px 0 0; padding: 4px 0;
+  background: #fff; border: 1px solid var(--border); border-radius: 6px;
+  max-height: 240px; overflow-y: auto; list-style: none;
+  box-shadow: 0 4px 14px rgba(12,18,32,.08);
+}
+.combo-item { padding: 6px 10px; cursor: pointer; }
+.combo-item.active, .combo-item:hover { background: #eef3ff; }
+.combo-empty { padding: 6px 10px; color: var(--muted); font-style: italic; }
+
+/* Dropzone */
+.dropzone {
+  border: 1.5px dashed var(--border); border-radius: 8px;
+  padding: 14px; text-align: center; cursor: pointer;
+  background: #fafbfd; color: var(--muted);
+  transition: all .15s ease;
+}
+.dropzone:hover { border-color: var(--accent); color: var(--text); background: #f4f7ff; }
+.dropzone.dragging { border-color: var(--accent); background: #e8efff; color: var(--accent); }
+.dropzone.busy { opacity: .7; cursor: progress; }
+.dropzone-prompt { font-size: 13px; }
+.dropzone-attached {
+  display: flex; justify-content: space-between; align-items: center;
+  color: var(--text); cursor: default;
+}
+.dropzone-attached button {
+  background: transparent; border: none; color: var(--danger); cursor: pointer;
+  padding: 2px 6px; font-size: 12px;
+}
