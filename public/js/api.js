@@ -48,7 +48,10 @@ window.api = {
   updateBudgetLine:  (pid, lid, data)   => request('PUT',  `/api/projects/${pid}/budget-lines/${lid}`, data),
   getBudgetHistory:  (pid, lid)         => request('GET',  `/api/projects/${pid}/budget-lines/${lid}/history`),
 
-  listContracts:     (pid)              => request('GET',  `/api/projects/${pid}/contracts`),
+  listContracts:     (pid, filters={})  => {
+    const qs = new URLSearchParams(Object.entries(filters).filter(([,v])=>v)).toString();
+    return request('GET', `/api/projects/${pid}/contracts${qs ? '?' + qs : ''}`);
+  },
   createContract:    (pid, data)        => request('POST', `/api/projects/${pid}/contracts`, data),
   getContract:       (id)               => request('GET',  `/api/contracts/${id}`),
   updateContract:    (id, data)         => request('PUT',  `/api/contracts/${id}`, data),
@@ -58,6 +61,8 @@ window.api = {
     return request('GET', `/api/projects/${pid}/invoices${qs ? '?' + qs : ''}`);
   },
   createInvoice:     (data)             => request('POST', '/api/invoices', data),
+  getInvoice:        (id)               => request('GET',  `/api/invoices/${id}`),
+  updateInvoice:     (id, data)         => request('PUT',  `/api/invoices/${id}`, data),
   approveInvoice:    (id)               => request('POST', `/api/invoices/${id}/approve`),
   rejectInvoice:     (id)               => request('POST', `/api/invoices/${id}/reject`),
   markPushed:        (id)               => request('POST', `/api/invoices/${id}/mark-pushed`),
@@ -68,6 +73,14 @@ window.api = {
     const form = new FormData();
     form.append('file', file);
     const res = await fetch('/api/files', { method: 'POST', credentials: 'same-origin', body: form });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    return payload;
+  },
+  extractContract: async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/api/contracts/extract', { method: 'POST', credentials: 'same-origin', body: form });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
     return payload;

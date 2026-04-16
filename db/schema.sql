@@ -91,7 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_contract_lines_code ON contract_lines(qb_code_id)
 
 CREATE TABLE IF NOT EXISTS invoices (
     id SERIAL PRIMARY KEY,
-    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    contract_id INTEGER REFERENCES contracts(id) ON DELETE CASCADE,
     invoice_number VARCHAR(128) NOT NULL,
     vendor_name VARCHAR(255) NOT NULL,
     amount NUMERIC(14,2) NOT NULL,
@@ -151,3 +151,21 @@ DO $$ BEGIN
     END IF;
 END $$;
 CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
+
+-- ---------- Migrations for existing databases ----------
+-- Make invoices.contract_id nullable (standalone invoices).
+DO $$ BEGIN
+    ALTER TABLE invoices ALTER COLUMN contract_id DROP NOT NULL;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- Add project_id directly on invoices so standalone invoices know their project.
+DO $$ BEGIN
+    ALTER TABLE invoices ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_invoices_project ON invoices(project_id);
+-- Add qb_code_id directly on invoices for filtering (optional, for standalone invoices).
+DO $$ BEGIN
+    ALTER TABLE invoices ADD COLUMN qb_code_id INTEGER REFERENCES qb_codes(id);
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;

@@ -52,8 +52,10 @@ router.post('/invoices/extract', requireAuth, pdfUpload.single('file'), async (r
 
 async function getInvoiceWithProject(invoiceId) {
   const r = await pool.query(
-    `SELECT i.*, c.project_id
-     FROM invoices i JOIN contracts c ON c.id = i.contract_id
+    `SELECT i.*,
+            COALESCE(i.project_id, c.project_id) AS project_id
+     FROM invoices i
+     LEFT JOIN contracts c ON c.id = i.contract_id
      WHERE i.id = $1`,
     [invoiceId]
   );
@@ -68,7 +70,7 @@ router.get('/projects/:id/invoices', requireAuth, async (req, res, next) => {
     if (!(await projects.userCanAccess(req.session.userId, projectId))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    const filters = ['c.project_id = $1'];
+    const filters = ['COALESCE(i.project_id, c.project_id) = $1'];
     const params = [projectId];
     if (req.query.status) {
       params.push(req.query.status);
@@ -82,44 +84,68 @@ router.get('/projects/:id/invoices', requireAuth, async (req, res, next) => {
       params.push(`%${req.query.vendor}%`);
       filters.push(`i.vendor_name ILIKE $${params.length}`);
     }
+    if (req.query.qb_code_id) {
+      params.push(Number(req.query.qb_code_id));
+      filters.push(`i.qb_code_id = $${params.length}`);
+    }
+    if (req.query.sort === 'vendor') {
+      var orderBy = 'i.vendor_name ASC, i.created_at DESC';
+    } else if (req.query.sort === 'amount') {
+      var orderBy = 'i.amount DESC, i.created_at DESC';
+    } else if (req.query.sort === 'status') {
+      var orderBy = 'i.status ASC, i.created_at DESC';
+    } else {
+      var orderBy = 'i.invoice_date DESC NULLS LAST, i.created_at DESC';
+    }
     const result = await pool.query(
       `SELECT i.*, c.vendor_name AS contract_vendor
-       FROM invoices i JOIN contracts c ON c.id = i.contract_id
+       FROM invoices i
+       LEFT JOIN contracts c ON c.id = i.contract_id
        WHERE ${filters.join(' AND ')}
-       ORDER BY i.invoice_date DESC NULLS LAST, i.created_at DESC`,
+       ORDER BY ${orderBy}`,
       params
     );
     res.json(result.rows);
   } catch (err) { next(err); }
 });
 
-// Create invoice under a contract.
+// Create invoice — can be under a contract OR standalone (project_id required if no contract).
 router.post('/invoices', requireAuth, async (req, res, next) => {
   try {
     const {
-      contract_id, invoice_number, vendor_name, amount, invoice_date,
-      description, file_reference,
+      contract_id, project_id, invoice_number, vendor_name, amount, invoice_date,
+      description, file_reference, qb_code_id,
     } = req.body || {};
-    if (!contract_id || !invoice_number || amount == null) {
-      return res.status(400).json({ error: 'contract_id, invoice_number, amount required' });
+    if (!invoice_number || amount == null) {
+      return res.status(400).json({ error: 'invoice_number and amount required' });
     }
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount must be > 0' });
 
-    const c = await pool.query('SELECT project_id, vendor_name FROM contracts WHERE id = $1', [contract_id]);
-    if (!c.rows[0]) return res.status(404).json({ error: 'Contract not found' });
-    if (!(await projects.userCanAccess(req.session.userId, c.rows[0].project_id))) {
+    let resolvedProjectId = project_id ? Number(project_id) : null;
+    let resolvedVendor = vendor_name || '';
+
+    if (contract_id) {
+      const c = await pool.query('SELECT project_id, vendor_name FROM contracts WHERE id = $1', [contract_id]);
+      if (!c.rows[0]) return res.status(404).json({ error: 'Contract not found' });
+      resolvedProjectId = resolvedProjectId || c.rows[0].project_id;
+      resolvedVendor = resolvedVendor || c.rows[0].vendor_name;
+    }
+
+    if (!resolvedProjectId) return res.status(400).json({ error: 'contract_id or project_id required' });
+    if (!(await projects.userCanAccess(req.session.userId, resolvedProjectId))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
     const result = await pool.query(
       `INSERT INTO invoices
-         (contract_id, invoice_number, vendor_name, amount, invoice_date,
-          description, file_reference, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         (contract_id, project_id, invoice_number, vendor_name, amount, invoice_date,
+          description, file_reference, qb_code_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
-      [contract_id, invoice_number, vendor_name || c.rows[0].vendor_name, amt,
-       invoice_date || null, description || null, file_reference || null, req.session.userId]
+      [contract_id || null, resolvedProjectId, invoice_number, resolvedVendor, amt,
+       invoice_date || null, description || null, file_reference || null,
+       qb_code_id || null, req.session.userId]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) { next(err); }
