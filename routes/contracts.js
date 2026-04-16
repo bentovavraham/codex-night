@@ -1,11 +1,37 @@
 const express = require('express');
+const multer = require('multer');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const projects = require('./projects');
+const storage = require('../lib/storage');
+const { extractContract } = require('../lib/extract');
 
 const router = express.Router();
 
 const APPROX = 0.01; // Allow 1-cent rounding tolerance when validating allocations.
+
+const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+// POST /api/contracts/extract — upload contract PDF → store + Claude extraction
+router.post('/contracts/extract', requireAuth, pdfUpload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'file field required' });
+    const saved = await storage.save(req.file.buffer, {
+      filename: req.file.originalname || 'contract.pdf',
+      mimeType: req.file.mimetype || 'application/pdf',
+    });
+    let extracted = null;
+    let extract_error = null;
+    try { extracted = await extractContract(req.file.buffer); }
+    catch (err) { console.error('Contract extraction failed:', err.message); extract_error = err.message; }
+    res.status(201).json({
+      file_reference: saved.reference,
+      download_url: `/api/files/${encodeURIComponent(saved.reference)}`,
+      filename: saved.filename, size: saved.size,
+      extracted, extract_error,
+    });
+  } catch (err) { next(err); }
+});
 
 async function userCanAccessContract(userId, contractId) {
   const r = await pool.query('SELECT project_id FROM contracts WHERE id = $1', [contractId]);
@@ -23,14 +49,30 @@ router.get('/projects/:id/contracts', requireAuth, async (req, res, next) => {
     if (!(await projects.userCanAccess(req.session.userId, projectId))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
+    const filters = ['c.project_id = $1'];
+    const params = [projectId];
+    if (req.query.vendor) {
+      params.push(`%${req.query.vendor}%`);
+      filters.push(`c.vendor_name ILIKE $${params.length}`);
+    }
+    if (req.query.status) {
+      params.push(req.query.status);
+      filters.push(`c.status = $${params.length}`);
+    }
+    const sortMap = {
+      vendor: 'c.vendor_name ASC',
+      amount: 'c.total_value DESC',
+      status: 'c.status ASC, c.created_at DESC',
+    };
+    const order = sortMap[req.query.sort] || 'c.contract_date DESC NULLS LAST, c.created_at DESC';
     const result = await pool.query(
       `SELECT c.*,
               (SELECT COALESCE(SUM(amount),0) FROM invoices
                  WHERE contract_id = c.id AND status IN ('approved','pushed','paid')) AS invoiced_amount
        FROM contracts c
-       WHERE c.project_id = $1
-       ORDER BY c.contract_date DESC NULLS LAST, c.created_at DESC`,
-      [projectId]
+       WHERE ${filters.join(' AND ')}
+       ORDER BY ${order}`,
+      params
     );
     res.json(result.rows);
   } catch (err) { next(err); }
