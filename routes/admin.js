@@ -9,14 +9,22 @@ const { insertRealCodes } = require('../db/qb-codes');
 
 const router = express.Router();
 
+// Accept either a valid SEED_TOKEN or a logged-in admin session.
+// SEED_TOKEN is still needed for the initial bootstrap (before any admin user
+// exists), but once you're logged in as an admin, the same endpoints are
+// reachable from the app UI with no token at all.
 function requireToken(req, res, next) {
+  // Session-admin path (preferred).
+  if (req.session?.userId && req.session?.role === 'admin') return next();
+
+  // Token path.
   const expected = process.env.SEED_TOKEN;
-  if (!expected) {
-    return res.status(503).json({ error: 'Admin endpoints disabled (SEED_TOKEN unset)' });
+  if (expected) {
+    const got = req.header('x-seed-token') || req.query.token || req.body?.token;
+    if (got === expected) return next();
   }
-  const got = req.header('x-seed-token') || req.query.token || req.body?.token;
-  if (got !== expected) return res.status(401).json({ error: 'Invalid seed token' });
-  next();
+  if (req.session?.userId) return res.status(403).json({ error: 'Admin role required' });
+  return res.status(401).json({ error: 'Authentication required (log in as admin, or provide x-seed-token)' });
 }
 
 // GET /api/admin/status — quick visibility into what's in the DB.
