@@ -169,3 +169,31 @@ DO $$ BEGIN
     ALTER TABLE invoices ADD COLUMN qb_code_id INTEGER REFERENCES qb_codes(id);
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
+
+-- Audit trail for invoices (who did what, when, and why).
+CREATE TABLE IF NOT EXISTS invoice_logs (
+    id SERIAL PRIMARY KEY,
+    invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    action VARCHAR(32) NOT NULL,
+    detail TEXT,
+    changed_by INTEGER NOT NULL REFERENCES users(id),
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_logs_invoice ON invoice_logs(invoice_id);
+
+-- Audit trail for contracts.
+CREATE TABLE IF NOT EXISTS contract_logs (
+    id SERIAL PRIMARY KEY,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    action VARCHAR(32) NOT NULL,
+    detail TEXT,
+    changed_by INTEGER NOT NULL REFERENCES users(id),
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_contract_logs_contract ON contract_logs(contract_id);
+
+-- Rejection note on invoices.
+DO $$ BEGIN
+    ALTER TABLE invoices ADD COLUMN rejection_note TEXT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
