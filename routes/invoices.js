@@ -17,7 +17,7 @@ const pdfUpload = multer({
 // multipart/form-data with a "file" field (PDF). Stores the PDF via the
 // storage module, calls Claude Opus 4.6 to extract invoice fields, and
 // returns both the file reference and the extracted fields.
-router.post('/extract', requireAuth, pdfUpload.single('file'), async (req, res, next) => {
+router.post('/invoices/extract', requireAuth, pdfUpload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'file field required' });
     if (!/pdf$/i.test(req.file.mimetype) && !/\.pdf$/i.test(req.file.originalname)) {
