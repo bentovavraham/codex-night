@@ -83,4 +83,9 @@ window.api = {
 
   searchVendors:    (q='')              => request('GET', `/api/vendors${q ? '?q=' + encodeURIComponent(q) : ''}`),
   searchCustomers:  (q='')              => request('GET', `/api/customers${q ? '?q=' + encodeURIComponent(q) : ''}`),
+
+  // Admin (session auth when logged in as admin)
+  adminStatus:      ()                  => request('GET', '/api/admin/status'),
+  adminImport:      (kind, payload)     => request('POST', `/api/admin/import-${kind}`, payload),
+  adminReplaceCodes:(force=true)        => request('POST', '/api/admin/replace-qb-codes', { force }),
 };

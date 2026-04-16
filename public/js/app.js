@@ -5,6 +5,7 @@ function App() {
   const [user, setUser] = React.useState(null);
   const [bootstrapping, setBootstrapping] = React.useState(true);
   const [project, setProject] = React.useState(null);
+  const [view, setView] = React.useState('projects'); // 'projects' | 'admin'
 
   React.useEffect(() => {
     api.me()
@@ -15,11 +16,20 @@ function App() {
 
   async function logout() {
     try { await api.logout(); } catch {}
-    setUser(null); setProject(null);
+    setUser(null); setProject(null); setView('projects');
   }
 
   if (bootstrapping) return <div className="empty" style={{ paddingTop: 120 }}>Loading…</div>;
   if (!user) return <Login onLoggedIn={setUser} />;
+
+  let body;
+  if (view === 'admin') {
+    body = <Admin onClose={() => setView('projects')} />;
+  } else if (project) {
+    body = <Project project={project} onBack={() => setProject(null)} />;
+  } else {
+    body = <ProjectList onOpen={setProject} />;
+  }
 
   return (
     <>
@@ -27,12 +37,13 @@ function App() {
         <h1>ActiveAcq</h1>
         <div className="user-info">
           {user.name} · <span className="hint">{user.role}</span>
+          {user.role === 'admin' && view !== 'admin' && (
+            <button onClick={() => { setProject(null); setView('admin'); }} style={{ marginLeft: 10 }}>Admin</button>
+          )}
           <button onClick={logout}>Sign out</button>
         </div>
       </header>
-      {project
-        ? <Project project={project} onBack={() => setProject(null)} />
-        : <ProjectList onOpen={setProject} />}
+      {body}
     </>
   );
 }
