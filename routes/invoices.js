@@ -51,7 +51,7 @@ router.get('/projects/:id/invoices', requireAuth, async (req, res, next) => {
     if (!(await projects.userCanAccess(req.session.userId, projectId))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    const filters = ['COALESCE(i.project_id, c.project_id) = $1'];
+    const filters = ['(i.project_id = $1 OR c.project_id = $1)'];
     const params = [projectId];
     if (req.query.status) { params.push(req.query.status); filters.push(`i.status = $${params.length}`); }
     if (req.query.contract_id === 'none') { filters.push('i.contract_id IS NULL'); }
@@ -62,7 +62,8 @@ router.get('/projects/:id/invoices', requireAuth, async (req, res, next) => {
     const order = sortMap[req.query.sort] || 'i.invoice_date DESC NULLS LAST, i.created_at DESC';
     const result = await pool.query(
       `SELECT i.*, c.vendor_name AS contract_vendor, c.total_value AS contract_total,
-              u_created.name AS created_by_name, u_approved.name AS approved_by_name
+              u_created.name AS created_by_name, u_approved.name AS approved_by_name,
+              (SELECT COUNT(*) FROM invoice_contracts ic WHERE ic.invoice_id = i.id)::int AS alloc_count
        FROM invoices i
        LEFT JOIN contracts c ON c.id = i.contract_id
        LEFT JOIN users u_created ON u_created.id = i.created_by
@@ -82,7 +83,7 @@ router.get('/projects/:id/invoices/export', requireAuth, async (req, res, next) 
               i.description, i.created_at, i.approved_at, i.paid_date, i.rejection_note,
               c.vendor_name AS contract_vendor, c.reference_number AS contract_ref
        FROM invoices i LEFT JOIN contracts c ON c.id = i.contract_id
-       WHERE COALESCE(i.project_id, c.project_id) = $1
+       WHERE (i.project_id = $1 OR c.project_id = $1)
        ORDER BY i.invoice_date DESC NULLS LAST`, [projectId]);
     const header = 'Invoice #,Vendor,Amount,Date,Status,Description,Contract Vendor,Contract Ref,Approved At,Paid Date,Rejection Note,Created At\n';
     const rows = result.rows.map(r =>
@@ -98,34 +99,58 @@ router.get('/projects/:id/invoices/export', requireAuth, async (req, res, next) 
 });
 
 // POST /api/invoices --------------------------------------------------------
+// Supports single contract (contract_id) or multi-contract (contracts: [{contract_id, amount}]).
 router.post('/invoices', requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { contract_id, project_id, invoice_number, vendor_name, amount,
+    const { contract_id, contracts: contractAllocs, project_id, invoice_number, vendor_name, amount,
             invoice_date, description, file_reference, qb_code_id } = req.body || {};
     if (!invoice_number || amount == null) return res.status(400).json({ error: 'invoice_number and amount required' });
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount must be > 0' });
 
+    // Build allocation list: either from contracts array or single contract_id.
+    let allocs = [];
+    if (Array.isArray(contractAllocs) && contractAllocs.length > 0) {
+      allocs = contractAllocs.map(a => ({ contract_id: Number(a.contract_id), amount: Number(a.amount) }));
+      const allocSum = allocs.reduce((s, a) => s + a.amount, 0);
+      if (Math.abs(allocSum - amt) > 0.01) {
+        return res.status(400).json({ error: `Contract allocations ($${allocSum.toFixed(2)}) must sum to invoice amount ($${amt.toFixed(2)}).` });
+      }
+    } else if (contract_id) {
+      allocs = [{ contract_id: Number(contract_id), amount: amt }];
+    }
+
     let resolvedProjectId = project_id ? Number(project_id) : null;
     let resolvedVendor = vendor_name || '';
+    // Primary contract_id stored on invoice = first allocation (for backward compat).
+    const primaryContractId = allocs.length > 0 ? allocs[0].contract_id : null;
 
-    if (contract_id) {
-      const c = await pool.query('SELECT project_id, vendor_name, total_value FROM contracts WHERE id = $1', [contract_id]);
-      if (!c.rows[0]) return res.status(404).json({ error: 'Contract not found' });
+    // Validate each contract allocation.
+    for (const alloc of allocs) {
+      const c = await pool.query('SELECT project_id, vendor_name, total_value FROM contracts WHERE id = $1', [alloc.contract_id]);
+      if (!c.rows[0]) return res.status(404).json({ error: `Contract ${alloc.contract_id} not found` });
       resolvedProjectId = resolvedProjectId || c.rows[0].project_id;
-      resolvedVendor = resolvedVendor || c.rows[0].vendor_name;
-      // Hard overspend check.
+      if (!resolvedVendor) resolvedVendor = c.rows[0].vendor_name;
+      // Overspend check per contract.
       const invoiced = await pool.query(
+        `SELECT COALESCE(SUM(ic.amount),0)::numeric AS total
+         FROM invoice_contracts ic JOIN invoices i ON i.id = ic.invoice_id
+         WHERE ic.contract_id = $1 AND i.status NOT IN ('rejected')`, [alloc.contract_id]);
+      // Also count legacy invoices that only use contract_id directly.
+      const legacyInvoiced = await pool.query(
         `SELECT COALESCE(SUM(amount),0)::numeric AS total FROM invoices
-         WHERE contract_id = $1 AND status NOT IN ('rejected')`, [contract_id]);
-      const remaining = Number(c.rows[0].total_value) - Number(invoiced.rows[0].total);
-      if (amt > remaining + 0.01) {
+         WHERE contract_id = $1 AND status NOT IN ('rejected')
+         AND id NOT IN (SELECT invoice_id FROM invoice_contracts)`, [alloc.contract_id]);
+      const totalInvoiced = Number(invoiced.rows[0].total) + Number(legacyInvoiced.rows[0].total);
+      const remaining = Number(c.rows[0].total_value) - totalInvoiced;
+      if (alloc.amount > remaining + 0.01) {
         return res.status(400).json({
-          error: `Invoice amount ($${amt.toFixed(2)}) exceeds remaining contract balance ($${remaining.toFixed(2)}). Reduce the amount or update the contract total first.`,
+          error: `Allocation of $${alloc.amount.toFixed(2)} to contract "${c.rows[0].vendor_name}" exceeds remaining balance ($${remaining.toFixed(2)}).`,
         });
       }
     }
+
     if (!resolvedProjectId) return res.status(400).json({ error: 'contract_id or project_id required' });
     if (!(await projects.userCanAccess(req.session.userId, resolvedProjectId)))
       return res.status(403).json({ error: 'Forbidden' });
@@ -135,11 +160,20 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
       `INSERT INTO invoices (contract_id, project_id, invoice_number, vendor_name, amount,
           invoice_date, description, file_reference, qb_code_id, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [contract_id || null, resolvedProjectId, invoice_number, resolvedVendor, amt,
+      [primaryContractId, resolvedProjectId, invoice_number, resolvedVendor, amt,
        invoice_date || null, description || null, file_reference || null,
        qb_code_id || null, req.session.userId]);
-    await logInvoice(client, result.rows[0].id, 'created',
-      `Created: ${invoice_number} for $${amt.toFixed(2)} from ${resolvedVendor}`, req.session.userId);
+    const invoiceId = result.rows[0].id;
+    // Insert allocation rows.
+    for (const alloc of allocs) {
+      await client.query(
+        'INSERT INTO invoice_contracts (invoice_id, contract_id, amount) VALUES ($1, $2, $3)',
+        [invoiceId, alloc.contract_id, alloc.amount]);
+    }
+    const contractNames = allocs.map(a => `contract #${a.contract_id}: $${a.amount.toFixed(2)}`).join(', ');
+    await logInvoice(client, invoiceId, 'created',
+      `Created: ${invoice_number} for $${amt.toFixed(2)} from ${resolvedVendor}${allocs.length > 1 ? ` (split: ${contractNames})` : ''}`,
+      req.session.userId);
     await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); next(err); }
@@ -153,7 +187,12 @@ router.get('/invoices/:id', requireAuth, async (req, res, next) => {
     if (!inv) return res.status(404).json({ error: 'Not found' });
     if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
-    res.json(inv);
+    // Fetch multi-contract allocations.
+    const allocs = await pool.query(
+      `SELECT ic.contract_id, ic.amount, c.vendor_name
+       FROM invoice_contracts ic JOIN contracts c ON c.id = ic.contract_id
+       WHERE ic.invoice_id = $1 ORDER BY ic.id`, [inv.id]);
+    res.json({ ...inv, contract_allocations: allocs.rows });
   } catch (err) { next(err); }
 });
 
@@ -181,10 +220,7 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
     if (!inv) return res.status(404).json({ error: 'Not found' });
     if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
-    // Block edits on finalized invoices.
-    if (['pushed', 'paid'].includes(inv.status)) {
-      return res.status(400).json({ error: `Cannot edit an invoice that has been ${inv.status}. Revert its status first.` });
-    }
+    // Warn but allow edits — users can revert status if needed.
     const { invoice_number, vendor_name, amount, invoice_date, description, status, file_reference } = req.body || {};
     const changes = [];
     if (invoice_number && invoice_number !== inv.invoice_number) changes.push(`number: ${inv.invoice_number} → ${invoice_number}`);
@@ -249,6 +285,52 @@ router.post('/invoices/:id/reject', requireAuth, async (req, res, next) => {
       `UPDATE invoices SET status = 'rejected', rejection_note = $2, updated_at = NOW()
        WHERE id = $1 RETURNING *`, [invId, note]);
     await logInvoice(client, invId, 'rejected', `Rejected: ${note}`, req.session.userId);
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
+});
+
+// POST /api/invoices/:id/revert — revert approved/rejected/on_hold back to pending
+router.post('/invoices/:id/revert', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const invId = Number(req.params.id);
+    const inv = await getInvoiceWithProject(invId);
+    if (!inv) return res.status(404).json({ error: 'Not found' });
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
+      return res.status(403).json({ error: 'Forbidden' });
+    if (inv.status === 'pending')
+      return res.status(400).json({ error: 'Invoice is already pending.' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE invoices SET status = 'pending', approved_by = NULL, approved_at = NULL,
+         rejection_note = NULL, paid_date = NULL, qb_reference_id = NULL, updated_at = NOW()
+       WHERE id = $1 RETURNING *`, [invId]);
+    await logInvoice(client, invId, 'reverted', `Reverted from ${inv.status} to pending`, req.session.userId);
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
+});
+
+// POST /api/invoices/:id/hold — put invoice on hold -------------------------
+router.post('/invoices/:id/hold', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const invId = Number(req.params.id);
+    const note = (req.body?.note || '').trim();
+    const inv = await getInvoiceWithProject(invId);
+    if (!inv) return res.status(404).json({ error: 'Not found' });
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
+      return res.status(403).json({ error: 'Forbidden' });
+    if (!['pending', 'approved'].includes(inv.status))
+      return res.status(400).json({ error: `Cannot hold an invoice in status '${inv.status}'` });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE invoices SET status = 'on_hold', rejection_note = $2, updated_at = NOW()
+       WHERE id = $1 RETURNING *`, [invId, note || null]);
+    await logInvoice(client, invId, 'on_hold', note ? `Put on hold: ${note}` : 'Put on hold', req.session.userId);
     await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); next(err); }

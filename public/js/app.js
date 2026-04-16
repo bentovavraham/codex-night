@@ -26,7 +26,7 @@ function App() {
   if (view === 'admin') {
     body = <Admin onClose={() => setView('projects')} />;
   } else if (project) {
-    body = <Project project={project} onBack={() => setProject(null)} />;
+    body = <Project project={project} onBack={() => setProject(null)} onProjectUpdate={setProject} />;
   } else {
     body = <ProjectList onOpen={setProject} />;
   }

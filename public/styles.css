@@ -134,9 +134,12 @@ tr.row-over td { background: var(--danger-bg) !important; }
 .badge.rejected { background: #ffe0dc; color: var(--danger); }
 .badge.pushed   { background: #ddeafd; color: #1b4ab4; }
 .badge.paid     { background: #d1f0d7; color: var(--ok); }
+.badge.on_hold  { background: #fff3cd; color: #856404; }
 .badge.draft    { background: #eef0f5; color: #3b4259; }
 .badge.active   { background: #dcf5e6; color: #0b663e; }
 .badge.closed   { background: #eae4f7; color: #512b89; }
+.badge.completed { background: #d1f0d7; color: var(--ok); }
+.badge.archived { background: #e2e2e2; color: #666; }
 
 .empty {
   text-align: center; padding: 40px; color: var(--muted);

@@ -34,6 +34,19 @@ window.Invoices = function Invoices({ projectId }) {
     await doAction(`${inv.invoice_number} rejected`, api.rejectInvoice, inv.id, note);
   }
 
+  async function handleHold(inv) {
+    const note = prompt('Reason for hold (optional):');
+    if (note === null) return; // cancelled
+    await doAction(`${inv.invoice_number} on hold`, api.holdInvoice, inv.id, note);
+  }
+
+  async function handleRevert(inv) {
+    const ok = await confirmDialog('Revert to pending?',
+      `This will revert ${inv.invoice_number} from "${inv.status}" back to "pending". Continue?`);
+    if (!ok) return;
+    await doAction(`${inv.invoice_number} reverted to pending`, api.revertInvoice, inv.id);
+  }
+
   async function handleApprove(inv) {
     const ok = await confirmDialog('Approve invoice?',
       `Approve ${inv.invoice_number} for ${fmt.moneyPrecise(inv.amount)} from ${inv.vendor_name}?`);
@@ -106,7 +119,8 @@ window.Invoices = function Invoices({ projectId }) {
           <select value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })} style={{ width: 130 }}>
             <option value="">All statuses</option>
             <option value="pending">Pending</option><option value="approved">Approved</option>
-            <option value="rejected">Rejected</option><option value="pushed">Pushed</option><option value="paid">Paid</option>
+            <option value="on_hold">On Hold</option><option value="rejected">Rejected</option>
+            <option value="pushed">Pushed</option><option value="paid">Paid</option>
           </select>
           <select value={filter.contract_id} onChange={e => setFilter({ ...filter, contract_id: e.target.value })} style={{ width: 220 }}>
             <option value="">All contracts</option>
@@ -155,7 +169,9 @@ window.Invoices = function Invoices({ projectId }) {
                     {i.file_reference && <> · <a href={`/api/files/${encodeURIComponent(i.file_reference)}`} target="_blank" title="View PDF">📄</a></>}
                   </td>
                   <td>{i.vendor_name}</td>
-                  <td>{i.contract_id ? (i.contract_vendor || `#${i.contract_id}`) : <span className="hint">standalone</span>}</td>
+                  <td>{i.alloc_count > 1
+                    ? <span className="badge" style={{ background: '#e8daff', color: '#5b21b6' }}>split ({i.alloc_count})</span>
+                    : i.contract_id ? (i.contract_vendor || `#${i.contract_id}`) : <span className="hint">standalone</span>}</td>
                   <td>{fmt.date(i.invoice_date)}</td>
                   <td className="num">{fmt.moneyPrecise(i.amount)}</td>
                   <td><span className={`badge ${i.status}`}>{i.status}</span></td>
@@ -165,10 +181,20 @@ window.Invoices = function Invoices({ projectId }) {
                     {i.status === 'pending' && <>
                       <button className="primary" disabled={busy[i.id]} onClick={() => handleApprove(i)}>
                         {busy[i.id] ? <span className="spinner"></span> : null}Approve</button>
+                      <button style={{ marginLeft: 4 }} disabled={busy[i.id]}
+                        onClick={() => handleHold(i)}>Hold</button>
                       <button className="danger" style={{ marginLeft: 4 }} disabled={busy[i.id]}
                         onClick={() => handleReject(i)}>Reject</button>
                     </>}
-                    {i.status === 'approved' && <button disabled={busy[i.id]}
+                    {i.status === 'on_hold' && <>
+                      <button className="primary" disabled={busy[i.id]} onClick={() => handleApprove(i)}>Approve</button>
+                      <button style={{ marginLeft: 4 }} disabled={busy[i.id]}
+                        onClick={() => handleRevert(i)}>Release</button>
+                    </>}
+                    {['approved', 'rejected', 'pushed', 'paid'].includes(i.status) &&
+                      <button style={{ marginLeft: 4 }} disabled={busy[i.id]}
+                        onClick={() => handleRevert(i)}>Revert</button>}
+                    {i.status === 'approved' && <button style={{ marginLeft: 4 }} disabled={busy[i.id]}
                       onClick={() => doAction(`${i.invoice_number} pushed`, api.markPushed, i.id)}>Push</button>}
                     {(i.status === 'approved' || i.status === 'pushed') &&
                       <button style={{ marginLeft: 4 }} disabled={busy[i.id]}
@@ -240,6 +266,15 @@ function InvoiceEdit({ invoiceId, projectId, contracts, onClose }) {
       {inv.file_reference && <div style={{ marginBottom: 12 }}>
         <a href={`/api/files/${encodeURIComponent(inv.file_reference)}`} target="_blank">View attached PDF</a>
       </div>}
+      {inv.contract_allocations && inv.contract_allocations.length > 1 && <div style={{ marginBottom: 12 }}>
+        <strong style={{ fontSize: 13 }}>Split across contracts:</strong>
+        <table className="data" style={{ marginTop: 6 }}>
+          <thead><tr><th>Contract</th><th className="num">Amount</th></tr></thead>
+          <tbody>{inv.contract_allocations.map((a, i) => (
+            <tr key={i}><td>{a.vendor_name}</td><td className="num">{fmt.moneyPrecise(a.amount)}</td></tr>
+          ))}</tbody>
+        </table>
+      </div>}
       <div className="form-grid">
         <div><label>Invoice number</label><input value={form.invoice_number} disabled={locked} onChange={e => setForm({ ...form, invoice_number: e.target.value })} /></div>
         <div><label>Vendor</label><SmartSearch value={form.vendor_name} onChange={v => setForm({ ...form, vendor_name: v })} fetcher={q => api.searchVendors(q)} placeholder="Vendor" /></div>
@@ -268,9 +303,10 @@ function InvoiceEdit({ invoiceId, projectId, contracts, onClose }) {
 
 // --- New invoice modal ---
 function NewInvoiceModal({ projectId, contracts, onClose, onSaved }) {
-  const [mode, setMode] = React.useState('contract');
+  const [mode, setMode] = React.useState('contract'); // contract | multi | standalone
   const [contractId, setContractId] = React.useState('');
   const [context, setContext] = React.useState(null);
+  const [allocs, setAllocs] = React.useState([{ contract_id: '', amount: '' }]);
   const [invoiceNumber, setInvoiceNumber] = React.useState('');
   const [amount, setAmount] = React.useState('');
   const [date, setDate] = React.useState('');
@@ -283,7 +319,7 @@ function NewInvoiceModal({ projectId, contracts, onClose, onSaved }) {
   const [saving, setSaving] = React.useState(false);
 
   React.useEffect(() => {
-    if (mode === 'standalone' || !contractId) { setContext(null); return; }
+    if (mode !== 'contract' || !contractId) { setContext(null); return; }
     api.getContract(contractId).then(c => {
       const remaining = Number(c.remaining_amount);
       setContext({ total: Number(c.total_value), invoiced: Number(c.invoiced_amount), remaining });
@@ -311,18 +347,34 @@ function NewInvoiceModal({ projectId, contracts, onClose, onSaved }) {
     finally { setUploading(false); }
   }
 
+  function setAlloc(i, patch) { const n = allocs.slice(); n[i] = { ...n[i], ...patch }; setAllocs(n); }
+  const allocSum = allocs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+  const allocDiff = (Number(amount) || 0) - allocSum;
+
   async function save() {
     setErr(null);
     if (!invoiceNumber || !amount) { setErr('Invoice number and amount are required.'); return; }
-    if (mode === 'contract' && !contractId) { setErr('Select a contract or use standalone mode.'); return; }
+    if (mode === 'contract' && !contractId) { setErr('Select a contract or use standalone/multi mode.'); return; }
+    if (mode === 'multi') {
+      const cleaned = allocs.filter(a => a.contract_id && a.amount);
+      if (cleaned.length < 2) { setErr('Add at least 2 contract allocations, or use single contract mode.'); return; }
+      if (Math.abs(allocDiff) > 0.01) { setErr(`Allocations must sum to invoice amount. Off by ${fmt.moneyPrecise(allocDiff)}.`); return; }
+    }
     setSaving(true);
     try {
-      await api.createInvoice({
-        contract_id: mode === 'contract' ? Number(contractId) : null,
+      const body = {
         project_id: projectId, invoice_number: invoiceNumber, vendor_name: vendor,
         amount: Number(amount), invoice_date: date || null,
         description: description || null, file_reference: fileRef?.file_reference || null,
-      });
+      };
+      if (mode === 'contract') {
+        body.contract_id = Number(contractId);
+      } else if (mode === 'multi') {
+        body.contracts = allocs.filter(a => a.contract_id && a.amount).map(a => ({
+          contract_id: Number(a.contract_id), amount: Number(a.amount),
+        }));
+      }
+      await api.createInvoice(body);
       onSaved();
     } catch (e) { setErr(e.message); }
     finally { setSaving(false); }
@@ -332,12 +384,13 @@ function NewInvoiceModal({ projectId, contracts, onClose, onSaved }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 600 }}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 640 }}>
         <div className="modal-header"><strong>New Invoice</strong><button onClick={onClose}>×</button></div>
         <div className="modal-body">
           <div className="tabs" style={{ marginBottom: 12 }}>
-            <button className={mode === 'contract' ? 'active' : ''} onClick={() => setMode('contract')}>Against a contract</button>
-            <button className={mode === 'standalone' ? 'active' : ''} onClick={() => setMode('standalone')}>Standalone (no contract)</button>
+            <button className={mode === 'contract' ? 'active' : ''} onClick={() => setMode('contract')}>Single contract</button>
+            <button className={mode === 'multi' ? 'active' : ''} onClick={() => setMode('multi')}>Split across contracts</button>
+            <button className={mode === 'standalone' ? 'active' : ''} onClick={() => setMode('standalone')}>Standalone</button>
           </div>
           <div className="form-grid">
             {mode === 'contract' && <>
@@ -357,12 +410,41 @@ function NewInvoiceModal({ projectId, contracts, onClose, onSaved }) {
               {extractNote && <div className="hint" style={{ marginTop: 6 }}>{extractNote}</div>}
             </div>
             <div><label>Invoice number</label><input value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="e.g. INV-001" /></div>
-            <div><label>Amount ($)</label><input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></div>
+            <div><label>Total amount ($)</label><input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></div>
             <div><label>Invoice date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
             <div><label>Vendor</label><SmartSearch value={vendor} onChange={v => setVendor(v)} fetcher={q => api.searchVendors(q)} placeholder="Start typing vendor name" /></div>
             <div className="full"><label>Notes / description</label>
               <textarea rows={3} value={description} onChange={e => setDescription(e.target.value)} placeholder="AI will generate a summary when you upload a PDF" /></div>
           </div>
+
+          {mode === 'multi' && <>
+            <h3 style={{ marginTop: 16, fontSize: 14 }}>Contract allocations</h3>
+            <div className="hint" style={{ marginBottom: 8 }}>Split this invoice across multiple contracts. Amounts must sum to the total above.</div>
+            <table className="data">
+              <thead><tr><th>Contract</th><th className="num">Amount</th><th></th></tr></thead>
+              <tbody>
+                {allocs.map((a, i) => (
+                  <tr key={i}>
+                    <td><select value={a.contract_id} onChange={e => setAlloc(i, { contract_id: e.target.value })} style={{ minWidth: 280 }}>
+                      <option value="">— Select —</option>
+                      {contracts.map(c => <option key={c.id} value={c.id}>{c.vendor_name} — {fmt.money(c.total_value)}</option>)}
+                    </select></td>
+                    <td className="num"><input type="number" step="0.01" value={a.amount}
+                      onChange={e => setAlloc(i, { amount: e.target.value })} style={{ textAlign: 'right', maxWidth: 140 }} /></td>
+                    <td><button onClick={() => setAllocs(allocs.filter((_, j) => j !== i))}>✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr>
+                <td><button onClick={() => setAllocs([...allocs, { contract_id: '', amount: '' }])}>+ Add contract</button></td>
+                <td className="num"><strong>{fmt.moneyPrecise(allocSum)}</strong></td><td></td>
+              </tr></tfoot>
+            </table>
+            {Math.abs(allocDiff) > 0.01 && <div className="hint" style={{ marginTop: 6, color: 'var(--danger)' }}>
+              Off by {fmt.moneyPrecise(allocDiff)} — must match total amount.
+            </div>}
+          </>}
+
           {overspend && <div className="error" style={{ marginTop: 10 }}>
             This amount exceeds the remaining contract balance ({fmt.moneyPrecise(context.remaining)}). The server will block this — reduce the amount or update the contract.
           </div>}

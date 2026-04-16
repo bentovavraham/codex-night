@@ -197,3 +197,26 @@ DO $$ BEGIN
     ALTER TABLE invoices ADD COLUMN rejection_note TEXT;
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
+
+-- Invoice-to-contract allocations: allows one invoice to span multiple contracts.
+-- Each row says "this invoice allocates $X to this contract."
+-- For single-contract invoices, there will be one row matching invoices.contract_id.
+CREATE TABLE IF NOT EXISTS invoice_contracts (
+    id SERIAL PRIMARY KEY,
+    invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    amount NUMERIC(14,2) NOT NULL,
+    UNIQUE (invoice_id, contract_id)
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_contracts_invoice ON invoice_contracts(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_contracts_contract ON invoice_contracts(contract_id);
+
+-- File storage in Postgres (replaces ephemeral local disk).
+CREATE TABLE IF NOT EXISTS files (
+    id VARCHAR(36) PRIMARY KEY,
+    filename VARCHAR(512) NOT NULL DEFAULT 'upload',
+    mime_type VARCHAR(128) NOT NULL DEFAULT 'application/octet-stream',
+    data BYTEA NOT NULL,
+    size INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

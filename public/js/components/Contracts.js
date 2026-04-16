@@ -188,10 +188,8 @@ function NewContractModal({ projectId, onClose, onSaved }) {
             <tbody>
               {lines.map((l,i)=>(
                 <tr key={i}>
-                  <td><select value={l.qb_code_id} onChange={e=>setLine(i,{qb_code_id:e.target.value})}>
-                    <option value="">— Select —</option>
-                    {codes.map(c=><option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}
-                  </select></td>
+                  <td><QbCodePicker codes={codes} value={l.qb_code_id}
+                    onChange={id=>setLine(i,{qb_code_id:id})} /></td>
                   <td className="num"><input type="number" step="0.01" value={l.amount}
                     onChange={e=>setLine(i,{amount:e.target.value})} style={{textAlign:'right',maxWidth:140}} /></td>
                   <td><button onClick={()=>setLines(lines.filter((_,j)=>j!==i))}>✕</button></td>
@@ -264,7 +262,7 @@ function ContractDetail({ contractId, projectId, onClose }) {
           <div><label>Date</label><input type="date" value={form.contract_date} onChange={e=>setForm({...form,contract_date:e.target.value})} /></div>
           <div><label>Status</label>
             <select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}>
-              <option value="draft">Draft</option><option value="active">Active</option><option value="closed">Closed</option>
+              <option value="draft">Draft</option><option value="active">Active</option><option value="closed">Closed</option><option value="approved">Approved</option>
             </select></div>
           <div className="full"><label>Description</label><textarea rows={3} value={form.description} onChange={e=>setForm({...form,description:e.target.value})} /></div>
           <div className="full"><button className="primary" onClick={saveEdit}>Save changes</button></div>
@@ -326,3 +324,48 @@ function ContractDetail({ contractId, projectId, onClose }) {
     </div>
   );
 }
+
+// QB Code picker with type-ahead filtering (replaces the long <select> dropdown).
+function QbCodePicker({ codes, value, onChange }) {
+  const [search, setSearch] = React.useState('');
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  const selected = codes.find(c => String(c.id) === String(value));
+
+  const filtered = search
+    ? codes.filter(c => `${c.code} ${c.name}`.toLowerCase().includes(search.toLowerCase())).slice(0, 20)
+    : codes.slice(0, 20);
+
+  React.useEffect(() => {
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  function pick(c) { onChange(String(c.id)); setSearch(''); setOpen(false); }
+
+  return (
+    <div className="combo" ref={ref} style={{ minWidth: 240 }}>
+      <input
+        value={open ? search : (selected ? `${selected.code} — ${selected.name}` : '')}
+        placeholder="Type to search QB codes…"
+        onFocus={() => { setOpen(true); setSearch(''); }}
+        onChange={e => { setSearch(e.target.value); setOpen(true); }}
+      />
+      {open && (
+        <ul className="combo-list" style={{ maxHeight: 200, overflowY: 'auto' }}>
+          {filtered.length === 0 && <li className="combo-empty">No matches</li>}
+          {filtered.map(c => (
+            <li key={c.id} className={`combo-item ${String(c.id) === String(value) ? 'active' : ''}`}
+              onMouseDown={e => { e.preventDefault(); pick(c); }}>
+              <span className="code" style={{ fontFamily: 'monospace', marginRight: 8 }}>{c.code}</span>{c.name}
+            </li>
+          ))}
+          {codes.length > 20 && filtered.length >= 20 && <li className="combo-empty">Type to narrow results…</li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+window.QbCodePicker = QbCodePicker;
