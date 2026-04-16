@@ -33,6 +33,9 @@ function App() {
 
   return (
     <>
+      <ToastContainer />
+      <ConfirmDialog />
+      <RejectDialog />
       <header className="app-header">
         <h1>ActiveAcq</h1>
         <div className="user-info">

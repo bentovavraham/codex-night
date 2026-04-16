@@ -23,7 +23,10 @@ window.Contracts = function Contracts({ projectId }) {
     <div className="panel">
       <div className="panel-header">
         <h2>Contracts</h2>
-        <button className="primary" onClick={() => setShowNew(true)}>+ New Contract</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <a href={`/api/projects/${projectId}/contracts/export`} target="_blank" className="btn" style={{ fontSize: 12 }}>Export CSV</a>
+          <button className="primary" onClick={() => setShowNew(true)}>+ New Contract</button>
+        </div>
       </div>
       <div className="toolbar">
         <input placeholder="Filter by vendor" value={filter.vendor}
@@ -219,10 +222,13 @@ function ContractDetail({ contractId, projectId, onClose }) {
   const [data, setData] = React.useState(null);
   const [editing, setEditing] = React.useState(false);
   const [form, setForm] = React.useState({});
+  const [history, setHistory] = React.useState([]);
   const [err, setErr] = React.useState(null);
 
   async function load() {
-    try { const d = await api.getContract(contractId); setData(d); setForm({
+    try {
+    const [d, hist] = await Promise.all([api.getContract(contractId), api.getContractHistory(contractId)]);
+    setData(d); setHistory(hist); setForm({
       vendor_name:d.vendor_name, description:d.description||'', total_value:String(d.total_value),
       contract_date:d.contract_date?d.contract_date.slice(0,10):'', reference_number:d.reference_number||'',
       status:d.status,
@@ -234,8 +240,9 @@ function ContractDetail({ contractId, projectId, onClose }) {
     setErr(null);
     try{
       await api.updateContract(contractId, form);
+      toast('Contract updated');
       setEditing(false); await load();
-    }catch(e){setErr(e.message);}
+    }catch(e){setErr(e.message); toast(e.message, 'error');}
   }
 
   if(!data) return <div className="empty">Loading contract…</div>;
@@ -288,19 +295,34 @@ function ContractDetail({ contractId, projectId, onClose }) {
         ))}</tbody>
       </table>
 
-      <h3 style={{marginTop:20,fontSize:14}}>Invoices</h3>
-      {data.invoices.length===0?<div className="empty" style={{padding:20}}>No invoices yet.</div>:(
+      <h3 style={{marginTop:20,fontSize:14}}>Invoices against this contract</h3>
+      {data.invoices.length===0?<div className="empty" style={{padding:20}}>No invoices submitted against this contract yet.</div>:(
         <table className="data">
-          <thead><tr><th>Invoice #</th><th>Date</th><th className="num">Amount</th><th>Status</th></tr></thead>
+          <thead><tr><th>Invoice #</th><th>Vendor</th><th>Date</th><th className="num">Amount</th><th>Status</th></tr></thead>
           <tbody>{data.invoices.map(i=>(
-            <tr key={i.id}>
+            <tr key={i.id} className={i.status === 'rejected' ? 'row-over' : ''}>
               <td>{i.invoice_number}{i.file_reference&&<> · <a href={`/api/files/${encodeURIComponent(i.file_reference)}`} target="_blank">📄</a></>}</td>
+              <td>{i.vendor_name}</td>
               <td>{fmt.date(i.invoice_date)}</td><td className="num">{fmt.moneyPrecise(i.amount)}</td>
               <td><span className={`badge ${i.status}`}>{i.status}</span></td>
             </tr>
           ))}</tbody>
         </table>
       )}
+
+      {/* Activity log */}
+      {history.length > 0 && <>
+        <h3 style={{marginTop:20,fontSize:14}}>Activity log</h3>
+        <div className="activity-log">
+          {history.map(h => (
+            <div key={h.id} className="activity-item">
+              <span className={`activity-action ${h.action}`}>{h.action}</span>
+              <span style={{flex:1}}>{h.detail}</span>
+              <span className="hint">{h.changed_by_name} · {fmt.datetime(h.changed_at)}</span>
+            </div>
+          ))}
+        </div>
+      </>}
     </div>
   );
 }

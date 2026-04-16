@@ -126,6 +126,11 @@ router.post('/projects/:id/contracts', requireAuth, async (req, res, next) => {
       );
     }
     await client.query('COMMIT');
+    // Log creation (outside transaction is fine — contract is committed).
+    await pool.query(
+      `INSERT INTO contract_logs (contract_id, action, detail, changed_by)
+       VALUES ($1,'created',$2,$3)`,
+      [contractId, `Created: ${vendor_name} for $${total}`, req.session.userId]);
     res.status(201).json(contract.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
@@ -170,17 +175,20 @@ router.get('/contracts/:id', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// Update contract (NOT the lines — those are separate).
+// Update contract with audit logging.
 router.put('/contracts/:id', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const contractId = Number(req.params.id);
     const access = await userCanAccessContract(req.session.userId, contractId);
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
+    const old = await client.query('SELECT * FROM contracts WHERE id = $1', [contractId]);
     const {
       vendor_name, description, total_value, contract_date,
       reference_number, status, file_reference,
     } = req.body || {};
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `UPDATE contracts SET
          vendor_name      = COALESCE($2, vendor_name),
          description      = COALESCE($3, description),
@@ -192,9 +200,58 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
          updated_at       = NOW()
        WHERE id = $1 RETURNING *`,
       [contractId, vendor_name ?? null, description ?? null, total_value ?? null,
-       contract_date ?? null, reference_number ?? null, status ?? null, file_reference ?? null]
-    );
+       contract_date ?? null, reference_number ?? null, status ?? null, file_reference ?? null]);
+    const changes = [];
+    const o = old.rows[0];
+    if (vendor_name && vendor_name !== o.vendor_name) changes.push(`vendor: ${o.vendor_name} → ${vendor_name}`);
+    if (total_value != null && Number(total_value) !== Number(o.total_value)) changes.push(`total: $${Number(o.total_value).toFixed(2)} → $${Number(total_value).toFixed(2)}`);
+    if (status && status !== o.status) changes.push(`status: ${o.status} → ${status}`);
+    if (changes.length > 0) {
+      await client.query(
+        `INSERT INTO contract_logs (contract_id, action, detail, changed_by) VALUES ($1,'edited',$2,$3)`,
+        [contractId, changes.join('; '), req.session.userId]);
+    }
+    await client.query('COMMIT');
     res.json(result.rows[0]);
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
+});
+
+// GET /api/contracts/:id/history
+router.get('/contracts/:id/history', requireAuth, async (req, res, next) => {
+  try {
+    const contractId = Number(req.params.id);
+    const access = await userCanAccessContract(req.session.userId, contractId);
+    if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
+    const result = await pool.query(
+      `SELECT l.*, u.name AS changed_by_name FROM contract_logs l
+       JOIN users u ON u.id = l.changed_by WHERE l.contract_id = $1
+       ORDER BY l.changed_at DESC`, [contractId]);
+    res.json(result.rows);
+  } catch (err) { next(err); }
+});
+
+// GET /api/projects/:id/contracts/export (CSV)
+router.get('/projects/:id/contracts/export', requireAuth, async (req, res, next) => {
+  try {
+    const projectId = Number(req.params.id);
+    if (!(await projects.userCanAccess(req.session.userId, projectId)))
+      return res.status(403).json({ error: 'Forbidden' });
+    const result = await pool.query(
+      `SELECT c.vendor_name, c.total_value, c.contract_date, c.reference_number,
+              c.status, c.description, c.created_at,
+              (SELECT COALESCE(SUM(amount),0) FROM invoices WHERE contract_id = c.id
+                 AND status IN ('approved','pushed','paid')) AS invoiced
+       FROM contracts c WHERE c.project_id = $1 ORDER BY c.contract_date DESC NULLS LAST`, [projectId]);
+    const header = 'Vendor,Total,Date,Reference,Status,Description,Invoiced,Created\n';
+    const rows = result.rows.map(r =>
+      [r.vendor_name, r.total_value, r.contract_date || '', r.reference_number || '',
+       r.status, `"${(r.description || '').replace(/"/g, '""')}"`,
+       r.invoiced, r.created_at].join(',')
+    ).join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="contracts-project-${projectId}.csv"`);
+    res.send(header + rows);
   } catch (err) { next(err); }
 });
 

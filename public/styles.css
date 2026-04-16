@@ -213,3 +213,67 @@ tr.row-over td { background: var(--danger-bg) !important; }
   background: transparent; border: none; color: var(--danger); cursor: pointer;
   padding: 2px 6px; font-size: 12px;
 }
+
+/* Toast notifications */
+.toast-container {
+  position: fixed; top: 16px; right: 16px; z-index: 100;
+  display: flex; flex-direction: column; gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  box-shadow: 0 4px 16px rgba(12,18,32,.15);
+  animation: toast-in .25s ease;
+  pointer-events: auto;
+}
+.toast-success { background: #117c41; color: #fff; }
+.toast-error { background: var(--danger); color: #fff; }
+.toast-info { background: var(--accent); color: #fff; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Action buttons — loading state */
+button .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor;
+  border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; margin-right: 4px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Activity log */
+.activity-log { max-height: 300px; overflow-y: auto; }
+.activity-item {
+  display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.activity-item:last-child { border-bottom: none; }
+.activity-action { font-weight: 600; min-width: 70px; text-transform: uppercase; font-size: 11px;
+  letter-spacing: .04em; padding-top: 2px; }
+.activity-action.created  { color: var(--accent); }
+.activity-action.edited   { color: #b45309; }
+.activity-action.approved { color: var(--ok); }
+.activity-action.rejected { color: var(--danger); }
+.activity-action.pushed   { color: #1b4ab4; }
+.activity-action.paid     { color: var(--ok); }
+
+/* Bulk action bar */
+.bulk-bar {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+  background: #eef3ff; border-radius: 6px; margin-bottom: 10px;
+  font-size: 13px; font-weight: 500;
+}
+.bulk-bar button { font-size: 13px; }
+
+/* Summary cards */
+.summary-cards { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.summary-card {
+  flex: 1; min-width: 120px; padding: 14px;
+  background: #fff; border: 1px solid var(--border); border-radius: 8px;
+  text-align: center;
+}
+.summary-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .04em; margin-bottom: 4px; }
+.summary-card .value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Rejection callout */
+.rejection-note {
+  background: var(--danger-bg); border-left: 3px solid var(--danger);
+  padding: 8px 12px; border-radius: 0 6px 6px 0; font-size: 13px;
+  margin-top: 6px;
+}

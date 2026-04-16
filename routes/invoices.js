@@ -7,63 +7,44 @@ const storage = require('../lib/storage');
 const { extractInvoice } = require('../lib/extract');
 
 const router = express.Router();
+const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
-const pdfUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
-});
+// Helpers -------------------------------------------------------------------
 
-// POST /api/invoices/extract
-// multipart/form-data with a "file" field (PDF). Stores the PDF via the
-// storage module, calls Claude Opus 4.6 to extract invoice fields, and
-// returns both the file reference and the extracted fields.
+async function getInvoiceWithProject(invoiceId) {
+  const r = await pool.query(
+    `SELECT i.*, COALESCE(i.project_id, c.project_id) AS project_id
+     FROM invoices i LEFT JOIN contracts c ON c.id = i.contract_id
+     WHERE i.id = $1`, [invoiceId]);
+  return r.rows[0] || null;
+}
+
+async function logInvoice(client, invoiceId, action, detail, userId) {
+  await client.query(
+    `INSERT INTO invoice_logs (invoice_id, action, detail, changed_by)
+     VALUES ($1,$2,$3,$4)`, [invoiceId, action, detail, userId]);
+}
+
+// POST /api/invoices/extract ------------------------------------------------
 router.post('/invoices/extract', requireAuth, pdfUpload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'file field required' });
-    if (!/pdf$/i.test(req.file.mimetype) && !/\.pdf$/i.test(req.file.originalname)) {
-      return res.status(400).json({ error: 'Only PDFs are supported for extraction' });
-    }
-
-    // Save first — even if extraction fails, user still has the uploaded PDF.
     const saved = await storage.save(req.file.buffer, {
       filename: req.file.originalname || 'invoice.pdf',
       mimeType: req.file.mimetype || 'application/pdf',
     });
-
-    let extracted = null;
-    let extract_error = null;
-    try {
-      extracted = await extractInvoice(req.file.buffer);
-    } catch (err) {
-      console.error('Invoice extraction failed:', err.message);
-      extract_error = err.message;
-    }
-
+    let extracted = null, extract_error = null;
+    try { extracted = await extractInvoice(req.file.buffer); }
+    catch (err) { console.error('Invoice extraction failed:', err.message); extract_error = err.message; }
     res.status(201).json({
       file_reference: saved.reference,
       download_url: `/api/files/${encodeURIComponent(saved.reference)}`,
-      filename: saved.filename,
-      size: saved.size,
-      extracted,
-      extract_error,
+      filename: saved.filename, size: saved.size, extracted, extract_error,
     });
   } catch (err) { next(err); }
 });
 
-async function getInvoiceWithProject(invoiceId) {
-  const r = await pool.query(
-    `SELECT i.*,
-            COALESCE(i.project_id, c.project_id) AS project_id
-     FROM invoices i
-     LEFT JOIN contracts c ON c.id = i.contract_id
-     WHERE i.id = $1`,
-    [invoiceId]
-  );
-  return r.rows[0] || null;
-}
-
-// List invoices across a project with optional filters.
-// /api/projects/:id/invoices?status=&contract_id=&vendor=
+// GET /api/projects/:id/invoices --------------------------------------------
 router.get('/projects/:id/invoices', requireAuth, async (req, res, next) => {
   try {
     const projectId = Number(req.params.id);
@@ -72,53 +53,57 @@ router.get('/projects/:id/invoices', requireAuth, async (req, res, next) => {
     }
     const filters = ['COALESCE(i.project_id, c.project_id) = $1'];
     const params = [projectId];
-    if (req.query.status) {
-      params.push(req.query.status);
-      filters.push(`i.status = $${params.length}`);
-    }
-    if (req.query.contract_id) {
-      params.push(Number(req.query.contract_id));
-      filters.push(`i.contract_id = $${params.length}`);
-    }
-    if (req.query.vendor) {
-      params.push(`%${req.query.vendor}%`);
-      filters.push(`i.vendor_name ILIKE $${params.length}`);
-    }
-    if (req.query.qb_code_id) {
-      params.push(Number(req.query.qb_code_id));
-      filters.push(`i.qb_code_id = $${params.length}`);
-    }
-    if (req.query.sort === 'vendor') {
-      var orderBy = 'i.vendor_name ASC, i.created_at DESC';
-    } else if (req.query.sort === 'amount') {
-      var orderBy = 'i.amount DESC, i.created_at DESC';
-    } else if (req.query.sort === 'status') {
-      var orderBy = 'i.status ASC, i.created_at DESC';
-    } else {
-      var orderBy = 'i.invoice_date DESC NULLS LAST, i.created_at DESC';
-    }
+    if (req.query.status) { params.push(req.query.status); filters.push(`i.status = $${params.length}`); }
+    if (req.query.contract_id === 'none') { filters.push('i.contract_id IS NULL'); }
+    else if (req.query.contract_id) { params.push(Number(req.query.contract_id)); filters.push(`i.contract_id = $${params.length}`); }
+    if (req.query.vendor) { params.push(`%${req.query.vendor}%`); filters.push(`i.vendor_name ILIKE $${params.length}`); }
+    if (req.query.qb_code_id) { params.push(Number(req.query.qb_code_id)); filters.push(`i.qb_code_id = $${params.length}`); }
+    const sortMap = { vendor: 'i.vendor_name ASC', amount: 'i.amount DESC', status: 'i.status ASC, i.created_at DESC' };
+    const order = sortMap[req.query.sort] || 'i.invoice_date DESC NULLS LAST, i.created_at DESC';
     const result = await pool.query(
-      `SELECT i.*, c.vendor_name AS contract_vendor
+      `SELECT i.*, c.vendor_name AS contract_vendor, c.total_value AS contract_total,
+              u_created.name AS created_by_name, u_approved.name AS approved_by_name
        FROM invoices i
        LEFT JOIN contracts c ON c.id = i.contract_id
-       WHERE ${filters.join(' AND ')}
-       ORDER BY ${orderBy}`,
-      params
-    );
+       LEFT JOIN users u_created ON u_created.id = i.created_by
+       LEFT JOIN users u_approved ON u_approved.id = i.approved_by
+       WHERE ${filters.join(' AND ')} ORDER BY ${order}`, params);
     res.json(result.rows);
   } catch (err) { next(err); }
 });
 
-// Create invoice — can be under a contract OR standalone (project_id required if no contract).
-router.post('/invoices', requireAuth, async (req, res, next) => {
+// GET /api/projects/:id/invoices/export (CSV) --------------------------------
+router.get('/projects/:id/invoices/export', requireAuth, async (req, res, next) => {
   try {
-    const {
-      contract_id, project_id, invoice_number, vendor_name, amount, invoice_date,
-      description, file_reference, qb_code_id,
-    } = req.body || {};
-    if (!invoice_number || amount == null) {
-      return res.status(400).json({ error: 'invoice_number and amount required' });
-    }
+    const projectId = Number(req.params.id);
+    if (!(await projects.userCanAccess(req.session.userId, projectId))) return res.status(403).json({ error: 'Forbidden' });
+    const result = await pool.query(
+      `SELECT i.invoice_number, i.vendor_name, i.amount, i.invoice_date, i.status,
+              i.description, i.created_at, i.approved_at, i.paid_date, i.rejection_note,
+              c.vendor_name AS contract_vendor, c.reference_number AS contract_ref
+       FROM invoices i LEFT JOIN contracts c ON c.id = i.contract_id
+       WHERE COALESCE(i.project_id, c.project_id) = $1
+       ORDER BY i.invoice_date DESC NULLS LAST`, [projectId]);
+    const header = 'Invoice #,Vendor,Amount,Date,Status,Description,Contract Vendor,Contract Ref,Approved At,Paid Date,Rejection Note,Created At\n';
+    const rows = result.rows.map(r =>
+      [r.invoice_number, r.vendor_name, r.amount, r.invoice_date || '', r.status,
+       `"${(r.description || '').replace(/"/g, '""')}"`, r.contract_vendor || '',
+       r.contract_ref || '', r.approved_at || '', r.paid_date || '',
+       `"${(r.rejection_note || '').replace(/"/g, '""')}"`, r.created_at].join(',')
+    ).join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="invoices-project-${projectId}.csv"`);
+    res.send(header + rows);
+  } catch (err) { next(err); }
+});
+
+// POST /api/invoices --------------------------------------------------------
+router.post('/invoices', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { contract_id, project_id, invoice_number, vendor_name, amount,
+            invoice_date, description, file_reference, qb_code_id } = req.body || {};
+    if (!invoice_number || amount == null) return res.status(400).json({ error: 'invoice_number and amount required' });
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount must be > 0' });
 
@@ -126,150 +111,217 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
     let resolvedVendor = vendor_name || '';
 
     if (contract_id) {
-      const c = await pool.query('SELECT project_id, vendor_name FROM contracts WHERE id = $1', [contract_id]);
+      const c = await pool.query('SELECT project_id, vendor_name, total_value FROM contracts WHERE id = $1', [contract_id]);
       if (!c.rows[0]) return res.status(404).json({ error: 'Contract not found' });
       resolvedProjectId = resolvedProjectId || c.rows[0].project_id;
       resolvedVendor = resolvedVendor || c.rows[0].vendor_name;
+      // Hard overspend check.
+      const invoiced = await pool.query(
+        `SELECT COALESCE(SUM(amount),0)::numeric AS total FROM invoices
+         WHERE contract_id = $1 AND status NOT IN ('rejected')`, [contract_id]);
+      const remaining = Number(c.rows[0].total_value) - Number(invoiced.rows[0].total);
+      if (amt > remaining + 0.01) {
+        return res.status(400).json({
+          error: `Invoice amount ($${amt.toFixed(2)}) exceeds remaining contract balance ($${remaining.toFixed(2)}). Reduce the amount or update the contract total first.`,
+        });
+      }
     }
-
     if (!resolvedProjectId) return res.status(400).json({ error: 'contract_id or project_id required' });
-    if (!(await projects.userCanAccess(req.session.userId, resolvedProjectId))) {
+    if (!(await projects.userCanAccess(req.session.userId, resolvedProjectId)))
       return res.status(403).json({ error: 'Forbidden' });
-    }
 
-    const result = await pool.query(
-      `INSERT INTO invoices
-         (contract_id, project_id, invoice_number, vendor_name, amount, invoice_date,
-          description, file_reference, qb_code_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       RETURNING *`,
+    await client.query('BEGIN');
+    const result = await client.query(
+      `INSERT INTO invoices (contract_id, project_id, invoice_number, vendor_name, amount,
+          invoice_date, description, file_reference, qb_code_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [contract_id || null, resolvedProjectId, invoice_number, resolvedVendor, amt,
        invoice_date || null, description || null, file_reference || null,
-       qb_code_id || null, req.session.userId]
-    );
+       qb_code_id || null, req.session.userId]);
+    await logInvoice(client, result.rows[0].id, 'created',
+      `Created: ${invoice_number} for $${amt.toFixed(2)} from ${resolvedVendor}`, req.session.userId);
+    await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
-  } catch (err) { next(err); }
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
 });
 
+// GET /api/invoices/:id -----------------------------------------------------
 router.get('/invoices/:id', requireAuth, async (req, res, next) => {
   try {
     const inv = await getInvoiceWithProject(Number(req.params.id));
     if (!inv) return res.status(404).json({ error: 'Not found' });
-    if (!(await projects.userCanAccess(req.session.userId, inv.project_id))) {
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
-    }
     res.json(inv);
   } catch (err) { next(err); }
 });
 
+// GET /api/invoices/:id/history ---------------------------------------------
+router.get('/invoices/:id/history', requireAuth, async (req, res, next) => {
+  try {
+    const inv = await getInvoiceWithProject(Number(req.params.id));
+    if (!inv) return res.status(404).json({ error: 'Not found' });
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
+      return res.status(403).json({ error: 'Forbidden' });
+    const result = await pool.query(
+      `SELECT l.*, u.name AS changed_by_name FROM invoice_logs l
+       JOIN users u ON u.id = l.changed_by
+       WHERE l.invoice_id = $1 ORDER BY l.changed_at DESC`, [inv.id]);
+    res.json(result.rows);
+  } catch (err) { next(err); }
+});
+
+// PUT /api/invoices/:id -----------------------------------------------------
 router.put('/invoices/:id', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const invId = Number(req.params.id);
     const inv = await getInvoiceWithProject(invId);
     if (!inv) return res.status(404).json({ error: 'Not found' });
-    if (!(await projects.userCanAccess(req.session.userId, inv.project_id))) {
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
+    // Block edits on finalized invoices.
+    if (['pushed', 'paid'].includes(inv.status)) {
+      return res.status(400).json({ error: `Cannot edit an invoice that has been ${inv.status}. Revert its status first.` });
     }
     const { invoice_number, vendor_name, amount, invoice_date, description, status, file_reference } = req.body || {};
-    const result = await pool.query(
+    const changes = [];
+    if (invoice_number && invoice_number !== inv.invoice_number) changes.push(`number: ${inv.invoice_number} → ${invoice_number}`);
+    if (amount != null && Number(amount) !== Number(inv.amount)) changes.push(`amount: $${Number(inv.amount).toFixed(2)} → $${Number(amount).toFixed(2)}`);
+    if (status && status !== inv.status) changes.push(`status: ${inv.status} → ${status}`);
+
+    await client.query('BEGIN');
+    const result = await client.query(
       `UPDATE invoices SET
-         invoice_number = COALESCE($2, invoice_number),
-         vendor_name    = COALESCE($3, vendor_name),
-         amount         = COALESCE($4, amount),
-         invoice_date   = COALESCE($5, invoice_date),
-         description    = COALESCE($6, description),
-         status         = COALESCE($7, status),
-         file_reference = COALESCE($8, file_reference),
-         updated_at     = NOW()
+         invoice_number = COALESCE($2, invoice_number), vendor_name = COALESCE($3, vendor_name),
+         amount = COALESCE($4, amount), invoice_date = COALESCE($5, invoice_date),
+         description = COALESCE($6, description), status = COALESCE($7, status),
+         file_reference = COALESCE($8, file_reference), updated_at = NOW()
        WHERE id = $1 RETURNING *`,
       [invId, invoice_number ?? null, vendor_name ?? null, amount ?? null,
-       invoice_date ?? null, description ?? null, status ?? null, file_reference ?? null]
-    );
+       invoice_date ?? null, description ?? null, status ?? null, file_reference ?? null]);
+    if (changes.length > 0) {
+      await logInvoice(client, invId, 'edited', changes.join('; '), req.session.userId);
+    }
+    await client.query('COMMIT');
     res.json(result.rows[0]);
-  } catch (err) { next(err); }
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
 });
 
+// POST /api/invoices/:id/approve --------------------------------------------
 router.post('/invoices/:id/approve', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const invId = Number(req.params.id);
     const inv = await getInvoiceWithProject(invId);
     if (!inv) return res.status(404).json({ error: 'Not found' });
-    if (!(await projects.userCanAccess(req.session.userId, inv.project_id))) {
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
-    }
-    if (inv.status !== 'pending') {
+    if (inv.status !== 'pending')
       return res.status(400).json({ error: `Cannot approve invoice in status '${inv.status}'` });
-    }
-    const result = await pool.query(
-      `UPDATE invoices SET status = 'approved', approved_by = $2, approved_at = NOW(), updated_at = NOW()
-       WHERE id = $1 RETURNING *`,
-      [invId, req.session.userId]
-    );
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE invoices SET status = 'approved', approved_by = $2, approved_at = NOW(),
+         rejection_note = NULL, updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [invId, req.session.userId]);
+    await logInvoice(client, invId, 'approved', `Approved $${Number(inv.amount).toFixed(2)}`, req.session.userId);
+    await client.query('COMMIT');
     res.json(result.rows[0]);
-  } catch (err) { next(err); }
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
 });
 
+// POST /api/invoices/:id/reject — requires a note ---------------------------
 router.post('/invoices/:id/reject', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const invId = Number(req.params.id);
+    const note = (req.body?.note || '').trim();
+    if (!note) return res.status(400).json({ error: 'A rejection reason is required.' });
     const inv = await getInvoiceWithProject(invId);
     if (!inv) return res.status(404).json({ error: 'Not found' });
-    if (!(await projects.userCanAccess(req.session.userId, inv.project_id))) {
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
-    }
-    const result = await pool.query(
-      `UPDATE invoices SET status = 'rejected', updated_at = NOW() WHERE id = $1 RETURNING *`,
-      [invId]
-    );
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE invoices SET status = 'rejected', rejection_note = $2, updated_at = NOW()
+       WHERE id = $1 RETURNING *`, [invId, note]);
+    await logInvoice(client, invId, 'rejected', `Rejected: ${note}`, req.session.userId);
+    await client.query('COMMIT');
     res.json(result.rows[0]);
-  } catch (err) { next(err); }
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
 });
 
+// POST /api/invoices/bulk-approve -------------------------------------------
+router.post('/invoices/bulk-approve', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : [];
+    if (ids.length === 0) return res.status(400).json({ error: 'ids array required' });
+    await client.query('BEGIN');
+    let approved = 0;
+    for (const id of ids) {
+      const inv = await getInvoiceWithProject(id);
+      if (!inv || inv.status !== 'pending') continue;
+      if (!(await projects.userCanAccess(req.session.userId, inv.project_id))) continue;
+      await client.query(
+        `UPDATE invoices SET status = 'approved', approved_by = $2, approved_at = NOW(),
+           rejection_note = NULL, updated_at = NOW() WHERE id = $1`, [id, req.session.userId]);
+      await logInvoice(client, id, 'approved', `Bulk approved $${Number(inv.amount).toFixed(2)}`, req.session.userId);
+      approved++;
+    }
+    await client.query('COMMIT');
+    res.json({ approved, total: ids.length });
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
+});
+
+// POST /api/invoices/:id/mark-pushed ----------------------------------------
 router.post('/invoices/:id/mark-pushed', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const invId = Number(req.params.id);
     const inv = await getInvoiceWithProject(invId);
     if (!inv) return res.status(404).json({ error: 'Not found' });
-    if (!(await projects.userCanAccess(req.session.userId, inv.project_id))) {
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
-    }
-    if (inv.status !== 'approved') {
-      return res.status(400).json({ error: `Invoice must be approved before it can be pushed` });
-    }
-    // Dry version: set qb_reference_id to a placeholder string. Real QB integration
-    // will replace this with the actual QB bill id.
-    const result = await pool.query(
-      `UPDATE invoices SET status = 'pushed',
-         qb_reference_id = COALESCE(qb_reference_id, 'DRY-' || id::text),
-         updated_at = NOW()
-       WHERE id = $1 RETURNING *`,
-      [invId]
-    );
+    if (inv.status !== 'approved')
+      return res.status(400).json({ error: 'Invoice must be approved before it can be pushed' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE invoices SET status = 'pushed', qb_reference_id = COALESCE(qb_reference_id, 'DRY-' || id::text),
+         updated_at = NOW() WHERE id = $1 RETURNING *`, [invId]);
+    await logInvoice(client, invId, 'pushed', 'Marked as pushed to QB', req.session.userId);
+    await client.query('COMMIT');
     res.json(result.rows[0]);
-  } catch (err) { next(err); }
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
 });
 
+// POST /api/invoices/:id/mark-paid ------------------------------------------
 router.post('/invoices/:id/mark-paid', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const invId = Number(req.params.id);
     const inv = await getInvoiceWithProject(invId);
     if (!inv) return res.status(404).json({ error: 'Not found' });
-    if (!(await projects.userCanAccess(req.session.userId, inv.project_id))) {
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
-    }
-    if (!['approved', 'pushed'].includes(inv.status)) {
-      return res.status(400).json({ error: `Invoice must be approved/pushed before it can be paid` });
-    }
+    if (!['approved', 'pushed'].includes(inv.status))
+      return res.status(400).json({ error: 'Invoice must be approved/pushed before it can be marked paid' });
     const paidDate = req.body?.paid_date || null;
-    const result = await pool.query(
-      `UPDATE invoices SET status = 'paid',
-         paid_date = COALESCE($2::date, CURRENT_DATE),
-         updated_at = NOW()
-       WHERE id = $1 RETURNING *`,
-      [invId, paidDate]
-    );
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE invoices SET status = 'paid', paid_date = COALESCE($2::date, CURRENT_DATE),
+         updated_at = NOW() WHERE id = $1 RETURNING *`, [invId, paidDate]);
+    await logInvoice(client, invId, 'paid', `Marked paid on ${result.rows[0].paid_date}`, req.session.userId);
+    await client.query('COMMIT');
     res.json(result.rows[0]);
-  } catch (err) { next(err); }
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
 });
 
 module.exports = router;

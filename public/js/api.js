@@ -54,6 +54,7 @@ window.api = {
   },
   createContract:    (pid, data)        => request('POST', `/api/projects/${pid}/contracts`, data),
   getContract:       (id)               => request('GET',  `/api/contracts/${id}`),
+  getContractHistory:(id)               => request('GET',  `/api/contracts/${id}/history`),
   updateContract:    (id, data)         => request('PUT',  `/api/contracts/${id}`, data),
 
   listInvoices:      (pid, filters={})  => {
@@ -63,8 +64,10 @@ window.api = {
   createInvoice:     (data)             => request('POST', '/api/invoices', data),
   getInvoice:        (id)               => request('GET',  `/api/invoices/${id}`),
   updateInvoice:     (id, data)         => request('PUT',  `/api/invoices/${id}`, data),
+  getInvoiceHistory: (id)               => request('GET',  `/api/invoices/${id}/history`),
   approveInvoice:    (id)               => request('POST', `/api/invoices/${id}/approve`),
-  rejectInvoice:     (id)               => request('POST', `/api/invoices/${id}/reject`),
+  rejectInvoice:     (id, note)         => request('POST', `/api/invoices/${id}/reject`, { note }),
+  bulkApprove:       (ids)              => request('POST', '/api/invoices/bulk-approve', { ids }),
   markPushed:        (id)               => request('POST', `/api/invoices/${id}/mark-pushed`),
   markPaid:          (id, paid_date)    => request('POST', `/api/invoices/${id}/mark-paid`, { paid_date }),
 
