@@ -376,11 +376,16 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
     const invoiced    = Number(invoicedR.rows[0].total);
     const paid        = Number(paidR.rows[0].total);
 
-    const commitment  = original + approvedCOs + tmApproved + expApproved;
-    const remaining   = commitment - invoiced;
-    const earmarkRemaining = earmarked != null ? earmarked - commitment : null;
-    const costCreep   = earmarked != null && commitment > earmarked;
-    const overrun     = invoiced > commitment;
+    // Commitment = contract + approved COs only (legal obligation on signed scope).
+    // T&M and expenses are real money but not contractual commitment — they are exposure.
+    const commitment     = original + approvedCOs;
+    const totalExposure  = commitment + tmApproved + expApproved;   // full spend risk
+    const remaining      = totalExposure - invoiced;
+    const earmarkRemaining = earmarked != null ? earmarked - totalExposure : null;
+    // Cost creep: total expected spend exceeds internal budget
+    const costCreep      = earmarked != null && totalExposure > earmarked;
+    // Overrun: vendor has invoiced more than what was committed + approved extras
+    const overrun        = invoiced > totalExposure;
 
     res.json({
       original_contract: original,
@@ -392,13 +397,14 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
       tm_pending: tmPending,
       expense_approved: expApproved,
       expense_pending: expPending,
-      commitment,
+      commitment,        // contract + approved COs only
+      total_exposure: totalExposure,  // commitment + T&M + expenses
       invoiced,
       paid,
-      remaining,
-      earmark_remaining: earmarkRemaining,
-      cost_creep: costCreep,
-      overrun,
+      remaining,         // total_exposure - invoiced
+      earmark_remaining: earmarkRemaining,  // earmarked - total_exposure
+      cost_creep: costCreep,  // total_exposure > earmarked
+      overrun,           // invoiced > total_exposure
     });
   } catch (err) { next(err); }
 });

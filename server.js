@@ -24,6 +24,7 @@ const customerRoutes = require('./routes/customers');
 const changeOrderRoutes = require('./routes/changeOrders');
 const tmChargeRoutes = require('./routes/tmCharges');
 const contractExpenseRoutes = require('./routes/contractExpenses');
+const alertRoutes = require('./routes/alerts');
 
 const app = express();
 app.disable('x-powered-by');
@@ -72,6 +73,7 @@ app.use('/api/customers', customerRoutes);
 app.use('/api', changeOrderRoutes);
 app.use('/api', tmChargeRoutes);
 app.use('/api', contractExpenseRoutes);
+app.use('/api', alertRoutes);
 
 // --- Static SPA ---
 app.use(express.static(path.join(__dirname, 'public')));

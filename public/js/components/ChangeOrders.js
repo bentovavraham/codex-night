@@ -4,6 +4,7 @@ window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedg
   const [cos, setCos] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [showNew, setShowNew] = React.useState(false);
+  const [editingCo, setEditingCo] = React.useState(null);
   const [err, setErr] = React.useState(null);
 
   async function load() {
@@ -53,19 +54,20 @@ window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedg
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <div style={{ display: 'flex', gap: 16 }}>
+        <div style={{ display: 'flex', gap: 20 }}>
           {approvedTotal > 0 && (
-            <div style={{ fontSize: 12, color: 'var(--ok)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ok)' }}>
               ✓ {fmt.money(approvedTotal)} approved
             </div>
           )}
           {pendingTotal > 0 && (
-            <div style={{ fontSize: 12, color: 'var(--warn)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--warn)' }}>
               ⏳ {fmt.money(pendingTotal)} pending
             </div>
           )}
+          {cos.length === 0 && <div style={{ fontSize: 14, color: 'var(--text-3)' }}>No change orders yet</div>}
         </div>
-        <button className="primary" style={{ fontSize: 12 }} onClick={() => setShowNew(true)}>+ New Change Order</button>
+        <button className="primary" onClick={() => setShowNew(true)}>+ New Change Order</button>
       </div>
 
       {err && <div className="error">{err}</div>}
@@ -87,31 +89,37 @@ window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedg
           <tbody>
             {cos.map(co => (
               <tr key={co.id} className={co.status === 'rejected' ? 'row-over' : ''}>
-                <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{co.co_number || <span className="hint">—</span>}</td>
+                <td style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600 }}>{co.co_number || <span className="hint">—</span>}</td>
                 <td>
-                  {co.description}
+                  <div style={{ fontSize: 14 }}>{co.description}</div>
                   {co.rejection_note && (
-                    <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2 }}>
+                    <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 3 }}>
                       Rejected: {co.rejection_note}
                     </div>
                   )}
                   {co.file_reference && (
-                    <> · <a href={`/api/files/${encodeURIComponent(co.file_reference)}`} target="_blank" onClick={e => e.stopPropagation()} style={{ fontSize: 11 }}>📄</a></>
+                    <> · <a href={`/api/files/${encodeURIComponent(co.file_reference)}`} target="_blank" onClick={e => e.stopPropagation()} style={{ fontSize: 12 }}>📄</a></>
                   )}
                 </td>
-                <td className="num" style={{ fontWeight: 600, color: co.status === 'approved' ? 'var(--ok)' : co.status === 'rejected' ? 'var(--text-3)' : 'var(--warn)' }}>
+                <td className="num" style={{ fontWeight: 700, fontSize: 15, color: co.status === 'approved' ? 'var(--ok)' : co.status === 'rejected' ? 'var(--text-3)' : 'var(--warn)' }}>
                   {fmt.money(co.amount)}
                 </td>
                 <td><COStatusBadge status={co.status} /></td>
-                <td style={{ fontSize: 12, color: 'var(--text-3)' }}>{co.created_by_name} · {fmt.date(co.created_at)}</td>
+                <td style={{ fontSize: 13, color: 'var(--text-3)' }}>{co.created_by_name} · {fmt.date(co.created_at)}</td>
                 <td>
-                  {co.status === 'pending' && (
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <button className="primary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => approve(co.id)}>Approve</button>
-                      <button style={{ fontSize: 11, padding: '3px 10px', color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => reject(co.id)}>Reject</button>
-                      <button style={{ fontSize: 11, padding: '3px 8px', color: 'var(--text-3)' }} onClick={() => del(co.id)} title="Delete">✕</button>
-                    </div>
-                  )}
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {co.status === 'pending' && (
+                      <>
+                        <button className="primary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => approve(co.id)}>Approve</button>
+                        <button style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => setEditingCo(co)}>Edit</button>
+                        <button style={{ fontSize: 12, padding: '4px 12px', color: 'var(--danger)', borderColor: 'var(--danger-border)' }} onClick={() => reject(co.id)}>Reject</button>
+                        <button style={{ fontSize: 12, padding: '4px 8px', color: 'var(--text-3)' }} onClick={() => del(co.id)} title="Delete">✕</button>
+                      </>
+                    )}
+                    {co.status === 'approved' && (
+                      <button style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => setEditingCo(co)}>Edit</button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -122,6 +130,10 @@ window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedg
       {showNew && (
         <NewCOModal contractId={contractId} onClose={() => setShowNew(false)}
           onSaved={async () => { setShowNew(false); await load(); if (onLedgerRefresh) onLedgerRefresh(); }} />
+      )}
+      {editingCo && (
+        <EditCOModal co={editingCo} onClose={() => setEditingCo(null)}
+          onSaved={async () => { setEditingCo(null); await load(); if (onLedgerRefresh) onLedgerRefresh(); }} />
       )}
     </div>
   );
@@ -242,6 +254,71 @@ function NewCOModal({ contractId, onClose, onSaved }) {
           <button onClick={onClose}>Cancel</button>
           <button className="primary" disabled={saving || uploading} onClick={save}>
             {saving ? 'Saving…' : 'Create Change Order'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditCOModal({ co, onClose, onSaved }) {
+  const [coNumber, setCoNumber] = React.useState(co.co_number || '');
+  const [description, setDescription] = React.useState(co.description || '');
+  const [amount, setAmount] = React.useState(String(co.amount || ''));
+  const [err, setErr] = React.useState(null);
+  const [saving, setSaving] = React.useState(false);
+
+  async function save() {
+    setErr(null);
+    if (!description || !amount) { setErr('Description and amount required'); return; }
+    setSaving(true);
+    try {
+      await api.updateChangeOrder(co.id, {
+        co_number: coNumber || null,
+        description,
+        amount: Number(amount),
+      });
+      toast('Change order updated');
+      onSaved();
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={onClose}>
+      <div style={{ width: 480, background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'hidden' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 22px', borderBottom: '1px solid var(--border)' }}>
+          <strong style={{ fontSize: 16 }}>Edit Change Order{co.co_number ? ` — ${co.co_number}` : ''}</strong>
+          <button onClick={onClose} style={{ fontSize: 20, lineHeight: 1, padding: '2px 8px' }}>×</button>
+        </div>
+        {co.status === 'approved' && (
+          <div style={{ padding: '10px 22px', background: 'var(--warn-bg)', borderBottom: '1px solid var(--warn-border)', fontSize: 13, color: 'var(--warn)' }}>
+            ⚠ This CO is approved — editing will update the commitment amount.
+          </div>
+        )}
+        <div style={{ padding: '22px' }}>
+          <div className="form-grid">
+            <div>
+              <label data-tip="Vendor's CO reference number">CO Number (optional)</label>
+              <input value={coNumber} onChange={e => setCoNumber(e.target.value)} placeholder="e.g. CO-001" />
+            </div>
+            <div>
+              <label data-tip="Dollar amount of this change order">Amount ($)</label>
+              <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+            </div>
+            <div className="full">
+              <label data-tip="Scope change description — used in audit trail">Description</label>
+              <textarea rows={4} value={description} onChange={e => setDescription(e.target.value)} placeholder="Describe the scope change…" />
+            </div>
+          </div>
+          {err && <div className="error" style={{ marginTop: 14 }}>{err}</div>}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 22px', borderTop: '1px solid var(--border)', background: 'var(--surface)' }}>
+          <button onClick={onClose}>Cancel</button>
+          <button className="primary" disabled={saving} onClick={save}>
+            {saving ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
       </div>

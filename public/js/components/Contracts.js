@@ -1,3 +1,15 @@
+// Compute overage severity for a single contract row (invoiced vs initial)
+function contractOverSev(c) {
+  const invoiced = parseFloat(c.invoiced_amount) || 0;
+  const initial  = parseFloat(c.total_value) || 0;
+  if (initial <= 0 || invoiced <= initial) return null;
+  const pct = (invoiced - initial) / initial * 100;
+  if (pct < 10)  return { sev: 'low',      pct, color: '#d97706', bg: '#fffbeb', border: '#fde68a', label: 'LOW' };
+  if (pct < 25)  return { sev: 'moderate', pct, color: '#c4522a', bg: '#fff7f4', border: '#fcd9cc', label: 'MODERATE' };
+  if (pct < 50)  return { sev: 'high',     pct, color: '#b04824', bg: '#fef3ee', border: '#f9b49a', label: 'HIGH' };
+  return             { sev: 'critical', pct, color: '#dc2626', bg: '#fef2f2', border: '#fecaca', label: 'CRITICAL' };
+}
+
 window.Contracts = function Contracts({ projectId, initialContractId, onContractOpened }) {
   const [contracts, setContracts] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -60,19 +72,38 @@ window.Contracts = function Contracts({ projectId, initialContractId, onContract
             </tr>
           </thead>
           <tbody>
-            {contracts.map((c) => (
-              <tr key={c.id} style={{cursor:'pointer'}} onClick={()=>setSelected(c.id)}>
+            {contracts.map((c) => {
+              const flag = contractOverSev(c);
+              return (
+              <tr key={c.id} style={{
+                cursor: 'pointer',
+                borderLeft: flag ? `4px solid ${flag.color}` : undefined,
+              }} onClick={()=>setSelected(c.id)}>
                 <td>
-                  <strong>{c.vendor_name}</strong>
-                  {c.file_reference && <> · <a href={`/api/files/${encodeURIComponent(c.file_reference)}`} target="_blank" onClick={e=>e.stopPropagation()} title="View PDF">📄</a></>}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <strong>{c.vendor_name}</strong>
+                    {flag && (
+                      <span data-tip={`Invoiced ${flag.pct.toFixed(1)}% over initial contract`} style={{
+                        fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+                        padding: '2px 6px', borderRadius: 4,
+                        background: flag.bg, color: flag.color, border: `1px solid ${flag.border}`,
+                        cursor: 'default',
+                      }}>{flag.label}</span>
+                    )}
+                    {c.file_reference && <a href={`/api/files/${encodeURIComponent(c.file_reference)}`} target="_blank" onClick={e=>e.stopPropagation()} title="View PDF" style={{ color: 'inherit', textDecoration: 'none' }}>📄</a>}
+                  </div>
                 </td>
                 <td>{c.description || <span className="hint">—</span>}</td>
                 <td>{fmt.date(c.contract_date)}</td>
                 <td className="num">{fmt.money(c.total_value)}</td>
-                <td className="num">{fmt.money(c.invoiced_amount)}</td>
+                <td className="num" style={{ color: flag ? flag.color : undefined, fontWeight: flag ? 700 : undefined }}>
+                  {fmt.money(c.invoiced_amount)}
+                  {flag && <span style={{ fontSize: 11, marginLeft: 4, opacity: 0.8 }}>↑</span>}
+                </td>
                 <td><span className={`badge ${c.status}`}>{c.status}</span></td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -447,11 +478,11 @@ function ContractDetail({ contractId, projectId, onClose }) {
       ) : (
         <>
           {/* Sub-tabs */}
-          <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: 18 }}>
             {tabs.map(t => (
               <button key={t.k} onClick={() => setActiveTab(t.k)} style={{
-                padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer',
-                fontSize: 13, fontWeight: activeTab === t.k ? 600 : 400,
+                padding: '10px 18px', background: 'transparent', border: 'none', cursor: 'pointer',
+                fontSize: 14, fontWeight: activeTab === t.k ? 700 : 500,
                 color: activeTab === t.k ? 'var(--accent)' : 'var(--text-2)',
                 borderBottom: activeTab === t.k ? '2px solid var(--accent)' : '2px solid transparent',
                 marginBottom: -1,
@@ -655,215 +686,417 @@ function ContractDetail({ contractId, projectId, onClose }) {
 // ── Contract-level Dashboard (Overview tab) ──────────────────────────────────
 
 function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
-  const original    = l.original_contract;
-  const commitment  = l.commitment;
-  const invoiced    = l.invoiced;
-  const paid        = l.paid;
-  const earmarked   = l.earmarked_amount;
-  const outstanding = invoiced - paid;
+  const original      = Number(l.original_contract) || 0;
+  const commitment    = Number(l.commitment) || 0;      // contract + approved COs only
+  const totalExposure = Number(l.total_exposure) || commitment; // commitment + T&M + expenses
+  const invoiced      = Number(l.invoiced) || 0;
+  const paid          = Number(l.paid) || 0;
+  const earmarked     = Number(l.earmarked_amount) || 0;
+  const approvedCOs   = Number(l.approved_cos) || 0;
+  const tmApproved    = Number(l.tm_approved) || 0;
+  const expApproved   = Number(l.expense_approved) || 0;
 
-  // Spend story — the core metric
-  const overInitial    = invoiced - original;
-  const overInitialPct = original > 0 ? ((Math.abs(overInitial) / original) * 100).toFixed(0) : 0;
-  const isOverInitial  = overInitial > 0.01;
-  const underInitial   = original > invoiced && invoiced > 0;
+  const outstanding         = Math.max(invoiced - paid, 0);
+  // Committed-not-invoiced: total exposure minus what's already been invoiced
+  const committedUninvoiced = Math.max(totalExposure - invoiced, 0);
+  const buffer              = earmarked > 0 ? earmarked - totalExposure : null;
+  const overBudget          = earmarked > 0 && totalExposure > earmarked;
+  const overInitial         = commitment > original;
+  const overInitialAmt      = overInitial ? commitment - original : 0;
 
-  // Burn bar scale: earmark if set, otherwise generous headroom above invoiced/original
-  const barScale = earmarked
-    ? Math.max(earmarked, invoiced * 1.05)
-    : Math.max(original * 1.5, invoiced * 1.1, 100);
-  function barPct(val) {
-    if (!barScale || val <= 0) return '0%';
-    return Math.min((val / barScale) * 100, 100).toFixed(2) + '%';
+  // Budget pressure: total_exposure vs earmarked
+  const budgetUsedPct = earmarked > 0 ? (totalExposure / earmarked) * 100 : null;
+  let budgetPressure = null;
+  if (budgetUsedPct !== null) {
+    if (budgetUsedPct >= 100) budgetPressure = 'danger';
+    else if (budgetUsedPct >= 90) budgetPressure = 'warning';
+    else if (budgetUsedPct >= 75) budgetPressure = 'caution';
   }
-  const initialTickPct = barScale > 0 ? Math.min((original / barScale) * 100, 100).toFixed(2) + '%' : '0%';
 
-  // Remaining against earmark (internal budget)
-  const remainingToEarmark = earmarked ? earmarked - invoiced : null;
-  const overEarmark = earmarked && invoiced > earmarked;
+  // Burn bar: scale = earmarked if set, otherwise totalExposure * 1.4
+  const barScale = earmarked > 0
+    ? Math.max(earmarked, totalExposure * 1.02)
+    : Math.max(original * 1.5, totalExposure * 1.15, 100);
 
-  // Health
-  let health = 'ok';
-  if (overEarmark || l.cost_creep) health = 'danger';
-  else if (isOverInitial || l.pending_co_count > 0) health = 'warn';
+  function pct(val) {
+    if (!barScale || val <= 0) return 0;
+    return Math.min((val / barScale) * 100, 100);
+  }
 
-  const hc = {
-    ok:     { color: 'var(--ok)',     bg: 'rgba(34,197,94,0.07)',  border: 'rgba(34,197,94,0.2)',   icon: '●' },
-    warn:   { color: 'var(--warn)',   bg: 'rgba(245,158,11,0.07)', border: 'rgba(245,158,11,0.25)', icon: '▲' },
-    danger: { color: 'var(--danger)', bg: 'rgba(239,68,68,0.09)',  border: 'rgba(239,68,68,0.28)',  icon: '■' },
-  }[health];
+  const paidPct              = pct(paid);
+  const outstandingPct       = pct(outstanding);
+  const committedUninvPct    = pct(committedUninvoiced);
+  const initialTickPct       = pct(original);
+  const earmarkedTickPct     = earmarked > 0 ? pct(earmarked) : null;
+
+  // Budget callout config
+  const budgetCallout = overBudget ? {
+    bg: '#fef2f2', border: '#fecaca', color: '#dc2626',
+    title: 'GET MORE MONEY',
+    body: `Commitment exceeds budget by ${fmt.money(commitment - earmarked)}`,
+    icon: '🔴',
+  } : budgetPressure === 'warning' ? {
+    bg: '#fff7ed', border: '#fed7aa', color: '#c2410c',
+    title: 'BUDGET RUNNING LOW',
+    body: `Only ${fmt.money(buffer)} left — ${(100 - budgetUsedPct).toFixed(1)}% of budget remaining`,
+    icon: '⚠',
+  } : budgetPressure === 'caution' ? {
+    bg: '#fffbeb', border: '#fde68a', color: '#d97706',
+    title: 'Watch the budget',
+    body: `${fmt.money(buffer)} remaining — ${(100 - budgetUsedPct).toFixed(1)}% of budget left`,
+    icon: '◎',
+  } : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-      {/* ── Status banner ── */}
-      <div style={{ padding: '12px 16px', borderRadius: 7, background: hc.bg, border: `1px solid ${hc.border}`, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-        <span style={{ color: hc.color, fontSize: 13, marginTop: 1, flexShrink: 0 }}>{hc.icon}</span>
-        <div style={{ flex: 1, display: 'flex', flexWrap: 'wrap', gap: '4px 20px', fontSize: 12 }}>
-          {invoiced === 0 && <span style={{ color: 'var(--text-2)' }}>No invoices yet — {fmt.money(original)} signed contract on the books.</span>}
-          {isOverInitial && (
-            <span style={{ color: 'var(--warn)', fontWeight: 600 }}>
-              +{fmt.money(overInitial)} over initial contract ({overInitialPct}%) — T&M and additional services are running.
-            </span>
-          )}
-          {underInitial && <span style={{ color: 'var(--text-2)' }}>{fmt.money(invoiced)} invoiced of {fmt.money(original)} contract — {fmt.money(original - invoiced)} remaining.</span>}
-          {overEarmark && <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Over internal budget by {fmt.money(invoiced - earmarked)} — earmark was {fmt.money(earmarked)}.</span>}
-          {earmarked && !overEarmark && invoiced > 0 && (
-            <span style={{ color: 'var(--text-2)' }}>{fmt.money(remainingToEarmark)} remaining of {fmt.money(earmarked)} internal budget.</span>
-          )}
-          {l.pending_co_count > 0 && (
-            <span style={{ color: 'var(--warn)' }}>
-              ⚠ {l.pending_co_count} CO{l.pending_co_count > 1 ? 's' : ''} pending — {fmt.money(l.pending_cos)} not yet committed.
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* ── Four key numbers ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: earmarked ? 'repeat(4,1fr)' : 'repeat(3,1fr)', gap: 1, background: 'var(--border)', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
-        <ContractStat
-          label="Initial Contract Amt"
-          value={original}
-          sublabel="What was signed"
-          color="var(--text-1)"
-          topBar="var(--border-2)"
-          tip="The original signed contract value — the number the vendor committed to at execution."
-        />
-        <ContractStat
-          label="Total Invoiced"
-          value={invoiced}
-          sublabel={
-            invoiced === 0 ? 'no invoices yet' :
-            isOverInitial ? `+${overInitialPct}% over initial` :
-            original > 0 ? `${Math.round((invoiced/original)*100)}% of initial` : ''
-          }
-          color={overEarmark ? 'var(--danger)' : isOverInitial ? 'var(--warn)' : 'var(--text-1)'}
-          topBar={overEarmark ? 'var(--danger)' : isOverInitial ? 'var(--warn)' : null}
-          tip="Sum of all invoices submitted against this contract — includes T&M and additional services billed above the initial amount."
-        />
-        <ContractStat
-          label="Paid"
-          value={paid}
-          sublabel={invoiced > 0 && paid > 0 ? `${Math.round((paid/invoiced)*100)}% of invoiced` : invoiced > 0 ? `${fmt.money(outstanding)} outstanding` : ''}
-          color={paid > 0 ? 'var(--ok)' : 'var(--text-3)'}
-          topBar={paid > 0 ? 'var(--ok)' : null}
-          tip="Cash actually sent to the vendor. Outstanding = Total Invoiced minus Paid."
-        />
-        {earmarked && (
-          <ContractStat
-            label="Internal Budget"
-            value={earmarked}
-            sublabel={
-              remainingToEarmark >= 0
-                ? `${fmt.money(remainingToEarmark)} remaining`
-                : `${fmt.money(Math.abs(remainingToEarmark))} OVER budget`
-            }
-            color={overEarmark ? 'var(--danger)' : remainingToEarmark < earmarked * 0.2 ? 'var(--warn)' : 'var(--text-2)'}
-            topBar={null}
-            tip="Your internal estimate of total expected spend — set higher than the contract to account for T&M tail, expenses, and additional services."
-          />
-        )}
-      </div>
-
-      {/* ── Spend bar ── */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '14px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)' }}>Total Spend vs. Budget</span>
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-            {earmarked
-              ? `${fmt.money(invoiced)} invoiced of ${fmt.money(earmarked)} budget`
-              : `${fmt.money(invoiced)} invoiced`}
-          </span>
-        </div>
-
-        {/* Bar */}
-        <div style={{ height: 22, borderRadius: 4, background: 'var(--surface-3)', overflow: 'visible', display: 'flex', position: 'relative' }}>
-          {/* Paid segment */}
-          {paid > 0 && (
-            <div style={{ width: barPct(paid), background: 'var(--ok)', height: '100%', borderRadius: '4px 0 0 4px', transition: 'width 0.5s', flexShrink: 0 }}
-              title={`Paid: ${fmt.money(paid)}`} />
-          )}
-          {/* Outstanding (invoiced not paid) */}
-          {outstanding > 0 && (
-            <div style={{ width: barPct(outstanding), background: '#3b82f6', height: '100%', transition: 'width 0.5s', flexShrink: 0 }}
-              title={`Outstanding: ${fmt.money(outstanding)}`} />
-          )}
-          {/* Initial contract tick mark — always shown */}
-          {original > 0 && (
-            <div style={{
-              position: 'absolute', left: initialTickPct, top: -4, bottom: -4,
-              width: 2, background: 'var(--text-1)', opacity: 0.7, borderRadius: 1,
-              zIndex: 2,
-            }} title={`Initial contract: ${fmt.money(original)}`} />
-          )}
-        </div>
-
-        {/* Tick label */}
-        <div style={{ position: 'relative', height: 18, marginTop: 4 }}>
-          <div style={{
-            position: 'absolute', left: initialTickPct, transform: 'translateX(-50%)',
-            fontSize: 10, color: 'var(--text-3)', whiteSpace: 'nowrap',
-          }}>
-            ↑ Initial {fmt.money(original)}
+      {/* ── Budget alert banner — the most important signal ── */}
+      {budgetCallout && (
+        <div style={{
+          padding: '14px 18px',
+          borderRadius: 8,
+          background: budgetCallout.bg,
+          border: `1px solid ${budgetCallout.border}`,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <span style={{ fontSize: 22, lineHeight: 1 }}>{budgetCallout.icon}</span>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: budgetCallout.color, letterSpacing: '-0.01em' }}>
+              {budgetCallout.title}
+            </div>
+            <div style={{ fontSize: 13, color: budgetCallout.color, opacity: 0.85, marginTop: 2 }}>
+              {budgetCallout.body}
+            </div>
           </div>
-          {earmarked && (
-            <div style={{ position: 'absolute', right: 0, fontSize: 10, color: 'var(--text-3)' }}>
-              Budget {fmt.money(earmarked)}
+          {overBudget && (
+            <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Over by</div>
+              <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'var(--mono)', color: '#dc2626', letterSpacing: '-0.02em' }}>
+                {fmt.money(commitment - earmarked)}
+              </div>
             </div>
           )}
-        </div>
-
-        {/* Legend */}
-        <div style={{ display: 'flex', gap: 16, marginTop: 10, flexWrap: 'wrap' }}>
-          {[
-            { label: 'Paid', val: paid, color: 'var(--ok)' },
-            { label: 'Invoiced (outstanding)', val: outstanding, color: '#3b82f6' },
-            isOverInitial && { label: `Over initial contract`, val: overInitial, color: 'var(--warn)' },
-          ].filter(Boolean).filter(i => i.val > 0.01).map(item => (
-            <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-2)' }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: item.color, flexShrink: 0, display: 'inline-block' }} />
-              {item.label}: <strong style={{ color: 'var(--text-1)' }}>{fmt.money(item.val)}</strong>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Commitment breakdown — only if there are additions ── */}
-      {(l.approved_cos > 0 || l.tm_approved > 0 || l.expense_approved > 0 || l.pending_co_count > 0) && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 18px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>How commitment is built</div>
-          <ContractLedgerRow label="Initial Contract Amount" value={original} total={commitment} />
-          {l.approved_cos > 0 && <ContractLedgerRow label="+ Approved Change Orders" value={l.approved_cos} total={commitment} color="var(--warn)" onClick={() => onGoToTab('change-orders')} />}
-          {l.tm_approved > 0 && <ContractLedgerRow label="+ Approved T&M" value={l.tm_approved} total={commitment} color="var(--warn)" onClick={() => onGoToTab('t-and-m')} />}
-          {l.expense_approved > 0 && <ContractLedgerRow label="+ Approved Expenses" value={l.expense_approved} total={commitment} color="var(--warn)" onClick={() => onGoToTab('expenses')} />}
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 13, fontWeight: 700 }}>= Total Commitment</span>
-            <span style={{ fontSize: 15, fontWeight: 700, fontFamily: 'var(--mono)', color: l.cost_creep ? 'var(--danger)' : 'var(--accent)' }}>{fmt.money(commitment)}</span>
-          </div>
-          {l.pending_co_count > 0 && (
-            <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 5, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', fontSize: 12, color: 'var(--warn)', display: 'flex', justifyContent: 'space-between', cursor: 'pointer' }}
-              onClick={() => onGoToTab('change-orders')}>
-              <span>⏳ {l.pending_co_count} CO{l.pending_co_count > 1 ? 's' : ''} pending — if approved, commitment → {fmt.money(commitment + l.pending_cos)}</span>
-              <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Review →</span>
+          {!overBudget && earmarked > 0 && (
+            <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: budgetCallout.color, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Remaining</div>
+              <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'var(--mono)', color: budgetCallout.color, letterSpacing: '-0.02em' }}>
+                {fmt.money(buffer)}
+              </div>
             </div>
           )}
         </div>
       )}
 
+      {/* ── The full spend story — always shown ── */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+
+        {/* Story headline row */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1, background: 'var(--border)' }}>
+          <ContractStat
+            label="Initial Contract"
+            value={original}
+            sublabel="What was signed"
+            color="var(--text-1)"
+            topBar="var(--border-2)"
+            tip="The original signed contract value — the number the vendor committed to at execution."
+          />
+          <ContractStat
+            label="Commitment"
+            value={commitment}
+            sublabel={approvedCOs > 0 ? `+${fmt.money(approvedCOs)} in COs` : 'Contract + approved COs'}
+            color={overBudget ? 'var(--danger)' : overInitial ? 'var(--warn)' : 'var(--accent)'}
+            topBar={overBudget ? 'var(--danger)' : overInitial ? 'var(--warn)' : 'var(--accent)'}
+            tip="What you are legally on the hook for: Initial contract + all approved change orders. T&M and expenses are tracked separately as additional exposure."
+          />
+          <ContractStat
+            label="Invoiced to Date"
+            value={invoiced}
+            sublabel={commitment > 0 ? `${Math.round((invoiced / commitment) * 100)}% of commitment` : 'no invoices yet'}
+            color={invoiced > commitment ? 'var(--danger)' : 'var(--text-1)'}
+            topBar={null}
+            tip="What vendors have actually billed. Should not exceed Total Commitment."
+          />
+          {earmarked > 0 ? (
+            <ContractStat
+              label="Internal Budget"
+              value={earmarked}
+              sublabel={
+                overBudget
+                  ? `${fmt.money(commitment - earmarked)} OVER budget`
+                  : buffer !== null ? `${fmt.money(buffer)} remaining` : ''
+              }
+              color={overBudget ? 'var(--danger)' : budgetPressure === 'warning' ? 'var(--warn)' : 'var(--text-2)'}
+              topBar={overBudget ? 'var(--danger)' : null}
+              tip="Your internal estimate for total expected spend including T&M, change orders, and buffer. Set when the contract was created."
+            />
+          ) : (
+            <ContractStat
+              label="Paid"
+              value={paid}
+              sublabel={invoiced > 0 && paid > 0 ? `${Math.round((paid / invoiced) * 100)}% of invoiced` : invoiced > 0 ? `${fmt.money(outstanding)} outstanding` : ''}
+              color={paid > 0 ? 'var(--ok)' : 'var(--text-3)'}
+              topBar={paid > 0 ? 'var(--ok)' : null}
+              tip="Cash actually sent to the vendor."
+            />
+          )}
+        </div>
+
+        {/* ── Burn bar — full story ── */}
+        <div style={{ padding: '18px 20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>
+              Commitment vs. Budget
+            </span>
+            {earmarked > 0 && budgetUsedPct !== null && (
+              <span style={{
+                fontSize: 13, fontWeight: 700,
+                color: overBudget ? '#dc2626' : budgetPressure === 'warning' ? '#c2410c' : budgetPressure === 'caution' ? '#d97706' : 'var(--ok)',
+              }}>
+                {budgetUsedPct.toFixed(1)}% of budget used
+              </span>
+            )}
+          </div>
+
+          {/* The bar */}
+          <div style={{ position: 'relative', height: 28, borderRadius: 6, background: 'var(--surface-3)', overflow: 'visible' }}>
+
+            {/* Background track */}
+            <div style={{ position: 'absolute', inset: 0, borderRadius: 6, background: 'var(--surface-3)' }} />
+
+            {/* Paid segment — green */}
+            {paidPct > 0 && (
+              <div style={{
+                position: 'absolute', left: 0, top: 0, bottom: 0,
+                width: `${paidPct}%`,
+                background: 'var(--ok)',
+                borderRadius: outstandingPct > 0 || committedUninvPct > 0 ? '6px 0 0 6px' : 6,
+                transition: 'width 0.6s ease',
+              }} title={`Paid: ${fmt.money(paid)}`} />
+            )}
+
+            {/* Outstanding segment — amber */}
+            {outstandingPct > 0 && (
+              <div style={{
+                position: 'absolute', left: `${paidPct}%`, top: 0, bottom: 0,
+                width: `${outstandingPct}%`,
+                background: 'var(--amber)',
+                borderRadius: committedUninvPct > 0 ? 0 : '0 6px 6px 0',
+                transition: 'width 0.6s ease',
+              }} title={`Invoiced (not yet paid): ${fmt.money(outstanding)}`} />
+            )}
+
+            {/* Committed-not-yet-invoiced — terracotta, slightly transparent */}
+            {committedUninvPct > 0 && (
+              <div style={{
+                position: 'absolute', left: `${paidPct + outstandingPct}%`, top: 0, bottom: 0,
+                width: `${committedUninvPct}%`,
+                background: 'rgba(196,82,42,0.55)',
+                backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.12) 4px, rgba(255,255,255,0.12) 8px)',
+                borderRadius: '0 6px 6px 0',
+                transition: 'width 0.6s ease',
+              }} title={`Committed but not yet invoiced: ${fmt.money(committedUninvoiced)}`} />
+            )}
+
+            {/* Initial contract tick — dark vertical line */}
+            {initialTickPct > 0 && initialTickPct < 99 && (
+              <div style={{
+                position: 'absolute', left: `${initialTickPct}%`,
+                top: -5, bottom: -5,
+                width: 2, background: 'var(--text-1)', opacity: 0.5,
+                borderRadius: 1, zIndex: 3,
+              }} title={`Initial contract: ${fmt.money(original)}`} />
+            )}
+
+            {/* Earmarked (budget) end line — only if earmarked < barScale */}
+            {earmarkedTickPct !== null && earmarkedTickPct < 99 && (
+              <div style={{
+                position: 'absolute', left: `${earmarkedTickPct}%`,
+                top: -7, bottom: -7,
+                width: 2,
+                background: overBudget ? '#dc2626' : 'var(--accent)',
+                opacity: 0.8,
+                borderRadius: 1, zIndex: 3,
+              }} title={`Internal budget: ${fmt.money(earmarked)}`} />
+            )}
+
+            {/* Over-budget overflow zone */}
+            {overBudget && earmarkedTickPct !== null && (
+              <div style={{
+                position: 'absolute', left: `${earmarkedTickPct}%`, right: 0, top: 0, bottom: 0,
+                background: 'rgba(220,38,38,0.15)',
+                border: '2px solid rgba(220,38,38,0.4)',
+                borderLeft: 'none',
+                borderRadius: '0 6px 6px 0',
+              }} />
+            )}
+          </div>
+
+          {/* Tick labels */}
+          <div style={{ position: 'relative', height: 22, marginTop: 6 }}>
+            {initialTickPct > 1 && initialTickPct < 95 && (
+              <div style={{
+                position: 'absolute', left: `${initialTickPct}%`,
+                transform: 'translateX(-50%)',
+                fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap',
+              }}>
+                ↑ Initial {fmt.money(original)}
+              </div>
+            )}
+            {earmarked > 0 && (
+              <div style={{
+                position: 'absolute', right: 0,
+                fontSize: 11,
+                color: overBudget ? '#dc2626' : 'var(--text-3)',
+                fontWeight: overBudget ? 700 : 400,
+              }}>
+                {overBudget ? '⚠ ' : ''}Budget {fmt.money(earmarked)}
+              </div>
+            )}
+          </div>
+
+          {/* Legend */}
+          <div style={{ display: 'flex', gap: 18, marginTop: 6, flexWrap: 'wrap' }}>
+            {[
+              paid > 0.01      && { label: 'Paid',                     val: paid,               color: 'var(--ok)' },
+              outstanding > 0.01 && { label: 'Invoiced – not yet paid',  val: outstanding,        color: 'var(--amber)' },
+              committedUninvoiced > 0.01 && { label: 'Committed – not yet invoiced', val: committedUninvoiced, color: 'rgba(196,82,42,0.55)' },
+            ].filter(Boolean).map(item => (
+              <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-2)' }}>
+                <span style={{ width: 12, height: 12, borderRadius: 3, background: item.color, flexShrink: 0, display: 'inline-block' }} />
+                {item.label}: <strong style={{ color: 'var(--text-1)', fontFamily: 'var(--mono)' }}>{fmt.money(item.val)}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── The full spend story — ALWAYS shown ── */}
+      <div style={{ background: 'var(--surface)', border: `1px solid ${overBudget ? '#fecaca' : 'var(--border)'}`, borderRadius: 10, padding: '16px 20px' }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 14 }}>
+          How we got here
+        </div>
+
+        {/* TIER 1: Commitment (legal) */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+          Legal Commitment
+        </div>
+        <ContractLedgerRow label="Initial Contract Amount" value={original} total={totalExposure} color="var(--text-2)" />
+        <ContractLedgerRow
+          label={approvedCOs > 0 ? `+ Approved Change Orders (${l.pending_co_count > 0 ? l.pending_co_count + ' pending' : 'all approved'})` : '+ Change Orders — none yet'}
+          value={approvedCOs}
+          total={totalExposure}
+          color={approvedCOs > 0 ? 'var(--warn)' : 'var(--text-3)'}
+          onClick={() => onGoToTab('change-orders')}
+        />
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>= Commitment</span>
+          <span style={{ fontSize: 20, fontWeight: 800, fontFamily: 'var(--mono)', color: overInitial ? 'var(--warn)' : 'var(--accent)', letterSpacing: '-0.02em' }}>
+            {fmt.money(commitment)}
+          </span>
+        </div>
+
+        {/* TIER 2: Additional exposure (T&M + Expenses) */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+          Additional Exposure
+        </div>
+        <ContractLedgerRow
+          label={tmApproved > 0 ? '+ Approved T&M charges' : '+ T&M — none yet'}
+          value={tmApproved}
+          total={totalExposure}
+          color={tmApproved > 0 ? '#c4522a' : 'var(--text-3)'}
+          onClick={() => onGoToTab('t-and-m')}
+        />
+        <ContractLedgerRow
+          label={expApproved > 0 ? '+ Approved Expenses' : '+ Expenses — none yet'}
+          value={expApproved}
+          total={totalExposure}
+          color={expApproved > 0 ? '#c4522a' : 'var(--text-3)'}
+          onClick={() => onGoToTab('expenses')}
+        />
+
+        {/* TOTAL EXPOSURE */}
+        <div style={{ borderTop: '2px solid var(--border)', paddingTop: 10, marginTop: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>= Total Exposure</span>
+          <span style={{ fontSize: 24, fontWeight: 800, fontFamily: 'var(--mono)', color: overBudget ? 'var(--danger)' : 'var(--accent)', letterSpacing: '-0.02em' }}>
+            {fmt.money(totalExposure)}
+          </span>
+        </div>
+
+        {/* Budget vs. Exposure — the key question */}
+        {earmarked > 0 && (
+          <div style={{
+            marginTop: 12, padding: '12px 16px', borderRadius: 8,
+            background: overBudget ? '#fef2f2' : budgetPressure === 'warning' ? '#fff7ed' : budgetPressure === 'caution' ? '#fffbeb' : 'var(--surface-2)',
+            border: `1px solid ${overBudget ? '#fecaca' : budgetPressure === 'warning' ? '#fed7aa' : budgetPressure === 'caution' ? '#fde68a' : 'var(--border)'}`,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Internal Budget</div>
+              <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'var(--mono)', color: 'var(--text-1)', letterSpacing: '-0.02em', marginTop: 3 }}>
+                {fmt.money(earmarked)}
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                {overBudget ? 'OVER BUDGET — GET MORE MONEY' : 'Buffer Remaining'}
+              </div>
+              <div style={{
+                fontSize: 30, fontWeight: 800, fontFamily: 'var(--mono)',
+                color: overBudget ? '#dc2626' : budgetPressure === 'warning' ? '#c2410c' : budgetPressure === 'caution' ? '#d97706' : 'var(--ok)',
+                letterSpacing: '-0.02em', marginTop: 2,
+              }}>
+                {overBudget ? `–${fmt.money(totalExposure - earmarked)}` : fmt.money(buffer)}
+              </div>
+              {budgetUsedPct !== null && (
+                <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 1 }}>
+                  {budgetUsedPct.toFixed(1)}% of budget used
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Pending COs warning */}
+        {l.pending_co_count > 0 && (
+          <div style={{
+            marginTop: 10, padding: '10px 14px', borderRadius: 7,
+            background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer',
+          }} onClick={() => onGoToTab('change-orders')}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--warn)' }}>
+                ⏳ {l.pending_co_count} change order{l.pending_co_count > 1 ? 's' : ''} pending approval
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+                If approved: commitment → {fmt.money(commitment + Number(l.pending_cos))}
+                {earmarked > 0 ? ` · exposure → ${fmt.money(totalExposure + Number(l.pending_cos))} (${((totalExposure + Number(l.pending_cos)) / earmarked * 100).toFixed(1)}% of budget)` : ''}
+              </div>
+            </div>
+            <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>Review →</span>
+          </div>
+        )}
+      </div>
+
       {/* ── Contract meta + QB allocation ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '14px 16px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Contract Details</div>
-          {c.description && <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 8 }}>{c.description}</div>}
-          <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 3 }}>Date: <span style={{ color: 'var(--text-2)' }}>{fmt.date(c.contract_date)}</span></div>
-          {c.reference_number && <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 3 }}>Reference: <span style={{ color: 'var(--text-2)' }}>{c.reference_number}</span></div>}
-          {c.file_reference && <div style={{ marginTop: 8 }}><a href={`/api/files/${encodeURIComponent(c.file_reference)}`} target="_blank" style={{ fontSize: 12 }}>📄 View contract PDF</a></div>}
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Contract Details</div>
+          {c.description && <div style={{ fontSize: 14, color: 'var(--text-2)', marginBottom: 8, lineHeight: 1.5 }}>{c.description}</div>}
+          <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 4 }}>Date: <span style={{ color: 'var(--text-2)' }}>{fmt.date(c.contract_date)}</span></div>
+          {c.reference_number && <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 4 }}>Reference: <span style={{ color: 'var(--text-2)' }}>{c.reference_number}</span></div>}
+          {earmarked > 0 && paid > 0 && (
+            <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 4 }}>
+              Paid: <span style={{ color: 'var(--ok)', fontWeight: 600 }}>{fmt.money(paid)}</span>
+              {outstanding > 0 && <> · <span style={{ color: 'var(--amber)' }}>{fmt.money(outstanding)} outstanding</span></>}
+            </div>
+          )}
+          {c.file_reference && <div style={{ marginTop: 8 }}><a href={`/api/files/${encodeURIComponent(c.file_reference)}`} target="_blank" style={{ fontSize: 13 }}>📄 View contract PDF</a></div>}
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '14px 16px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>QB Code Allocation</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>QB Code Allocation</div>
           <table className="data" style={{ margin: 0 }}>
             <thead><tr><th>Code</th><th>Name</th><th className="num">Amount</th></tr></thead>
-            <tbody>{c.lines.map(ln => (
+            <tbody>{(c.lines || []).map(ln => (
               <tr key={ln.id}><td className="code">{ln.code}</td><td>{ln.name}</td><td className="num">{fmt.moneyPrecise(ln.amount)}</td></tr>
             ))}</tbody>
           </table>
@@ -871,12 +1104,20 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
       </div>
 
       {/* ── Quick actions ── */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={() => onGoToTab('change-orders')} style={{ fontSize: 12, flex: 1, padding: '10px', textAlign: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', color: 'var(--text-2)' }}>
-          + Change Order {l.pending_co_count > 0 && <span style={{ color: 'var(--warn)', fontWeight: 700 }}>({l.pending_co_count} pending)</span>}
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button onClick={() => onGoToTab('change-orders')} style={{
+          flex: 1, padding: '12px', textAlign: 'center',
+          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
+          cursor: 'pointer', color: 'var(--text-2)', fontSize: 14, fontWeight: 500,
+        }}>
+          + Change Order{l.pending_co_count > 0 && <span style={{ marginLeft: 6, color: 'var(--warn)', fontWeight: 700 }}>· {l.pending_co_count} pending</span>}
         </button>
-        <button onClick={() => onGoToTab('invoices')} style={{ fontSize: 12, flex: 1, padding: '10px', textAlign: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', color: 'var(--text-2)' }}>
-          + Invoice {outstanding > 0 && <span style={{ color: 'var(--text-3)' }}>({fmt.money(outstanding)} outstanding)</span>}
+        <button onClick={() => onGoToTab('invoices')} style={{
+          flex: 1, padding: '12px', textAlign: 'center',
+          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
+          cursor: 'pointer', color: 'var(--text-2)', fontSize: 14, fontWeight: 500,
+        }}>
+          + Invoice{outstanding > 0 && <span style={{ marginLeft: 6, color: 'var(--amber)', fontWeight: 600 }}>· {fmt.money(outstanding)} outstanding</span>}
         </button>
       </div>
     </div>
@@ -887,11 +1128,11 @@ function ContractStat({ label, value, sublabel, color, topBar, tip }) {
   return (
     <div data-tip={tip} style={{ background: 'var(--surface)', padding: '16px 18px', position: 'relative' }}>
       {topBar && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: topBar, borderRadius: '2px 2px 0 0' }} />}
-      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--mono)', color, lineHeight: 1, marginBottom: 5, letterSpacing: '-0.02em' }}>
-        {value > 0 ? fmt.money(value) : <span style={{ color: 'var(--text-3)', fontSize: 16 }}>—</span>}
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 9 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, fontFamily: 'var(--mono)', color, lineHeight: 1, marginBottom: 6, letterSpacing: '-0.02em' }}>
+        {value > 0 ? fmt.money(value) : <span style={{ color: 'var(--text-3)', fontSize: 18 }}>—</span>}
       </div>
-      {sublabel && <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{sublabel}</div>}
+      {sublabel && <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{sublabel}</div>}
     </div>
   );
 }

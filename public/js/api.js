@@ -127,6 +127,8 @@ window.api = {
   rejectExpense:    (id, note)         => request('POST', `/api/expenses/${id}/reject`, { rejection_note: note }),
   deleteExpense:    (id)               => request('DELETE',`/api/expenses/${id}`),
 
+  getAlerts:        ()                  => request('GET', '/api/alerts'),
+
   searchVendors:    (q='')              => request('GET', `/api/vendors${q ? '?q=' + encodeURIComponent(q) : ''}`),
   searchCustomers:  (q='')              => request('GET', `/api/customers${q ? '?q=' + encodeURIComponent(q) : ''}`),
 

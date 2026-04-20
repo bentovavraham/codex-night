@@ -224,24 +224,24 @@ function AlertPill({ color, text }) {
 
 function RollupCell({ label, value, sub, subColor, accent, tip }) {
   return (
-    <div style={{ background: 'var(--surface)', padding: '12px 16px' }}>
-      <div data-tip={tip || undefined} style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6, display: 'inline-block' }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'var(--mono)', color: accent || 'var(--text-1)', lineHeight: 1 }}>
-        {value > 0 ? fmt.money(value) : <span style={{ color: 'var(--text-3)', fontSize: 16 }}>—</span>}
+    <div style={{ background: 'var(--surface)', padding: '14px 18px' }}>
+      <div data-tip={tip || undefined} style={{ fontSize: 12, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 7, fontWeight: 600, display: 'inline-block' }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, fontFamily: 'var(--mono)', color: accent || 'var(--text-1)', lineHeight: 1 }}>
+        {value > 0 ? fmt.money(value) : <span style={{ color: 'var(--text-3)', fontSize: 18 }}>—</span>}
       </div>
-      {sub && <div style={{ fontSize: 11, color: subColor || 'var(--text-3)', marginTop: 4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 12.5, color: subColor || 'var(--text-3)', marginTop: 5 }}>{sub}</div>}
     </div>
   );
 }
 
 function MiniCell({ label, value, sub, subColor, color, tip }) {
   return (
-    <div style={{ background: 'var(--surface)', padding: '8px 14px' }}>
-      <div data-tip={tip || undefined} style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3, display: 'inline-block' }}>{label}</div>
-      <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--mono)', color: color || 'var(--text-1)' }}>
+    <div style={{ background: 'var(--surface)', padding: '10px 16px' }}>
+      <div data-tip={tip || undefined} style={{ fontSize: 11.5, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4, fontWeight: 600, display: 'inline-block' }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 600, fontFamily: 'var(--mono)', color: color || 'var(--text-1)' }}>
         {value > 0 ? fmt.money(value) : <span style={{ color: 'var(--text-3)' }}>—</span>}
       </div>
-      {sub && <div style={{ fontSize: 10, color: subColor || 'var(--text-3)', marginTop: 2 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 11.5, color: subColor || 'var(--text-3)', marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }

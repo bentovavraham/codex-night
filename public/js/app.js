@@ -7,6 +7,17 @@ function App() {
   const [view, setView] = React.useState('projects');
   const [projectTab, setProjectTab] = React.useState('dashboard');
 
+  // Alerts drawer
+  const [alertsOpen, setAlertsOpen] = React.useState(false);
+  const [alertCount, setAlertCount] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!user) return;
+    api.getAlerts()
+      .then(d => setAlertCount((d.contract_flags || []).length))
+      .catch(() => {});
+  }, [user]);
+
   // Drop screen state
   const [showDrop, setShowDrop] = React.useState(false);
   const [dropLabel, setDropLabel] = React.useState(null);
@@ -91,11 +102,27 @@ function App() {
     { k: 'invoices',  label: 'Invoices',   icon: '◈' },
   ];
 
+  function handleGoToContract(projectId, contractId) {
+    setAlertsOpen(false);
+    // Navigate to the project and open the contract
+    const p = { id: projectId };
+    api.getProject(projectId).then(proj => {
+      setProject(proj);
+      setProjectTab('contracts');
+      setView('project');
+    }).catch(() => {});
+  }
+
   return (
     <>
       <ToastContainer />
       <ConfirmDialog />
       <RejectDialog />
+      <AlertsDrawer
+        open={alertsOpen}
+        onClose={() => setAlertsOpen(false)}
+        onGoToContract={handleGoToContract}
+      />
       <div className="app-shell">
 
         {/* ── Sidebar ── */}
@@ -137,6 +164,22 @@ function App() {
                 </button>
               </>
             )}
+
+            {/* Alerts */}
+            <button className="sidebar-item" onClick={() => setAlertsOpen(true)}
+              style={{ position: 'relative' }}>
+              <span className="icon">⚠</span> Alerts
+              {alertCount > 0 && (
+                <span style={{
+                  marginLeft: 'auto',
+                  minWidth: 20, height: 20, borderRadius: 10,
+                  background: '#dc2626', color: '#fff',
+                  fontSize: 11, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '0 5px',
+                }}>{alertCount}</span>
+              )}
+            </button>
 
             {user.role === 'admin' && (
               <button className={`sidebar-item ${view === 'admin' ? 'active' : ''}`}
