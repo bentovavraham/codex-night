@@ -7,6 +7,9 @@ function App() {
   const [view, setView] = React.useState('projects');
   const [projectTab, setProjectTab] = React.useState('dashboard');
 
+  // Glossary drawer
+  const [glossaryOpen, setGlossaryOpen] = React.useState(false);
+
   // Alerts drawer
   const [alertsOpen, setAlertsOpen] = React.useState(false);
   const [alertCount, setAlertCount] = React.useState(0);
@@ -123,6 +126,10 @@ function App() {
         onClose={() => setAlertsOpen(false)}
         onGoToContract={handleGoToContract}
       />
+      <GlossaryDrawer
+        open={glossaryOpen}
+        onClose={() => setGlossaryOpen(false)}
+      />
       <div className="app-shell">
 
         {/* ── Sidebar ── */}
@@ -215,9 +222,31 @@ function App() {
                 <div className="sidebar-user-role">{user.role}</div>
               </div>
             </div>
-            <button className="sidebar-item ghost" style={{ width: '100%', marginTop: 4 }} onClick={logout}>
-              <span className="icon">→</span> Sign out
-            </button>
+            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+              <button className="sidebar-item ghost" style={{ flex: 1 }} onClick={logout}>
+                <span className="icon">→</span> Sign out
+              </button>
+              <button
+                onClick={() => setGlossaryOpen(true)}
+                title="Financial terms glossary"
+                style={{
+                  flexShrink: 0,
+                  width: 34, height: 34,
+                  borderRadius: 7,
+                  border: '1px solid rgba(255,255,255,0.18)',
+                  background: 'rgba(0,0,0,0.15)',
+                  color: 'rgba(255,255,255,0.6)',
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 14, fontWeight: 700, fontStyle: 'italic',
+                  transition: 'background 0.12s, color 0.12s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,0,0,0.28)'; e.currentTarget.style.color = '#fff'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(0,0,0,0.15)'; e.currentTarget.style.color = 'rgba(255,255,255,0.6)'; }}
+              >
+                ?
+              </button>
+            </div>
           </div>
         </aside>
 
