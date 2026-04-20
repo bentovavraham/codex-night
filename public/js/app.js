@@ -13,6 +13,18 @@ function App() {
   const [dropAutoFire, setDropAutoFire] = React.useState(false);
   const [pendingProject, setPendingProject] = React.useState(null);
 
+  // Animations toggle — persisted in localStorage
+  const [animsOn, setAnimsOn] = React.useState(() => {
+    try { return localStorage.getItem('activeacq_anims') !== 'off'; } catch { return true; }
+  });
+  function toggleAnims() {
+    setAnimsOn(v => {
+      const next = !v;
+      try { localStorage.setItem('activeacq_anims', next ? 'on' : 'off'); } catch {}
+      return next;
+    });
+  }
+
   React.useEffect(() => {
     api.me()
       .then(u => setUser(u))
@@ -26,8 +38,12 @@ function App() {
     setShowDrop(false); setPendingProject(null);
   }
 
-  // Opening a project: auto-fire drop screen, project name as label
+  // Opening a project: auto-fire drop screen (if animations on)
   function openProject(p) {
+    if (!animsOn) {
+      setProject(p); setProjectTab('dashboard'); setView('project');
+      return;
+    }
     setPendingProject(p);
     setDropLabel(p.name.toUpperCase());
     setDropAutoFire(true);
@@ -132,12 +148,22 @@ function App() {
 
           {/* User footer */}
           <div className="sidebar-footer">
-            {/* DROP IT — big circle, same as the drop screen button */}
-            <button className="sidebar-drop-circle" onClick={triggerDrop}
-              title="Drop it" aria-label="Drop the container">
-              <span className="ds-btn-icon">⬇</span>
-              <span className="ds-btn-label">DROP IT</span>
-            </button>
+            {/* Animations toggle */}
+            <div className="sidebar-anim-toggle" onClick={toggleAnims} title={animsOn ? 'Turn animations off' : 'Turn animations on'}>
+              <span className={`sidebar-anim-label${animsOn ? '' : ' off'}`}>
+                {animsOn ? 'Animations on' : 'Animations off'}
+              </span>
+              <div className={`toggle-pill${animsOn ? ' on' : ''}`} />
+            </div>
+
+            {/* DROP IT — big circle, only shown when animations are on */}
+            {animsOn && (
+              <button className="sidebar-drop-circle" onClick={triggerDrop}
+                title="Drop it" aria-label="Drop the container">
+                <span className="ds-btn-icon">⬇</span>
+                <span className="ds-btn-label">DROP IT</span>
+              </button>
+            )}
 
             <div className="sidebar-user">
               <div className="sidebar-avatar">{initials}</div>

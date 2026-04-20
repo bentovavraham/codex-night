@@ -387,6 +387,56 @@ select option { background: white; color: var(--text); }
 .sidebar-drop-circle .ds-btn-icon  { font-size: 22px; line-height: 1; }
 .sidebar-drop-circle .ds-btn-label { font-size: 9px; font-weight: 800; letter-spacing: 0.2em; }
 
+/* ── Animations toggle ── */
+.sidebar-anim-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 4px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.sidebar-anim-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.55);
+  text-transform: uppercase;
+}
+.sidebar-anim-label.off {
+  color: rgba(255,255,255,0.35);
+}
+/* Pill toggle switch */
+.toggle-pill {
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.25);
+  border: 1.5px solid rgba(255,255,255,0.2);
+  position: relative;
+  transition: background .2s, border-color .2s;
+  flex-shrink: 0;
+}
+.toggle-pill.on {
+  background: rgba(255,255,255,0.25);
+  border-color: rgba(255,255,255,0.45);
+}
+.toggle-pill::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.45);
+  transition: transform .2s ease, background .2s;
+}
+.toggle-pill.on::after {
+  transform: translateX(14px);
+  background: #ffffff;
+}
+
 @keyframes sidebar-btn-breathe {
   0%, 100% {
     box-shadow:
@@ -1264,12 +1314,12 @@ button .spinner {
 
 /* Tagline — white with dark shadow so it reads on orange */
 .ds-tagline {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.26em;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(255,255,255,0.9);
-  text-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  color: rgba(255,255,255,0.95);
+  text-shadow: 0 2px 8px rgba(0,0,0,0.2);
   margin: 0;
 }
 
@@ -1394,12 +1444,12 @@ button .spinner {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.26em;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(255,255,255,0.9);
-  text-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  color: rgba(255,255,255,0.95);
+  text-shadow: 0 2px 8px rgba(0,0,0,0.2);
   white-space: nowrap;
   pointer-events: none;
   z-index: 1;
