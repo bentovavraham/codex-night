@@ -211,6 +211,80 @@ CREATE TABLE IF NOT EXISTS invoice_contracts (
 CREATE INDEX IF NOT EXISTS idx_invoice_contracts_invoice ON invoice_contracts(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_invoice_contracts_contract ON invoice_contracts(contract_id);
 
+-- ---- Phase 1: Cost control additions ----------------------------------------
+
+-- Earmarked amount on contracts (internal budget > contract value).
+DO $$ BEGIN
+    ALTER TABLE contracts ADD COLUMN earmarked_amount NUMERIC(14,2);
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+-- Rename total_value alias: we keep total_value in DB for compat but
+-- surface it as "estimated_cost" in the API layer.
+
+-- Change Orders: formal modifications to a contract's scope/cost.
+CREATE TABLE IF NOT EXISTS change_orders (
+    id SERIAL PRIMARY KEY,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    co_number VARCHAR(64),                      -- e.g. "CO-001"
+    description TEXT NOT NULL,
+    amount NUMERIC(14,2) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending', -- pending|approved|rejected
+    approved_by INTEGER REFERENCES users(id),
+    approved_at TIMESTAMPTZ,
+    rejection_note TEXT,
+    file_reference VARCHAR(1024),
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_change_orders_contract ON change_orders(contract_id);
+CREATE INDEX IF NOT EXISTS idx_change_orders_status ON change_orders(status);
+
+-- Change order audit log.
+CREATE TABLE IF NOT EXISTS change_order_logs (
+    id SERIAL PRIMARY KEY,
+    change_order_id INTEGER NOT NULL REFERENCES change_orders(id) ON DELETE CASCADE,
+    action VARCHAR(32) NOT NULL,
+    detail TEXT,
+    changed_by INTEGER NOT NULL REFERENCES users(id),
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_co_logs_co ON change_order_logs(change_order_id);
+
+-- Time & Material charges: non-contract billable work linked to a contract.
+CREATE TABLE IF NOT EXISTS tm_charges (
+    id SERIAL PRIMARY KEY,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    description TEXT NOT NULL,
+    hours NUMERIC(8,2),
+    rate NUMERIC(10,2),
+    amount NUMERIC(14,2) NOT NULL,
+    charge_date DATE,
+    qb_code_id INTEGER REFERENCES qb_codes(id),
+    file_reference VARCHAR(1024),
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',  -- pending|approved|rejected
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tm_charges_contract ON tm_charges(contract_id);
+
+-- Contract Expenses: reimbursable expenses (travel, tolls, hotels, food).
+CREATE TABLE IF NOT EXISTS contract_expenses (
+    id SERIAL PRIMARY KEY,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    category VARCHAR(64) NOT NULL DEFAULT 'other', -- travel|tolls|food|hotel|copies|other
+    description TEXT,
+    amount NUMERIC(14,2) NOT NULL,
+    expense_date DATE,
+    qb_code_id INTEGER REFERENCES qb_codes(id),
+    file_reference VARCHAR(1024),
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',  -- pending|approved|rejected
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_contract_expenses_contract ON contract_expenses(contract_id);
+
 -- File storage in Postgres (replaces ephemeral local disk).
 CREATE TABLE IF NOT EXISTS files (
     id VARCHAR(36) PRIMARY KEY,

@@ -84,6 +84,7 @@ function NewContractModal({ projectId, onClose, onSaved }) {
   const [vendor, setVendor] = React.useState('');
   const [description, setDescription] = React.useState('');
   const [total, setTotal] = React.useState('');
+  const [earmarked, setEarmarked] = React.useState('');
   const [date, setDate] = React.useState('');
   const [ref, setRef] = React.useState('');
   const [fileRef, setFileRef] = React.useState(null);
@@ -135,6 +136,7 @@ function NewContractModal({ projectId, onClose, onSaved }) {
     try{
       await api.createContract(projectId,{
         vendor_name:vendor,description,total_value:Number(total),
+        earmarked_amount:earmarked?Number(earmarked):null,
         contract_date:date||null,reference_number:ref||null,status,
         file_reference:fileRef?.file_reference||null,lines:cleaned,
       });
@@ -164,8 +166,12 @@ function NewContractModal({ projectId, onClose, onSaved }) {
               <input value={ref} onChange={e=>setRef(e.target.value)} />
             </div>
             <div>
-              <label>Total value</label>
+              <label>Estimated Cost (contract value)</label>
               <input type="number" step="0.01" value={total} onChange={e=>setTotal(e.target.value)} />
+            </div>
+            <div>
+              <label>Earmarked Amount <span className="hint">(internal budget — must be ≥ contract)</span></label>
+              <input type="number" step="0.01" value={earmarked} onChange={e=>setEarmarked(e.target.value)} placeholder="Optional" />
             </div>
             <div>
               <label>Date</label>
@@ -218,109 +224,204 @@ function NewContractModal({ projectId, onClose, onSaved }) {
 
 function ContractDetail({ contractId, projectId, onClose }) {
   const [data, setData] = React.useState(null);
+  const [ledger, setLedger] = React.useState(null);
   const [editing, setEditing] = React.useState(false);
   const [form, setForm] = React.useState({});
   const [history, setHistory] = React.useState([]);
   const [err, setErr] = React.useState(null);
+  const [activeTab, setActiveTab] = React.useState('overview');
 
   async function load() {
     try {
-    const [d, hist] = await Promise.all([api.getContract(contractId), api.getContractHistory(contractId)]);
-    setData(d); setHistory(hist); setForm({
-      vendor_name:d.vendor_name, description:d.description||'', total_value:String(d.total_value),
-      contract_date:d.contract_date?d.contract_date.slice(0,10):'', reference_number:d.reference_number||'',
-      status:d.status,
-    }); } catch(e){setErr(e.message);}
+      const [d, hist, led] = await Promise.all([
+        api.getContract(contractId),
+        api.getContractHistory(contractId),
+        api.getContractLedger(contractId),
+      ]);
+      setData(d); setHistory(hist); setLedger(led);
+      setForm({
+        vendor_name: d.vendor_name, description: d.description || '',
+        total_value: String(d.total_value),
+        earmarked_amount: d.earmarked_amount != null ? String(d.earmarked_amount) : '',
+        contract_date: d.contract_date ? d.contract_date.slice(0, 10) : '',
+        reference_number: d.reference_number || '', status: d.status,
+      });
+    } catch (e) { setErr(e.message); }
   }
-  React.useEffect(()=>{load();},[contractId]);
 
-  async function saveEdit(){
+  async function saveEdit() {
     setErr(null);
-    try{
-      await api.updateContract(contractId, form);
+    try {
+      await api.updateContract(contractId, {
+        ...form,
+        total_value: Number(form.total_value),
+        earmarked_amount: form.earmarked_amount ? Number(form.earmarked_amount) : null,
+      });
       toast('Contract updated');
-      setEditing(false); await load();
-    }catch(e){setErr(e.message); toast(e.message, 'error');}
+      setEditing(false);
+      await load();
+    } catch (e) { setErr(e.message); toast(e.message, 'error'); }
   }
 
-  if(!data) return <div className="empty">Loading contract…</div>;
-  if(err) return <div className="error">{err}</div>;
+  React.useEffect(() => { load(); }, [contractId]);
+
+  if (!data) return <div className="empty">Loading contract…</div>;
+  if (err) return <div className="error">{err}</div>;
+
+  const tabs = [
+    { k: 'overview', label: 'Overview' },
+    { k: 'change-orders', label: `Change Orders${ledger && ledger.pending_co_count > 0 ? ` (${ledger.pending_co_count} pending)` : ''}` },
+    { k: 'invoices', label: 'Invoices' },
+    { k: 'history', label: 'History' },
+  ];
 
   return (
     <div className="panel">
       <div className="panel-header">
-        <h2>{data.vendor_name}</h2>
-        <div><button onClick={()=>setEditing(!editing)}>{editing?'Cancel':'Edit'}</button>
-        <button onClick={onClose} style={{marginLeft:8}}>← Back</button></div>
+        <div>
+          <h2 style={{ margin: 0 }}>{data.vendor_name}</h2>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
+            <span className={`badge ${data.status}`}>{data.status}</span>
+            {data.reference_number && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Ref: {data.reference_number}</span>}
+            {data.file_reference && (
+              <a href={`/api/files/${encodeURIComponent(data.file_reference)}`} target="_blank" style={{ fontSize: 12 }}>📄 Contract</a>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setEditing(!editing)}>{editing ? 'Cancel' : 'Edit'}</button>
+          <button onClick={onClose}>← Back</button>
+        </div>
       </div>
 
-      {editing ? (
-        <div className="form-grid">
-          <div><label>Vendor</label><input value={form.vendor_name} onChange={e=>setForm({...form,vendor_name:e.target.value})} /></div>
-          <div><label>Reference #</label><input value={form.reference_number} onChange={e=>setForm({...form,reference_number:e.target.value})} /></div>
-          <div><label>Total value</label><input type="number" step="0.01" value={form.total_value} onChange={e=>setForm({...form,total_value:e.target.value})} /></div>
-          <div><label>Date</label><input type="date" value={form.contract_date} onChange={e=>setForm({...form,contract_date:e.target.value})} /></div>
-          <div><label>Status</label>
-            <select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}>
-              <option value="draft">Draft</option><option value="active">Active</option><option value="closed">Closed</option><option value="approved">Approved</option>
-            </select></div>
-          <div className="full"><label>Description</label><textarea rows={3} value={form.description} onChange={e=>setForm({...form,description:e.target.value})} /></div>
-          <div className="full"><button className="primary" onClick={saveEdit}>Save changes</button></div>
-        </div>
-      ) : (
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
-          <div>
-            <div className="hint">Status</div><div><span className={`badge ${data.status}`}>{data.status}</span></div>
-            <div className="hint" style={{marginTop:10}}>Date</div><div>{fmt.date(data.contract_date)}</div>
-            <div className="hint" style={{marginTop:10}}>Reference #</div><div>{data.reference_number||'—'}</div>
-            {data.description&&<><div className="hint" style={{marginTop:10}}>Description</div><div>{data.description}</div></>}
-            {data.file_reference&&<><div className="hint" style={{marginTop:10}}>Attachment</div>
-            <div><a href={`/api/files/${encodeURIComponent(data.file_reference)}`} target="_blank">View contract PDF</a></div></>}
-          </div>
-          <div>
-            <div className="hint">Total value</div><div><strong>{fmt.moneyPrecise(data.total_value)}</strong></div>
-            <div className="hint" style={{marginTop:10}}>Invoiced (approved+)</div><div>{fmt.moneyPrecise(data.invoiced_amount)}</div>
-            <div className="hint" style={{marginTop:10}}>Remaining</div><div><strong>{fmt.moneyPrecise(data.remaining_amount)}</strong></div>
-          </div>
-        </div>
-      )}
-
-      <h3 style={{marginTop:20,fontSize:14}}>Allocation</h3>
-      <table className="data">
-        <thead><tr><th>QB Code</th><th>Name</th><th className="num">Amount</th></tr></thead>
-        <tbody>{data.lines.map(l=>(
-          <tr key={l.id}><td className="code">{l.code}</td><td>{l.name}</td><td className="num">{fmt.moneyPrecise(l.amount)}</td></tr>
-        ))}</tbody>
-      </table>
-
-      <h3 style={{marginTop:20,fontSize:14}}>Invoices against this contract</h3>
-      {data.invoices.length===0?<div className="empty" style={{padding:20}}>No invoices submitted against this contract yet.</div>:(
-        <table className="data">
-          <thead><tr><th>Invoice #</th><th>Vendor</th><th>Date</th><th className="num">Amount</th><th>Status</th></tr></thead>
-          <tbody>{data.invoices.map(i=>(
-            <tr key={i.id} className={i.status === 'rejected' ? 'row-over' : ''}>
-              <td>{i.invoice_number}{i.file_reference&&<> · <a href={`/api/files/${encodeURIComponent(i.file_reference)}`} target="_blank">📄</a></>}</td>
-              <td>{i.vendor_name}</td>
-              <td>{fmt.date(i.invoice_date)}</td><td className="num">{fmt.moneyPrecise(i.amount)}</td>
-              <td><span className={`badge ${i.status}`}>{i.status}</span></td>
-            </tr>
-          ))}</tbody>
-        </table>
-      )}
-
-      {/* Activity log */}
-      {history.length > 0 && <>
-        <h3 style={{marginTop:20,fontSize:14}}>Activity log</h3>
-        <div className="activity-log">
-          {history.map(h => (
-            <div key={h.id} className="activity-item">
-              <span className={`activity-action ${h.action}`}>{h.action}</span>
-              <span style={{flex:1}}>{h.detail}</span>
-              <span className="hint">{h.changed_by_name} · {fmt.datetime(h.changed_at)}</span>
+      {/* Cost ledger strip */}
+      {ledger && !editing && (
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+          gap: 1, background: 'var(--border)', borderTop: '1px solid var(--border)',
+          borderBottom: '1px solid var(--border)', marginBottom: 16,
+        }}>
+          {[
+            { label: 'Original', val: ledger.original_contract, color: 'var(--text-1)' },
+            { label: '+ Approved COs', val: ledger.approved_cos, color: ledger.approved_cos > 0 ? 'var(--warn)' : 'var(--text-3)', show: true },
+            { label: '+ T&M', val: ledger.tm_approved, color: ledger.tm_approved > 0 ? 'var(--warn)' : 'var(--text-3)', show: true },
+            { label: '= Commitment', val: ledger.commitment, color: ledger.cost_creep ? 'var(--danger)' : 'var(--accent)', bold: true },
+            { label: 'Earmarked', val: ledger.earmarked_amount, color: 'var(--text-2)', show: true },
+            { label: 'Invoiced', val: ledger.invoiced, color: 'var(--text-1)' },
+            { label: 'Paid', val: ledger.paid, color: 'var(--ok)' },
+          ].filter(item => item.val > 0 || item.show).map(item => (
+            <div key={item.label} style={{ background: 'var(--surface)', padding: '10px 14px', textAlign: 'center' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{item.label}</div>
+              <div style={{ fontSize: 14, fontWeight: item.bold ? 700 : 600, color: item.color, fontFamily: 'var(--mono)' }}>
+                {item.val != null && item.val > 0 ? fmt.money(item.val) : <span style={{ color: 'var(--text-3)' }}>—</span>}
+              </div>
             </div>
           ))}
         </div>
-      </>}
+      )}
+
+      {/* Alerts */}
+      {ledger && ledger.cost_creep && (
+        <div style={{ padding: '8px 14px', marginBottom: 12, borderRadius: 5, background: 'rgba(220,55,55,0.1)', border: '1px solid rgba(220,55,55,0.3)', fontSize: 12, color: 'var(--danger)' }}>
+          🔴 Cost creep: commitment {fmt.money(ledger.commitment)} exceeds earmark {fmt.money(ledger.earmarked_amount)}
+        </div>
+      )}
+      {ledger && ledger.pending_co_count > 0 && (
+        <div style={{ padding: '8px 14px', marginBottom: 12, borderRadius: 5, background: 'rgba(230,160,30,0.1)', border: '1px solid rgba(230,160,30,0.3)', fontSize: 12, color: 'var(--warn)' }}>
+          ⚠️ {ledger.pending_co_count} change order{ledger.pending_co_count > 1 ? 's' : ''} pending — {fmt.money(ledger.pending_cos)} not yet committed
+        </div>
+      )}
+
+      {editing ? (
+        <div className="form-grid" style={{ marginBottom: 16 }}>
+          <div><label>Vendor</label><input value={form.vendor_name} onChange={e => setForm({ ...form, vendor_name: e.target.value })} /></div>
+          <div><label>Reference #</label><input value={form.reference_number} onChange={e => setForm({ ...form, reference_number: e.target.value })} /></div>
+          <div><label>Estimated Cost (contract value)</label><input type="number" step="0.01" value={form.total_value} onChange={e => setForm({ ...form, total_value: e.target.value })} /></div>
+          <div><label>Earmarked Amount (internal budget)</label><input type="number" step="0.01" value={form.earmarked_amount} onChange={e => setForm({ ...form, earmarked_amount: e.target.value })} placeholder="Optional — must be ≥ contract value" /></div>
+          <div><label>Date</label><input type="date" value={form.contract_date} onChange={e => setForm({ ...form, contract_date: e.target.value })} /></div>
+          <div><label>Status</label>
+            <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+              <option value="draft">Draft</option><option value="active">Active</option>
+              <option value="closed">Closed</option><option value="approved">Approved</option>
+            </select>
+          </div>
+          <div className="full"><label>Description</label><textarea rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+          {err && <div className="full"><div className="error">{err}</div></div>}
+          <div className="full"><button className="primary" onClick={saveEdit}>Save changes</button></div>
+        </div>
+      ) : (
+        <>
+          {/* Sub-tabs */}
+          <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
+            {tabs.map(t => (
+              <button key={t.k} onClick={() => setActiveTab(t.k)} style={{
+                padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer',
+                fontSize: 13, fontWeight: activeTab === t.k ? 600 : 400,
+                color: activeTab === t.k ? 'var(--accent)' : 'var(--text-2)',
+                borderBottom: activeTab === t.k ? '2px solid var(--accent)' : '2px solid transparent',
+                marginBottom: -1,
+              }}>{t.label}</button>
+            ))}
+          </div>
+
+          {activeTab === 'overview' && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+                <div>
+                  {data.description && <><div className="hint">Description</div><div style={{ marginBottom: 10 }}>{data.description}</div></>}
+                  <div className="hint">Date</div><div>{fmt.date(data.contract_date)}</div>
+                </div>
+                <div>
+                  <div className="hint">QB Code Allocation</div>
+                  <table className="data" style={{ marginTop: 6 }}>
+                    <thead><tr><th>Code</th><th>Name</th><th className="num">Amount</th></tr></thead>
+                    <tbody>{data.lines.map(l => (
+                      <tr key={l.id}><td className="code">{l.code}</td><td>{l.name}</td><td className="num">{fmt.moneyPrecise(l.amount)}</td></tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'change-orders' && (
+            <ChangeOrders contractId={contractId} contractVendor={data.vendor_name}
+              onLedgerRefresh={load} />
+          )}
+
+          {activeTab === 'invoices' && (
+            data.invoices.length === 0
+              ? <div className="empty" style={{ padding: 20 }}>No invoices against this contract yet.</div>
+              : <table className="data">
+                  <thead><tr><th>Invoice #</th><th>Vendor</th><th>Date</th><th className="num">Amount</th><th>Status</th></tr></thead>
+                  <tbody>{data.invoices.map(i => (
+                    <tr key={i.id} className={i.status === 'rejected' ? 'row-over' : ''}>
+                      <td>{i.invoice_number}{i.file_reference && <> · <a href={`/api/files/${encodeURIComponent(i.file_reference)}`} target="_blank">📄</a></>}</td>
+                      <td>{i.vendor_name}</td>
+                      <td>{fmt.date(i.invoice_date)}</td>
+                      <td className="num">{fmt.moneyPrecise(i.amount)}</td>
+                      <td><span className={`badge ${i.status}`}>{i.status}</span></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+          )}
+
+          {activeTab === 'history' && history.length > 0 && (
+            <div className="activity-log">
+              {history.map(h => (
+                <div key={h.id} className="activity-item">
+                  <span className={`activity-action ${h.action}`}>{h.action}</span>
+                  <span style={{ flex: 1 }}>{h.detail}</span>
+                  <span className="hint">{h.changed_by_name} · {fmt.datetime(h.changed_at)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {activeTab === 'history' && history.length === 0 && (
+            <div className="empty">No history yet.</div>
+          )}
+        </>
+      )}
     </div>
   );
 }

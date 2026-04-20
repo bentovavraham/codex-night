@@ -21,6 +21,9 @@ const adminRoutes = require('./routes/admin');
 const uploadRoutes = require('./routes/uploads');
 const vendorRoutes = require('./routes/vendors');
 const customerRoutes = require('./routes/customers');
+const changeOrderRoutes = require('./routes/changeOrders');
+const tmChargeRoutes = require('./routes/tmCharges');
+const contractExpenseRoutes = require('./routes/contractExpenses');
 
 const app = express();
 app.disable('x-powered-by');
@@ -66,6 +69,9 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/files', uploadRoutes);            // POST uploads, GET :reference downloads
 app.use('/api/vendors', vendorRoutes);
 app.use('/api/customers', customerRoutes);
+app.use('/api', changeOrderRoutes);
+app.use('/api', tmChargeRoutes);
+app.use('/api', contractExpenseRoutes);
 
 // --- Static SPA ---
 app.use(express.static(path.join(__dirname, 'public')));

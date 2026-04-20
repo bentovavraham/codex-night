@@ -87,7 +87,7 @@ router.post('/projects/:id/contracts', requireAuth, async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
     const {
-      vendor_name, description, total_value, contract_date,
+      vendor_name, description, total_value, earmarked_amount, contract_date,
       reference_number, status, file_reference, lines,
     } = req.body || {};
     if (!vendor_name || total_value == null) {
@@ -97,6 +97,7 @@ router.post('/projects/:id/contracts', requireAuth, async (req, res, next) => {
     if (!Number.isFinite(total) || total < 0) {
       return res.status(400).json({ error: 'total_value must be >= 0' });
     }
+    const earmarked = earmarked_amount != null ? Number(earmarked_amount) : null;
     const allocs = Array.isArray(lines) ? lines : [];
     if (allocs.length === 0) return res.status(400).json({ error: 'At least one line required' });
     const sum = allocs.reduce((s, l) => s + Number(l.amount || 0), 0);
@@ -109,11 +110,11 @@ router.post('/projects/:id/contracts', requireAuth, async (req, res, next) => {
     await client.query('BEGIN');
     const contract = await client.query(
       `INSERT INTO contracts
-         (project_id, vendor_name, description, total_value, contract_date,
+         (project_id, vendor_name, description, total_value, earmarked_amount, contract_date,
           reference_number, status, file_reference, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,'draft'),$8,$9)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'draft'),$9,$10)
        RETURNING *`,
-      [projectId, vendor_name, description || null, total,
+      [projectId, vendor_name, description || null, total, earmarked,
        contract_date || null, reference_number || null,
        status || null, file_reference || null, req.session.userId]
     );
@@ -184,7 +185,7 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
     const old = await client.query('SELECT * FROM contracts WHERE id = $1', [contractId]);
     const {
-      vendor_name, description, total_value, contract_date,
+      vendor_name, description, total_value, earmarked_amount, contract_date,
       reference_number, status, file_reference,
     } = req.body || {};
     await client.query('BEGIN');
@@ -193,14 +194,16 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
          vendor_name      = COALESCE($2, vendor_name),
          description      = COALESCE($3, description),
          total_value      = COALESCE($4, total_value),
-         contract_date    = COALESCE($5, contract_date),
-         reference_number = COALESCE($6, reference_number),
-         status           = COALESCE($7, status),
-         file_reference   = COALESCE($8, file_reference),
+         earmarked_amount = COALESCE($5, earmarked_amount),
+         contract_date    = COALESCE($6, contract_date),
+         reference_number = COALESCE($7, reference_number),
+         status           = COALESCE($8, status),
+         file_reference   = COALESCE($9, file_reference),
          updated_at       = NOW()
        WHERE id = $1 RETURNING *`,
       [contractId, vendor_name ?? null, description ?? null, total_value ?? null,
-       contract_date ?? null, reference_number ?? null, status ?? null, file_reference ?? null]);
+       earmarked_amount ?? null, contract_date ?? null, reference_number ?? null,
+       status ?? null, file_reference ?? null]);
     const changes = [];
     const o = old.rows[0];
     if (vendor_name && vendor_name !== o.vendor_name) changes.push(`vendor: ${o.vendor_name} → ${vendor_name}`);
@@ -252,6 +255,151 @@ router.get('/projects/:id/contracts/export', requireAuth, async (req, res, next)
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="contracts-project-${projectId}.csv"`);
     res.send(header + rows);
+  } catch (err) { next(err); }
+});
+
+// GET /api/projects/:id/cost-summary — project-level financial position
+router.get('/projects/:id/cost-summary', requireAuth, async (req, res, next) => {
+  try {
+    const projectId = Number(req.params.id);
+    if (!(await projects.userCanAccess(req.session.userId, projectId)))
+      return res.status(403).json({ error: 'Forbidden' });
+
+    const [contractsR, cosR, tmR, expR, invoicedR, paidR, pendingInvR] = await Promise.all([
+      pool.query(`SELECT COALESCE(SUM(total_value),0) AS total, COALESCE(SUM(earmarked_amount),0) AS earmarked,
+          COUNT(*) AS contract_count
+        FROM contracts WHERE project_id = $1`, [projectId]),
+      pool.query(`SELECT
+          COALESCE(SUM(CASE WHEN co.status='approved' THEN co.amount ELSE 0 END),0) AS approved_total,
+          COALESCE(SUM(CASE WHEN co.status='pending'  THEN co.amount ELSE 0 END),0) AS pending_total,
+          COUNT(*) FILTER (WHERE co.status='pending') AS pending_count
+        FROM change_orders co JOIN contracts c ON c.id = co.contract_id WHERE c.project_id = $1`, [projectId]),
+      pool.query(`SELECT
+          COALESCE(SUM(CASE WHEN t.status='approved' THEN t.amount ELSE 0 END),0) AS approved_total,
+          COALESCE(SUM(CASE WHEN t.status='pending'  THEN t.amount ELSE 0 END),0) AS pending_total
+        FROM tm_charges t JOIN contracts c ON c.id = t.contract_id WHERE c.project_id = $1`, [projectId]),
+      pool.query(`SELECT
+          COALESCE(SUM(CASE WHEN e.status='approved' THEN e.amount ELSE 0 END),0) AS approved_total,
+          COALESCE(SUM(CASE WHEN e.status='pending'  THEN e.amount ELSE 0 END),0) AS pending_total
+        FROM contract_expenses e JOIN contracts c ON c.id = e.contract_id WHERE c.project_id = $1`, [projectId]),
+      pool.query(`SELECT COALESCE(SUM(i.amount),0) AS total FROM invoices i
+        WHERE (i.project_id = $1 OR EXISTS (SELECT 1 FROM contracts c WHERE c.id = i.contract_id AND c.project_id = $1))
+          AND i.status IN ('approved','pushed','paid')`, [projectId]),
+      pool.query(`SELECT COALESCE(SUM(i.amount),0) AS total FROM invoices i
+        WHERE (i.project_id = $1 OR EXISTS (SELECT 1 FROM contracts c WHERE c.id = i.contract_id AND c.project_id = $1))
+          AND i.status = 'paid'`, [projectId]),
+      pool.query(`SELECT COUNT(*) AS count, COALESCE(SUM(i.amount),0) AS amount FROM invoices i
+        WHERE (i.project_id = $1 OR EXISTS (SELECT 1 FROM contracts c WHERE c.id = i.contract_id AND c.project_id = $1))
+          AND i.status = 'pending'`, [projectId]),
+    ]);
+
+    const contractsTotal = Number(contractsR.rows[0].total);
+    const earmarkedTotal = Number(contractsR.rows[0].earmarked);
+    const approvedCOs    = Number(cosR.rows[0].approved_total);
+    const pendingCOs     = Number(cosR.rows[0].pending_total);
+    const pendingCOCount = Number(cosR.rows[0].pending_count);
+    const tmApproved     = Number(tmR.rows[0].approved_total);
+    const tmPending      = Number(tmR.rows[0].pending_total);
+    const expApproved    = Number(expR.rows[0].approved_total);
+    const expPending     = Number(expR.rows[0].pending_total);
+    const invoiced       = Number(invoicedR.rows[0].total);
+    const paid           = Number(paidR.rows[0].total);
+    const pendingInvoiceCount  = Number(pendingInvR.rows[0].count);
+    const pendingInvoiceAmount = Number(pendingInvR.rows[0].amount);
+
+    const commitment       = contractsTotal + approvedCOs + tmApproved + expApproved;
+    const earmarkRemaining = earmarkedTotal > 0 ? earmarkedTotal - commitment : null;
+    const costCreep        = earmarkedTotal > 0 && commitment > earmarkedTotal;
+    const overrun          = invoiced > commitment;
+
+    res.json({
+      contracts_total: contractsTotal,
+      earmarked_total: earmarkedTotal,
+      approved_cos: approvedCOs,
+      pending_cos: pendingCOs,
+      pending_co_count: pendingCOCount,
+      tm_approved: tmApproved,
+      tm_pending: tmPending,
+      expense_approved: expApproved,
+      expense_pending: expPending,
+      commitment,
+      invoiced,
+      paid,
+      earmark_remaining: earmarkRemaining,
+      pending_invoice_count: pendingInvoiceCount,
+      pending_invoice_amount: pendingInvoiceAmount,
+      cost_creep: costCreep,
+      overrun,
+    });
+  } catch (err) { next(err); }
+});
+
+// GET /api/contracts/:id/ledger — full cost breakdown for one contract
+router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
+  try {
+    const contractId = Number(req.params.id);
+    const access = await userCanAccessContract(req.session.userId, contractId);
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Not found' : 'Forbidden' });
+
+    const [contractR, cosR, tmR, expR, invoicedR, paidR] = await Promise.all([
+      pool.query('SELECT total_value, earmarked_amount FROM contracts WHERE id = $1', [contractId]),
+      // Approved change orders only count toward commitment
+      pool.query(`SELECT
+          COALESCE(SUM(CASE WHEN status='approved' THEN amount ELSE 0 END),0) AS approved_total,
+          COALESCE(SUM(CASE WHEN status='pending'  THEN amount ELSE 0 END),0) AS pending_total,
+          COALESCE(SUM(CASE WHEN status='rejected' THEN amount ELSE 0 END),0) AS rejected_total,
+          COUNT(*) FILTER (WHERE status='pending') AS pending_count
+        FROM change_orders WHERE contract_id = $1`, [contractId]),
+      pool.query(`SELECT
+          COALESCE(SUM(CASE WHEN status='approved' THEN amount ELSE 0 END),0) AS approved_total,
+          COALESCE(SUM(CASE WHEN status='pending'  THEN amount ELSE 0 END),0) AS pending_total
+        FROM tm_charges WHERE contract_id = $1`, [contractId]),
+      pool.query(`SELECT
+          COALESCE(SUM(CASE WHEN status='approved' THEN amount ELSE 0 END),0) AS approved_total,
+          COALESCE(SUM(CASE WHEN status='pending'  THEN amount ELSE 0 END),0) AS pending_total
+        FROM contract_expenses WHERE contract_id = $1`, [contractId]),
+      pool.query(`SELECT COALESCE(SUM(amount),0) AS total
+        FROM invoices WHERE contract_id = $1 AND status IN ('approved','pushed','paid')`, [contractId]),
+      pool.query(`SELECT COALESCE(SUM(amount),0) AS total
+        FROM invoices WHERE contract_id = $1 AND status = 'paid'`, [contractId]),
+    ]);
+
+    const original = Number(contractR.rows[0].total_value);
+    const earmarked = contractR.rows[0].earmarked_amount != null ? Number(contractR.rows[0].earmarked_amount) : null;
+    const approvedCOs = Number(cosR.rows[0].approved_total);
+    const pendingCOs  = Number(cosR.rows[0].pending_total);
+    const pendingCOCount = Number(cosR.rows[0].pending_count);
+    const tmApproved  = Number(tmR.rows[0].approved_total);
+    const tmPending   = Number(tmR.rows[0].pending_total);
+    const expApproved = Number(expR.rows[0].approved_total);
+    const expPending  = Number(expR.rows[0].pending_total);
+    const invoiced    = Number(invoicedR.rows[0].total);
+    const paid        = Number(paidR.rows[0].total);
+
+    const commitment  = original + approvedCOs + tmApproved + expApproved;
+    const remaining   = commitment - invoiced;
+    const earmarkRemaining = earmarked != null ? earmarked - commitment : null;
+    const costCreep   = earmarked != null && commitment > earmarked;
+    const overrun     = invoiced > commitment;
+
+    res.json({
+      original_contract: original,
+      earmarked_amount: earmarked,
+      approved_cos: approvedCOs,
+      pending_cos: pendingCOs,
+      pending_co_count: pendingCOCount,
+      tm_approved: tmApproved,
+      tm_pending: tmPending,
+      expense_approved: expApproved,
+      expense_pending: expPending,
+      commitment,
+      invoiced,
+      paid,
+      remaining,
+      earmark_remaining: earmarkRemaining,
+      cost_creep: costCreep,
+      overrun,
+    });
   } catch (err) { next(err); }
 });
 

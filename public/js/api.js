@@ -99,6 +99,34 @@ window.api = {
     return payload;
   },
 
+  // Cost control
+  getCostSummary:   (pid)              => request('GET',  `/api/projects/${pid}/cost-summary`),
+  getContractLedger:(id)               => request('GET',  `/api/contracts/${id}/ledger`),
+
+  // Change orders
+  listChangeOrders: (contractId)       => request('GET',  `/api/contracts/${contractId}/change-orders`),
+  createChangeOrder:(contractId, data) => request('POST', `/api/contracts/${contractId}/change-orders`, data),
+  updateChangeOrder:(id, data)         => request('PUT',  `/api/change-orders/${id}`, data),
+  approveChangeOrder:(id)              => request('POST', `/api/change-orders/${id}/approve`),
+  rejectChangeOrder: (id, note)        => request('POST', `/api/change-orders/${id}/reject`, { note }),
+  deleteChangeOrder: (id)              => request('DELETE',`/api/change-orders/${id}`),
+
+  // T&M charges
+  listTMCharges:    (contractId)       => request('GET',  `/api/contracts/${contractId}/tm-charges`),
+  createTMCharge:   (contractId, data) => request('POST', `/api/contracts/${contractId}/tm-charges`, data),
+  updateTMCharge:   (id, data)         => request('PUT',  `/api/tm-charges/${id}`, data),
+  approveTMCharge:  (id)               => request('POST', `/api/tm-charges/${id}/approve`),
+  rejectTMCharge:   (id)               => request('POST', `/api/tm-charges/${id}/reject`),
+  deleteTMCharge:   (id)               => request('DELETE',`/api/tm-charges/${id}`),
+
+  // Expenses
+  listExpenses:     (contractId)       => request('GET',  `/api/contracts/${contractId}/expenses`),
+  createExpense:    (contractId, data) => request('POST', `/api/contracts/${contractId}/expenses`, data),
+  updateExpense:    (id, data)         => request('PUT',  `/api/expenses/${id}`, data),
+  approveExpense:   (id)               => request('POST', `/api/expenses/${id}/approve`),
+  rejectExpense:    (id)               => request('POST', `/api/expenses/${id}/reject`),
+  deleteExpense:    (id)               => request('DELETE',`/api/expenses/${id}`),
+
   searchVendors:    (q='')              => request('GET', `/api/vendors${q ? '?q=' + encodeURIComponent(q) : ''}`),
   searchCustomers:  (q='')              => request('GET', `/api/customers${q ? '?q=' + encodeURIComponent(q) : ''}`),
 
