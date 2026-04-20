@@ -1,3 +1,23 @@
+// Inline confidence dot shown next to auto-filled labels.
+// Clears when the user edits the field manually.
+function ConfidenceDot({ level }) {
+  if (!level) return null;
+  const map = {
+    high:   { color: '#16a34a', tip: 'High confidence — Claude found this clearly in the document' },
+    medium: { color: '#d97706', tip: 'Medium confidence — verify this field before saving' },
+    low:    { color: '#dc2626', tip: 'Low confidence — Claude guessed this; please verify' },
+  };
+  const m = map[level];
+  if (!m) return null;
+  return (
+    <span title={m.tip} style={{
+      display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+      background: m.color, marginLeft: 5, verticalAlign: 'middle',
+      boxShadow: `0 0 4px ${m.color}88`,
+    }} />
+  );
+}
+
 window.Invoices = function Invoices({ projectId }) {
   const [invoices, setInvoices] = React.useState([]);
   const [contracts, setContracts] = React.useState([]);
@@ -88,134 +108,226 @@ window.Invoices = function Invoices({ projectId }) {
   const totalApproved = invoices.filter(i => ['approved', 'pushed', 'paid'].includes(i.status)).reduce((s, i) => s + Number(i.amount), 0);
   const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + Number(i.amount), 0);
 
+  const pendingInvoices = invoices.filter(i => i.status === 'pending');
+  const allPendingSelected = pendingInvoices.length > 0 && pendingInvoices.every(i => selected.has(i.id));
+
+  // Status accent colors
+  function statusAccent(status) {
+    if (status === 'pending')  return { color: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.3)'  };
+    if (status === 'on_hold')  return { color: '#7c3aed', bg: 'rgba(124,58,237,0.08)', border: 'rgba(124,58,237,0.3)' };
+    if (status === 'approved') return { color: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' };
+    if (status === 'pushed')   return { color: '#0891b2', bg: 'rgba(8,145,178,0.08)',  border: 'rgba(8,145,178,0.25)' };
+    if (status === 'paid')     return { color: '#16a34a', bg: 'rgba(22,163,74,0.08)',  border: 'rgba(22,163,74,0.25)' };
+    if (status === 'rejected') return { color: '#dc2626', bg: 'rgba(220,38,38,0.08)',  border: 'rgba(220,38,38,0.25)' };
+    return { color: 'var(--text-3)', bg: 'var(--surface-2)', border: 'var(--border)' };
+  }
+
   return (
     <div className="panel">
-      <div className="panel-header">
-        <h2>Invoices</h2>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Invoices</h2>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3 }}>
+            {invoices.length} invoice{invoices.length !== 1 ? 's' : ''}
+            {pendingCount > 0 && (
+              <span style={{ marginLeft: 8, padding: '1px 7px', borderRadius: 10, background: '#d97706', color: '#fff', fontSize: 11, fontWeight: 700 }}>
+                {pendingCount} pending
+              </span>
+            )}
+          </div>
+        </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <a href={`/api/projects/${projectId}/invoices/export`} target="_blank" className="btn" style={{ fontSize: 12 }}>Export CSV</a>
           <button className="primary" onClick={() => setShowNew(true)}>+ New Invoice</button>
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="summary-cards">
-        <div className="summary-card"><div className="label">Pending</div><div className="value">{pendingCount}</div><div className="hint">{fmt.money(totalPending)}</div></div>
-        <div className="summary-card"><div className="label">Approved+</div><div className="value">{fmt.money(totalApproved)}</div></div>
-        <div className="summary-card"><div className="label">Paid</div><div className="value">{fmt.money(totalPaid)}</div></div>
-        <div className="summary-card"><div className="label">Total</div><div className="value">{invoices.length}</div></div>
-      </div>
+      {/* Summary strip */}
+      {invoices.length > 0 && (
+        <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
+          {[
+            { label: 'Needs Approval', value: pendingCount > 0 ? fmt.money(totalPending) : '—', sub: pendingCount > 0 ? `${pendingCount} invoice${pendingCount !== 1 ? 's' : ''}` : 'all clear', accent: pendingCount > 0 ? '#d97706' : 'var(--ok)' },
+            { label: 'Approved',       value: fmt.money(totalApproved), sub: 'invoiced total' },
+            { label: 'Paid',           value: fmt.money(totalPaid),     sub: 'cash out', accent: '#16a34a' },
+          ].map((s, i) => (
+            <div key={i} style={{
+              flex: 1, padding: '12px 18px',
+              borderRight: i < 2 ? '1px solid var(--border)' : 'none',
+              background: 'var(--surface-2)',
+            }}>
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>{s.label}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: s.accent || 'var(--text-1)' }}>{s.value}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{s.sub}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
-      {/* View toggle */}
-      <div className="tabs" style={{ marginBottom: 8 }}>
+      {/* View tabs */}
+      <div className="tabs" style={{ marginBottom: 12 }}>
         <button className={view === 'all' ? 'active' : ''} onClick={() => setView('all')}>All invoices</button>
         <button className={view === 'pending' ? 'active' : ''} onClick={() => setView('pending')}>
-          Needs approval ({pendingCount})
+          Needs approval {pendingCount > 0 ? `(${pendingCount})` : ''}
         </button>
       </div>
 
+      {/* Filters — only on all-view */}
       {view === 'all' && (
-        <div className="toolbar">
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+          <input placeholder="Search vendor" value={filter.vendor}
+            onChange={e => setFilter({ ...filter, vendor: e.target.value })}
+            style={{ flex: '1 1 140px', minWidth: 0 }} />
           <select value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })} style={{ width: 130 }}>
             <option value="">All statuses</option>
-            <option value="pending">Pending</option><option value="approved">Approved</option>
-            <option value="on_hold">On Hold</option><option value="rejected">Rejected</option>
-            <option value="pushed">Pushed</option><option value="paid">Paid</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="on_hold">On Hold</option>
+            <option value="rejected">Rejected</option>
+            <option value="pushed">Pushed</option>
+            <option value="paid">Paid</option>
           </select>
-          <select value={filter.contract_id} onChange={e => setFilter({ ...filter, contract_id: e.target.value })} style={{ width: 220 }}>
+          <select value={filter.contract_id} onChange={e => setFilter({ ...filter, contract_id: e.target.value })} style={{ width: 200 }}>
             <option value="">All contracts</option>
             <option value="none">Standalone only</option>
             {contracts.map(c => <option key={c.id} value={c.id}>{c.vendor_name} — {fmt.money(c.total_value)}</option>)}
           </select>
-          <input placeholder="Search vendor" value={filter.vendor} onChange={e => setFilter({ ...filter, vendor: e.target.value })} style={{ width: 160 }} />
           <select value={filter.sort} onChange={e => setFilter({ ...filter, sort: e.target.value })} style={{ width: 130 }}>
-            <option value="">Sort: Date</option><option value="vendor">Vendor</option>
-            <option value="amount">Amount</option><option value="status">Status</option>
+            <option value="">Sort: Date</option>
+            <option value="amount">Sort: Amount</option>
+            <option value="vendor">Sort: Vendor</option>
+            <option value="status">Sort: Status</option>
           </select>
         </div>
       )}
 
-      {/* Bulk action bar */}
-      {selected.size > 0 && (
-        <div className="bulk-bar">
-          <span>{selected.size} selected</span>
-          <button className="primary" disabled={busy.bulk} onClick={handleBulkApprove}>
-            {busy.bulk ? <><span className="spinner"></span>Approving…</> : `Approve ${selected.size}`}
-          </button>
-          <button onClick={() => setSelected(new Set())}>Clear selection</button>
+      {/* Bulk select bar */}
+      {view === 'pending' && pendingInvoices.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '8px 14px', borderRadius: 7, background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+          <input type="checkbox" style={{ width: 'auto', margin: 0 }}
+            checked={allPendingSelected}
+            onChange={e => e.target.checked ? selectAll() : setSelected(new Set())} />
+          <span style={{ fontSize: 13, color: 'var(--text-2)' }}>
+            {selected.size > 0 ? `${selected.size} selected` : `Select all ${pendingInvoices.length}`}
+          </span>
+          {selected.size > 0 && (
+            <>
+              <button className="primary" disabled={busy.bulk} onClick={handleBulkApprove} style={{ marginLeft: 'auto' }}>
+                {busy.bulk ? <><span className="spinner"></span>Approving…</> : `Approve ${selected.size}`}
+              </button>
+              <button onClick={() => setSelected(new Set())}>Clear</button>
+            </>
+          )}
         </div>
       )}
 
-      {err && <div className="error">{err}</div>}
+      {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
+
       {loading ? <div className="empty">Loading invoices…</div>
        : invoices.length === 0 ? <div className="empty">No invoices match these filters.</div>
        : (
-        <table className="data">
-          <thead><tr>
-            <th style={{ width: 28 }}><input type="checkbox" style={{ width: 'auto' }}
-              checked={selected.size > 0 && selected.size === invoices.filter(i => i.status === 'pending').length}
-              onChange={e => e.target.checked ? selectAll() : setSelected(new Set())} /></th>
-            <th data-tip="Vendor's invoice reference number">Invoice #</th>
-            <th data-tip="Vendor or subcontractor who submitted this invoice">Vendor</th>
-            <th data-tip="The contract this invoice is billed against">Contract</th>
-            <th data-tip="Date on the invoice from the vendor">Date</th>
-            <th className="num" data-tip="Total billed amount on this invoice">Amount</th>
-            <th data-tip="pending = awaiting approval · approved = ready to pay · paid = check sent · rejected = sent back to vendor">Status</th>
-            <th data-tip="Team member who entered this invoice">Created by</th>
-            <th></th>
-          </tr></thead>
-          <tbody>
-            {invoices.map(i => (
-              <React.Fragment key={i.id}>
-                <tr className={i.status === 'rejected' ? 'row-over' : ''}>
-                  <td><input type="checkbox" style={{ width: 'auto' }} disabled={i.status !== 'pending'}
-                    checked={selected.has(i.id)} onChange={() => toggleSelect(i.id)} /></td>
-                  <td>
-                    {i.invoice_number}
-                    {i.file_reference && <> · <a href={`/api/files/${encodeURIComponent(i.file_reference)}`} target="_blank" title="View PDF">📄</a></>}
-                  </td>
-                  <td>{i.vendor_name}</td>
-                  <td>{i.alloc_count > 1
-                    ? <span className="badge" style={{ background: '#e8daff', color: '#5b21b6' }}>split ({i.alloc_count})</span>
-                    : i.contract_id ? (i.contract_vendor || `#${i.contract_id}`) : <span className="hint">standalone</span>}</td>
-                  <td>{fmt.date(i.invoice_date)}</td>
-                  <td className="num">{fmt.moneyPrecise(i.amount)}</td>
-                  <td><span className={`badge ${i.status}`}>{i.status}</span></td>
-                  <td className="hint">{i.created_by_name || ''}</td>
-                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button onClick={() => setEditingId(i.id)} style={{ marginRight: 4 }}>Edit</button>
-                    {i.status === 'pending' && <>
-                      <button className="primary" disabled={busy[i.id]} onClick={() => handleApprove(i)}>
-                        {busy[i.id] ? <span className="spinner"></span> : null}Approve</button>
-                      <button style={{ marginLeft: 4 }} disabled={busy[i.id]}
-                        onClick={() => handleHold(i)}>Hold</button>
-                      <button className="danger" style={{ marginLeft: 4 }} disabled={busy[i.id]}
-                        onClick={() => handleReject(i)}>Reject</button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {invoices.map(i => {
+            const sa = statusAccent(i.status);
+            const isBusy = !!busy[i.id];
+            const isPending = i.status === 'pending';
+            const isSelected = selected.has(i.id);
+
+            return (
+              <div key={i.id} style={{
+                borderRadius: 8,
+                border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
+                borderLeft: `4px solid ${sa.color}`,
+                background: isSelected ? 'rgba(196,82,42,0.04)' : 'var(--surface)',
+                overflow: 'hidden',
+                transition: 'box-shadow 0.12s',
+              }}
+                onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,0.08)'}
+                onMouseLeave={e => e.currentTarget.style.boxShadow = ''}
+              >
+                {/* Main row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px' }}>
+
+                  {/* Checkbox — only for pending */}
+                  <div style={{ flexShrink: 0, width: 18 }}>
+                    {isPending && (
+                      <input type="checkbox" style={{ width: 'auto', margin: 0 }}
+                        checked={isSelected} onChange={() => toggleSelect(i.id)} />
+                    )}
+                  </div>
+
+                  {/* Vendor + invoice # */}
+                  <div style={{ flex: '1 1 0', minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)' }}>{i.vendor_name}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'monospace' }}>{i.invoice_number}</span>
+                      {i.file_reference && (
+                        <a href={`/api/files/${encodeURIComponent(i.file_reference)}`} target="_blank"
+                          title="View PDF" style={{ fontSize: 13, textDecoration: 'none', flexShrink: 0 }}>📄</a>
+                      )}
+                      {i.alloc_count > 1 && (
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#e8daff', color: '#5b21b6' }}>
+                          split ×{i.alloc_count}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
+                      {i.contract_id
+                        ? (i.alloc_count > 1 ? 'Multiple contracts' : (i.contract_vendor || `Contract #${i.contract_id}`))
+                        : 'Standalone'}
+                      {i.invoice_date && <span style={{ marginLeft: 8 }}>{fmt.date(i.invoice_date)}</span>}
+                      {i.created_by_name && <span style={{ marginLeft: 8 }}>· {i.created_by_name}</span>}
+                    </div>
+                  </div>
+
+                  {/* Amount */}
+                  <div style={{ flexShrink: 0, textAlign: 'right', minWidth: 90 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)' }}>{fmt.moneyPrecise(i.amount)}</div>
+                  </div>
+
+                  {/* Status pill */}
+                  <div style={{ flexShrink: 0, minWidth: 72, textAlign: 'center' }}>
+                    <span style={{
+                      display: 'inline-block', fontSize: 10, fontWeight: 700,
+                      letterSpacing: '0.07em', textTransform: 'uppercase',
+                      padding: '3px 9px', borderRadius: 5,
+                      background: sa.bg, color: sa.color, border: `1px solid ${sa.border}`,
+                    }}>{i.status.replace('_', ' ')}</span>
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{ flexShrink: 0, display: 'flex', gap: 5, alignItems: 'center' }}>
+                    <button onClick={() => setEditingId(i.id)} style={{ fontSize: 12, padding: '4px 10px' }}>Edit</button>
+                    {isPending && <>
+                      <button className="primary" disabled={isBusy} onClick={() => handleApprove(i)} style={{ fontSize: 12, padding: '4px 10px' }}>
+                        {isBusy ? <span className="spinner" /> : 'Approve'}
+                      </button>
+                      <button disabled={isBusy} onClick={() => handleHold(i)} style={{ fontSize: 12, padding: '4px 10px' }}>Hold</button>
+                      <button className="danger" disabled={isBusy} onClick={() => handleReject(i)} style={{ fontSize: 12, padding: '4px 10px' }}>Reject</button>
                     </>}
                     {i.status === 'on_hold' && <>
-                      <button className="primary" disabled={busy[i.id]} onClick={() => handleApprove(i)}>Approve</button>
-                      <button style={{ marginLeft: 4 }} disabled={busy[i.id]}
-                        onClick={() => handleRevert(i)}>Release</button>
+                      <button className="primary" disabled={isBusy} onClick={() => handleApprove(i)} style={{ fontSize: 12, padding: '4px 10px' }}>Approve</button>
+                      <button disabled={isBusy} onClick={() => handleRevert(i)} style={{ fontSize: 12, padding: '4px 10px' }}>Release</button>
                     </>}
-                    {['approved', 'rejected', 'pushed', 'paid'].includes(i.status) &&
-                      <button style={{ marginLeft: 4 }} disabled={busy[i.id]}
-                        onClick={() => handleRevert(i)}>Revert</button>}
-                    {i.status === 'approved' && <button style={{ marginLeft: 4 }} disabled={busy[i.id]}
-                      onClick={() => doAction(`${i.invoice_number} pushed`, api.markPushed, i.id)}>Push</button>}
+                    {['approved','rejected','pushed','paid'].includes(i.status) &&
+                      <button disabled={isBusy} onClick={() => handleRevert(i)} style={{ fontSize: 12, padding: '4px 10px' }}>Revert</button>}
+                    {i.status === 'approved' &&
+                      <button disabled={isBusy} onClick={() => doAction(`${i.invoice_number} pushed`, api.markPushed, i.id)} style={{ fontSize: 12, padding: '4px 10px' }}>Push</button>}
                     {(i.status === 'approved' || i.status === 'pushed') &&
-                      <button style={{ marginLeft: 4 }} disabled={busy[i.id]}
-                        onClick={() => doAction(`${i.invoice_number} marked paid`, api.markPaid, i.id, null)}>Paid</button>}
-                  </td>
-                </tr>
+                      <button disabled={isBusy} onClick={() => doAction(`${i.invoice_number} marked paid`, api.markPaid, i.id, null)} style={{ fontSize: 12, padding: '4px 10px' }}>Paid</button>}
+                  </div>
+                </div>
+
+                {/* Rejection note — inline below the row */}
                 {i.rejection_note && (
-                  <tr><td></td><td colSpan={8}>
-                    <div className="rejection-note"><strong>Rejected:</strong> {i.rejection_note}</div>
-                  </td></tr>
+                  <div style={{ padding: '7px 16px 10px 52px', borderTop: '1px solid var(--border)', background: 'rgba(220,38,38,0.04)', fontSize: 12.5, color: '#dc2626' }}>
+                    <strong>Rejected:</strong> {i.rejection_note}
+                  </div>
                 )}
-              </React.Fragment>
-            ))}
-          </tbody>
-        </table>
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {showNew && <NewInvoiceModal projectId={projectId} contracts={contracts}
@@ -331,6 +443,7 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
   const [fileRef, setFileRef] = React.useState(null);
   const [uploading, setUploading] = React.useState(false);
   const [extractNote, setExtractNote] = React.useState(null);
+  const [confidence, setConfidence] = React.useState({});
   const [err, setErr] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
 
@@ -352,12 +465,18 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
       if (resp.extract_error) { setExtractNote(`PDF saved. Extraction failed: ${resp.extract_error}`); }
       else if (resp.extracted) {
         const e = resp.extracted;
-        if (e.invoice_number && !invoiceNumber) setInvoiceNumber(e.invoice_number);
-        if (e.vendor_name && !vendor) setVendor(e.vendor_name);
-        if (e.amount && (!amount || Number(amount) === 0)) setAmount(String(e.amount));
-        if (e.invoice_date && !date) setDate(e.invoice_date);
+        const filled = [];
+        if (e.invoice_number && !invoiceNumber) { setInvoiceNumber(e.invoice_number); filled.push('invoice_number'); }
+        if (e.vendor_name && !vendor) { setVendor(e.vendor_name); filled.push('vendor_name'); }
+        if (e.amount && (!amount || Number(amount) === 0)) { setAmount(String(e.amount)); filled.push('amount'); }
+        if (e.invoice_date && !date) { setDate(e.invoice_date); filled.push('invoice_date'); }
         if (e.summary) setDescription(d => d ? `${d}\n\n${e.summary}` : e.summary);
-        setExtractNote('Fields pre-filled from PDF — review before saving.');
+        if (e.confidence) {
+          const conf = {};
+          filled.forEach(f => { if (e.confidence[f]) conf[f] = e.confidence[f]; });
+          setConfidence(conf);
+        }
+        setExtractNote('Fields pre-filled from PDF — colored dots show extraction confidence.');
       }
     } catch (e) { setErr(e.message); }
     finally { setUploading(false); }
@@ -504,20 +623,28 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
             {/* Main fields */}
             <div className="form-grid">
               <div>
-                <label data-tip="The invoice number from the vendor's document — used for duplicate detection">Invoice number</label>
-                <input value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="e.g. INV-001" autoFocus={!hasPdf} />
+                <label data-tip="The invoice number from the vendor's document — used for duplicate detection">
+                  Invoice number <ConfidenceDot level={confidence.invoice_number} />
+                </label>
+                <input value={invoiceNumber} onChange={e => { setInvoiceNumber(e.target.value); setConfidence(c => ({ ...c, invoice_number: undefined })); }} placeholder="e.g. INV-001" autoFocus={!hasPdf} />
               </div>
               <div>
-                <label data-tip="Total dollar amount billed on this invoice">Amount</label>
-                <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+                <label data-tip="Total dollar amount billed on this invoice">
+                  Amount <ConfidenceDot level={confidence.amount} />
+                </label>
+                <input type="number" step="0.01" value={amount} onChange={e => { setAmount(e.target.value); setConfidence(c => ({ ...c, amount: undefined })); }} placeholder="0.00" />
               </div>
               <div>
-                <label data-tip="Date printed on the vendor's invoice — may differ from today's date">Invoice date</label>
-                <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+                <label data-tip="Date printed on the vendor's invoice — may differ from today's date">
+                  Invoice date <ConfidenceDot level={confidence.invoice_date} />
+                </label>
+                <input type="date" value={date} onChange={e => { setDate(e.target.value); setConfidence(c => ({ ...c, invoice_date: undefined })); }} />
               </div>
               <div>
-                <label data-tip="Vendor or subcontractor submitting this invoice">Vendor</label>
-                <SmartSearch value={vendor} onChange={v => setVendor(v)} fetcher={q => api.searchVendors(q)} placeholder="Vendor name" />
+                <label data-tip="Vendor or subcontractor submitting this invoice">
+                  Vendor <ConfidenceDot level={confidence.vendor_name} />
+                </label>
+                <SmartSearch value={vendor} onChange={v => { setVendor(v); setConfidence(c => ({ ...c, vendor_name: undefined })); }} fetcher={q => api.searchVendors(q)} placeholder="Vendor name" />
               </div>
               <div className="full">
                 <label data-tip="Internal notes about what this invoice covers — visible to the project team only">Description / notes</label>

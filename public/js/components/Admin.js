@@ -1,11 +1,34 @@
 // Admin settings page: pasted-text import for vendors and customers, plus
-// live counts. Reachable only when the logged-in user has role=admin.
+// QB CSV file import, and live counts.
+// Reachable only when the logged-in user has role=admin.
+
+// Parse a QuickBooks vendor export CSV.
+// QB exports typically have columns: Name, Type, Company Name, ...
+// We extract the first non-empty "Name" column, skip header row.
+function parseQbVendorCsv(text) {
+  const lines = text.split('\n');
+  if (lines.length < 2) return [];
+  // Detect delimiter: QB can export tab or comma
+  const header = lines[0];
+  const delim = header.includes('\t') ? '\t' : ',';
+  const cols = header.split(delim).map(c => c.replace(/^"|"$/g, '').trim().toLowerCase());
+  const nameIdx = cols.indexOf('name') >= 0 ? cols.indexOf('name')
+                : cols.indexOf('vendor') >= 0 ? cols.indexOf('vendor')
+                : 0;
+  return lines.slice(1)
+    .map(l => {
+      const parts = l.split(delim);
+      return (parts[nameIdx] || '').replace(/^"|"$/g, '').trim();
+    })
+    .filter(n => n && n.toLowerCase() !== 'name' && n.toLowerCase() !== 'vendor');
+}
 
 window.Admin = function Admin({ onClose }) {
   const [status, setStatus] = React.useState(null);
   const [vendorText, setVendorText] = React.useState('');
   const [customerText, setCustomerText] = React.useState('');
-  const [busy, setBusy] = React.useState(null); // 'vendors' | 'customers' | null
+  const [vendorCsvNames, setVendorCsvNames] = React.useState(null); // parsed from CSV upload
+  const [busy, setBusy] = React.useState(null); // 'vendors' | 'customers' | 'vendor-csv' | null
   const [msg, setMsg] = React.useState(null);
   const [err, setErr] = React.useState(null);
 
@@ -55,6 +78,32 @@ window.Admin = function Admin({ onClose }) {
     finally { setBusy(null); }
   }
 
+  function onVendorCsvFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const names = parseQbVendorCsv(ev.target.result);
+      setVendorCsvNames(names);
+      setMsg(null); setErr(null);
+    };
+    reader.readAsText(file);
+    // Reset input so the same file can be re-selected
+    e.target.value = '';
+  }
+
+  async function doImportVendorCsv() {
+    if (!vendorCsvNames || vendorCsvNames.length === 0) return;
+    setErr(null); setMsg(null); setBusy('vendor-csv');
+    try {
+      const total = await importChunked('vendors', vendorCsvNames, true);
+      setMsg(`Imported ${vendorCsvNames.length} vendors from CSV (table now has ${total}).`);
+      setVendorCsvNames(null);
+      await loadStatus();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(null); }
+  }
+
   return (
     <div className="container">
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 8 }}>
@@ -84,10 +133,44 @@ window.Admin = function Admin({ onClose }) {
       </div>
 
       <div className="panel">
-        <h2>Import vendors</h2>
+        <h2>Import vendors — QB CSV file</h2>
         <p className="hint">
-          Paste the QuickBooks vendor list — one name per line. The Import button wipes the
-          existing vendors table and replaces it with what's pasted.
+          Export your vendor list from QuickBooks Online: <strong>Expenses → Vendors → Export (CSV)</strong>.
+          Upload the file here — vendor names will be extracted automatically and replace the current list.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '8px 14px', borderRadius: 6, cursor: 'pointer',
+            border: '1px solid var(--border)', background: 'var(--surface-2)',
+            fontSize: 13, color: 'var(--text-2)',
+          }}>
+            <span>📂</span> Choose QB vendor export (.csv)
+            <input type="file" accept=".csv,.txt,text/csv" onChange={onVendorCsvFile}
+              style={{ display: 'none' }} />
+          </label>
+          {vendorCsvNames && (
+            <>
+              <span className="hint">{vendorCsvNames.length} vendor(s) detected</span>
+              <button className="primary" disabled={busy === 'vendor-csv'}
+                      onClick={doImportVendorCsv}>
+                {busy === 'vendor-csv' ? 'Importing…' : `Import ${vendorCsvNames.length} vendors`}
+              </button>
+              <button onClick={() => setVendorCsvNames(null)}>Clear</button>
+            </>
+          )}
+        </div>
+        {vendorCsvNames && vendorCsvNames.length > 0 && (
+          <div style={{ marginTop: 10, maxHeight: 140, overflowY: 'auto', fontSize: 12, color: 'var(--text-3)', background: 'var(--surface-2)', borderRadius: 6, padding: '8px 12px', border: '1px solid var(--border)' }}>
+            {vendorCsvNames.slice(0, 50).join(', ')}{vendorCsvNames.length > 50 ? ` … and ${vendorCsvNames.length - 50} more` : ''}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>Import vendors — paste text</h2>
+        <p className="hint">
+          Paste the QuickBooks vendor list — one name per line. Replaces the current vendor table.
         </p>
         <textarea rows={10} value={vendorText} onChange={(e)=>setVendorText(e.target.value)}
                   placeholder="Paste vendor list — one per line" />

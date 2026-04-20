@@ -24,6 +24,95 @@ router.userCanAccess = async function (userId, projectId) {
   return await userIsAdmin(userId);
 };
 
+// GET /api/projects/health — all projects with financial health summary
+// Must be declared before /:id to avoid "health" being captured as an id.
+router.get('/health', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.session.userId;
+    const isAdmin = await userIsAdmin(userId);
+    const accessClause = isAdmin
+      ? '1=1'
+      : `p.id IN (SELECT project_id FROM project_members WHERE user_id = ${userId})`;
+
+    const result = await pool.query(`
+      SELECT
+        p.id, p.name, p.description, p.status, p.updated_at, p.created_at,
+        COALESCE(c_stats.active_contracts, 0)    AS active_contracts,
+        COALESCE(c_stats.total_earmarked, 0)     AS total_earmarked,
+        COALESCE(c_stats.total_contract_value, 0) AS total_contract_value,
+        COALESCE(co_stats.co_approved, 0)        AS co_approved,
+        COALESCE(co_stats.co_pending_count, 0)   AS pending_cos,
+        COALESCE(tm_stats.tm_approved, 0)        AS tm_approved,
+        COALESCE(exp_stats.exp_approved, 0)      AS exp_approved,
+        COALESCE(inv_stats.invoiced, 0)          AS invoiced,
+        COALESCE(inv_stats.paid, 0)              AS paid,
+        COALESCE(inv_stats.pending_count, 0)     AS pending_invoices
+      FROM projects p
+
+      LEFT JOIN (
+        SELECT project_id,
+          COUNT(*) FILTER (WHERE status != 'closed')          AS active_contracts,
+          SUM(earmarked_amount) FILTER (WHERE status != 'closed') AS total_earmarked,
+          SUM(total_value) FILTER (WHERE status != 'closed')  AS total_contract_value
+        FROM contracts GROUP BY project_id
+      ) c_stats ON c_stats.project_id = p.id
+
+      LEFT JOIN (
+        SELECT c.project_id,
+          COALESCE(SUM(co.amount) FILTER (WHERE co.status = 'approved'), 0) AS co_approved,
+          COUNT(*) FILTER (WHERE co.status = 'pending') AS co_pending_count
+        FROM change_orders co JOIN contracts c ON c.id = co.contract_id
+        GROUP BY c.project_id
+      ) co_stats ON co_stats.project_id = p.id
+
+      LEFT JOIN (
+        SELECT c.project_id,
+          COALESCE(SUM(tm.amount) FILTER (WHERE tm.status = 'approved'), 0) AS tm_approved
+        FROM tm_charges tm JOIN contracts c ON c.id = tm.contract_id
+        GROUP BY c.project_id
+      ) tm_stats ON tm_stats.project_id = p.id
+
+      LEFT JOIN (
+        SELECT c.project_id,
+          COALESCE(SUM(e.amount) FILTER (WHERE e.status = 'approved'), 0) AS exp_approved
+        FROM contract_expenses e JOIN contracts c ON c.id = e.contract_id
+        GROUP BY c.project_id
+      ) exp_stats ON exp_stats.project_id = p.id
+
+      LEFT JOIN (
+        SELECT c.project_id,
+          COALESCE(SUM(i.amount) FILTER (WHERE i.status IN ('approved','pushed','paid')), 0) AS invoiced,
+          COALESCE(SUM(i.amount) FILTER (WHERE i.status = 'paid'), 0) AS paid,
+          COUNT(*) FILTER (WHERE i.status = 'pending') AS pending_count
+        FROM invoices i JOIN contracts c ON c.id = i.contract_id
+        GROUP BY c.project_id
+      ) inv_stats ON inv_stats.project_id = p.id
+
+      WHERE ${accessClause}
+      ORDER BY p.updated_at DESC
+    `);
+
+    // Compute derived fields server-side so the client doesn't need to
+    const rows = result.rows.map(r => {
+      const commitment   = Number(r.total_contract_value) + Number(r.co_approved);
+      const totalExposure = commitment + Number(r.tm_approved) + Number(r.exp_approved);
+      const earmarked    = Number(r.total_earmarked) || 0;
+      const budgetUsedPct = earmarked > 0 ? (totalExposure / earmarked) * 100 : null;
+      const buffer       = earmarked > 0 ? earmarked - totalExposure : null;
+      let health = 'none'; // no earmark set
+      if (budgetUsedPct !== null) {
+        if (budgetUsedPct >= 100) health = 'danger';
+        else if (budgetUsedPct >= 90) health = 'warning';
+        else if (budgetUsedPct >= 75) health = 'caution';
+        else health = 'ok';
+      }
+      return { ...r, commitment, total_exposure: totalExposure, budget_used_pct: budgetUsedPct, buffer, health };
+    });
+
+    res.json(rows);
+  } catch (err) { next(err); }
+});
+
 // GET /api/projects — projects current user is a member of (or all if admin)
 router.get('/', requireAuth, async (req, res, next) => {
   try {

@@ -220,16 +220,62 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
   finally { client.release(); }
 });
 
-// GET /api/contracts/:id/history
+// GET /api/contracts/:id/history — unified audit trail across all event types
 router.get('/contracts/:id/history', requireAuth, async (req, res, next) => {
   try {
     const contractId = Number(req.params.id);
     const access = await userCanAccessContract(req.session.userId, contractId);
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
-    const result = await pool.query(
-      `SELECT l.*, u.name AS changed_by_name FROM contract_logs l
-       JOIN users u ON u.id = l.changed_by WHERE l.contract_id = $1
-       ORDER BY l.changed_at DESC`, [contractId]);
+
+    const result = await pool.query(`
+      -- Contract-level events (created, edited, status changes, T&M, expenses)
+      SELECT
+        l.id,
+        'contract'          AS source,
+        l.action,
+        l.detail,
+        NULL::numeric       AS amount,
+        u.name              AS changed_by_name,
+        l.changed_at
+      FROM contract_logs l
+      JOIN users u ON u.id = l.changed_by
+      WHERE l.contract_id = $1
+
+      UNION ALL
+
+      -- Invoice events (submitted, approved, rejected, paid, etc.)
+      SELECT
+        l.id,
+        'invoice'           AS source,
+        l.action,
+        COALESCE('Invoice ' || i.invoice_number || ': ' || l.detail, l.detail) AS detail,
+        i.amount,
+        u.name              AS changed_by_name,
+        l.changed_at
+      FROM invoice_logs l
+      JOIN invoices i ON i.id = l.invoice_id
+      JOIN users u ON u.id = l.changed_by
+      WHERE i.contract_id = $1
+
+      UNION ALL
+
+      -- Change order events (created, approved, rejected, edited)
+      SELECT
+        l.id,
+        'change_order'      AS source,
+        l.action,
+        COALESCE('CO' || CASE WHEN co.co_number IS NOT NULL THEN ' ' || co.co_number ELSE '' END || ': ' || l.detail, l.detail) AS detail,
+        co.amount,
+        u.name              AS changed_by_name,
+        l.changed_at
+      FROM change_order_logs l
+      JOIN change_orders co ON co.id = l.change_order_id
+      JOIN users u ON u.id = l.changed_by
+      WHERE co.contract_id = $1
+
+      ORDER BY changed_at DESC
+    `, [contractId]);
+
     res.json(result.rows);
   } catch (err) { next(err); }
 });

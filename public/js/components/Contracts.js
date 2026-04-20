@@ -1,3 +1,22 @@
+// Inline confidence dot shown next to auto-filled contract fields.
+function ContractConfidenceDot({ level }) {
+  if (!level) return null;
+  const map = {
+    high:   { color: '#16a34a', tip: 'High confidence — Claude found this clearly in the document' },
+    medium: { color: '#d97706', tip: 'Medium confidence — verify before saving' },
+    low:    { color: '#dc2626', tip: 'Low confidence — Claude guessed this; please verify' },
+  };
+  const m = map[level];
+  if (!m) return null;
+  return (
+    <span title={m.tip} style={{
+      display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+      background: m.color, marginLeft: 5, verticalAlign: 'middle',
+      boxShadow: `0 0 4px ${m.color}88`,
+    }} />
+  );
+}
+
 // Compute overage severity for a single contract row (invoiced vs initial)
 function contractOverSev(c) {
   const invoiced = parseFloat(c.invoiced_amount) || 0;
@@ -35,77 +54,161 @@ window.Contracts = function Contracts({ projectId, initialContractId, onContract
                            onClose={() => { setSelected(null); load(); }} />;
   }
 
+  // Summary stats
+  const totalValue    = contracts.reduce((s, c) => s + (Number(c.total_value) || 0), 0);
+  const totalInvoiced = contracts.reduce((s, c) => s + (Number(c.invoiced_amount) || 0), 0);
+  const activeCount   = contracts.filter(c => c.status === 'active').length;
+
   return (
     <div className="panel">
-      <div className="panel-header">
-        <h2>Contracts</h2>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Contracts</h2>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3 }}>
+            {contracts.length} contract{contracts.length !== 1 ? 's' : ''}
+            {activeCount > 0 && <span style={{ marginLeft: 8, color: 'var(--ok)', fontWeight: 600 }}>{activeCount} active</span>}
+          </div>
+        </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <a href={`/api/projects/${projectId}/contracts/export`} target="_blank" className="btn" style={{ fontSize: 12 }}>Export CSV</a>
           <button className="primary" onClick={() => setShowNew(true)}>+ New Contract</button>
         </div>
       </div>
-      <div className="toolbar">
+
+      {/* Summary strip */}
+      {contracts.length > 0 && (
+        <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
+          {[
+            { label: 'Total Contracted', value: fmt.money(totalValue) },
+            { label: 'Total Invoiced',   value: fmt.money(totalInvoiced) },
+            { label: 'Contracts',        value: contracts.length },
+          ].map((s, i) => (
+            <div key={i} style={{
+              flex: 1, padding: '12px 18px',
+              borderRight: i < 2 ? '1px solid var(--border)' : 'none',
+              background: 'var(--surface-2)',
+            }}>
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>{s.label}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <input placeholder="Filter by vendor" value={filter.vendor}
-               onChange={(e)=>setFilter({...filter, vendor: e.target.value})} style={{width:180}} />
-        <select value={filter.status} onChange={(e)=>setFilter({...filter, status: e.target.value})} style={{width:120}}>
+               onChange={(e)=>setFilter({...filter, vendor: e.target.value})}
+               style={{ flex: '1 1 160px', minWidth: 0 }} />
+        <select value={filter.status} onChange={(e)=>setFilter({...filter, status: e.target.value})} style={{ width: 130 }}>
           <option value="">All statuses</option>
           <option value="draft">Draft</option>
           <option value="active">Active</option>
           <option value="closed">Closed</option>
         </select>
-        <select value={filter.sort} onChange={(e)=>setFilter({...filter, sort: e.target.value})} style={{width:120}}>
+        <select value={filter.sort} onChange={(e)=>setFilter({...filter, sort: e.target.value})} style={{ width: 130 }}>
           <option value="">Sort: Date</option>
           <option value="vendor">Sort: Vendor</option>
           <option value="amount">Sort: Amount</option>
           <option value="status">Sort: Status</option>
         </select>
       </div>
-      {err && <div className="error">{err}</div>}
+
+      {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
+
       {loading ? <div className="empty">Loading…</div>
        : contracts.length === 0 ? <div className="empty">No contracts match these filters.</div>
        : (
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Vendor</th><th>Description</th><th>Date</th>
-              <th className="num">Initial Contract Amt</th><th className="num">Invoiced</th><th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {contracts.map((c) => {
-              const flag = contractOverSev(c);
-              return (
-              <tr key={c.id} style={{
-                cursor: 'pointer',
-                borderLeft: flag ? `4px solid ${flag.color}` : undefined,
-              }} onClick={()=>setSelected(c.id)}>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <strong>{c.vendor_name}</strong>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {contracts.map((c) => {
+            const flag = contractOverSev(c);
+            const invoiced = Number(c.invoiced_amount) || 0;
+            const total    = Number(c.total_value) || 0;
+            const invoicedPct = total > 0 ? Math.min((invoiced / total) * 100, 100) : 0;
+            const overPct     = total > 0 && invoiced > total ? Math.min(((invoiced - total) / total) * 100, 50) : 0;
+
+            return (
+              <div key={c.id}
+                onClick={() => setSelected(c.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 16,
+                  padding: '14px 18px',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderLeft: `4px solid ${flag ? flag.color : 'var(--border)'}`,
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  transition: 'box-shadow 0.12s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.1)'}
+                onMouseLeave={e => e.currentTarget.style.boxShadow = ''}
+              >
+                {/* Vendor + description */}
+                <div style={{ flex: '1 1 0', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {c.vendor_name}
+                    </span>
                     {flag && (
-                      <span data-tip={`Invoiced ${flag.pct.toFixed(1)}% over initial contract`} style={{
-                        fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
-                        padding: '2px 6px', borderRadius: 4,
+                      <span style={{
+                        fontSize: 9, fontWeight: 800, letterSpacing: '0.08em',
+                        padding: '2px 6px', borderRadius: 4, flexShrink: 0,
                         background: flag.bg, color: flag.color, border: `1px solid ${flag.border}`,
-                        cursor: 'default',
                       }}>{flag.label}</span>
                     )}
-                    {c.file_reference && <a href={`/api/files/${encodeURIComponent(c.file_reference)}`} target="_blank" onClick={e=>e.stopPropagation()} title="View PDF" style={{ color: 'inherit', textDecoration: 'none' }}>📄</a>}
+                    {c.file_reference && (
+                      <a href={`/api/files/${encodeURIComponent(c.file_reference)}`}
+                         target="_blank" onClick={e => e.stopPropagation()}
+                         title="View PDF" style={{ flexShrink: 0, fontSize: 13, textDecoration: 'none' }}>📄</a>
+                    )}
                   </div>
-                </td>
-                <td>{c.description || <span className="hint">—</span>}</td>
-                <td>{fmt.date(c.contract_date)}</td>
-                <td className="num">{fmt.money(c.total_value)}</td>
-                <td className="num" style={{ color: flag ? flag.color : undefined, fontWeight: flag ? 700 : undefined }}>
-                  {fmt.money(c.invoiced_amount)}
-                  {flag && <span style={{ fontSize: 11, marginLeft: 4, opacity: 0.8 }}>↑</span>}
-                </td>
-                <td><span className={`badge ${c.status}`}>{c.status}</span></td>
-              </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {c.description || <span style={{ fontStyle: 'italic' }}>No description</span>}
+                    {c.contract_date && <span style={{ marginLeft: 10 }}>{fmt.date(c.contract_date)}</span>}
+                  </div>
+                </div>
+
+                {/* Mini invoice bar */}
+                <div style={{ flex: '0 0 120px' }}>
+                  <div style={{ height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'visible', position: 'relative', marginBottom: 4 }}>
+                    {invoicedPct > 0 && (
+                      <div style={{
+                        width: `${invoicedPct}%`, height: '100%',
+                        background: flag ? flag.color : '#16a34a',
+                        borderRadius: 3, transition: 'width 0.3s',
+                      }} />
+                    )}
+                    {overPct > 0 && (
+                      <div style={{
+                        position: 'absolute', top: 0, right: `-${overPct * 0.6}%`,
+                        width: `${overPct * 0.6}%`, height: '100%',
+                        background: '#dc2626', borderRadius: '0 3px 3px 0',
+                        boxShadow: '0 0 4px rgba(220,38,38,0.5)',
+                      }} />
+                    )}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-3)', textAlign: 'right' }}>
+                    {invoicedPct.toFixed(0)}% invoiced
+                  </div>
+                </div>
+
+                {/* Amounts */}
+                <div style={{ flex: '0 0 110px', textAlign: 'right' }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>{fmt.money(total)}</div>
+                  <div style={{ fontSize: 11.5, color: flag ? flag.color : 'var(--text-3)', fontWeight: flag ? 600 : 400 }}>
+                    {fmt.money(invoiced)} invoiced
+                  </div>
+                </div>
+
+                {/* Status */}
+                <div style={{ flex: '0 0 64px', textAlign: 'right' }}>
+                  <span className={`badge ${c.status}`}>{c.status}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
       {showNew && <NewContractModal projectId={projectId}
         onClose={()=>setShowNew(false)}
@@ -125,6 +228,7 @@ function NewContractModal({ projectId, onClose, onSaved }) {
   const [fileRef, setFileRef] = React.useState(null);
   const [uploading, setUploading] = React.useState(false);
   const [extractNote, setExtractNote] = React.useState(null);
+  const [confidence, setConfidence] = React.useState({});
   const [status, setStatus] = React.useState('draft');
   const [lines, setLines] = React.useState([{qb_code_id:'',amount:''}]);
   const [err, setErr] = React.useState(null);
@@ -148,12 +252,18 @@ function NewContractModal({ projectId, onClose, onSaved }) {
         setExtractNote(`File saved, but extraction failed: ${resp.extract_error}`);
       } else if(resp.extracted){
         const e=resp.extracted;
-        if(e.vendor_name&&!vendor) setVendor(e.vendor_name);
-        if(e.total_value&&(!total||Number(total)===0)) setTotal(String(e.total_value));
-        if(e.contract_date&&!date) setDate(e.contract_date);
-        if(e.reference_number&&!ref) setRef(e.reference_number);
+        const filled=[];
+        if(e.vendor_name&&!vendor){setVendor(e.vendor_name);filled.push('vendor_name');}
+        if(e.total_value&&(!total||Number(total)===0)){setTotal(String(e.total_value));filled.push('total_value');}
+        if(e.contract_date&&!date){setDate(e.contract_date);filled.push('contract_date');}
+        if(e.reference_number&&!ref){setRef(e.reference_number);filled.push('reference_number');}
         if(e.description) setDescription(d=>d?`${d}\n\n${e.description}`:e.description);
-        setExtractNote('Fields pre-filled from PDF — review before saving.');
+        if(e.confidence){
+          const conf={};
+          filled.forEach(f=>{if(e.confidence[f])conf[f]=e.confidence[f];});
+          setConfidence(conf);
+        }
+        setExtractNote('Fields pre-filled from PDF — colored dots show extraction confidence.');
       }
     } catch(e){setErr(e.message);}
     finally{setUploading(false);}
@@ -260,24 +370,32 @@ function NewContractModal({ projectId, onClose, onSaved }) {
 
             <div className="form-grid">
               <div>
-                <label data-tip="The company or individual you are contracting with. Type to search existing vendors.">Vendor</label>
-                <SmartSearch value={vendor} onChange={v => setVendor(v)} fetcher={q => api.searchVendors(q)} placeholder="Search vendors" />
+                <label data-tip="The company or individual you are contracting with. Type to search existing vendors.">
+                  Vendor <ContractConfidenceDot level={confidence.vendor_name} />
+                </label>
+                <SmartSearch value={vendor} onChange={v => { setVendor(v); setConfidence(c=>({...c,vendor_name:undefined})); }} fetcher={q => api.searchVendors(q)} placeholder="Search vendors" />
               </div>
               <div>
-                <label data-tip="The vendor's own reference number or proposal number. Used for matching their invoices later.">Reference number</label>
-                <input value={ref} onChange={e => setRef(e.target.value)} />
+                <label data-tip="The vendor's own reference number or proposal number. Used for matching their invoices later.">
+                  Reference number <ContractConfidenceDot level={confidence.reference_number} />
+                </label>
+                <input value={ref} onChange={e => { setRef(e.target.value); setConfidence(c=>({...c,reference_number:undefined})); }} />
               </div>
               <div>
-                <label data-tip="The dollar amount on the signed contract — the fixed lump sum only. Do not include estimated T&M.">Initial Contract Amount</label>
-                <input type="number" step="0.01" value={total} onChange={e => setTotal(e.target.value)} placeholder="0.00" />
+                <label data-tip="The dollar amount on the signed contract — the fixed lump sum only. Do not include estimated T&M.">
+                  Initial Contract Amount <ContractConfidenceDot level={confidence.total_value} />
+                </label>
+                <input type="number" step="0.01" value={total} onChange={e => { setTotal(e.target.value); setConfidence(c=>({...c,total_value:undefined})); }} placeholder="0.00" />
               </div>
               <div>
                 <label data-tip="Your internal budget for what this vendor will actually cost you — including open-ended T&M, meetings, and additional services. Leave blank if truly unknown. The dashboard uses this as the warning threshold.">Internal Budget</label>
                 <input type="number" step="0.01" value={earmarked} onChange={e => setEarmarked(e.target.value)} placeholder="Optional — incl. T&M tail" />
               </div>
               <div>
-                <label data-tip="The date the contract was signed or became effective.">Contract date</label>
-                <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+                <label data-tip="The date the contract was signed or became effective.">
+                  Contract date <ContractConfidenceDot level={confidence.contract_date} />
+                </label>
+                <input type="date" value={date} onChange={e => { setDate(e.target.value); setConfidence(c=>({...c,contract_date:undefined})); }} />
               </div>
               <div>
                 <label data-tip="Draft = not yet active. Active = work in progress. Closed = complete or terminated.">Status</label>
@@ -663,19 +781,88 @@ function ContractDetail({ contractId, projectId, onClose }) {
             );
           })()}
 
-          {activeTab === 'history' && history.length > 0 && (
-            <div className="activity-log">
-              {history.map(h => (
-                <div key={h.id} className="activity-item">
-                  <span className={`activity-action ${h.action}`}>{h.action}</span>
-                  <span style={{ flex: 1 }}>{h.detail}</span>
-                  <span className="hint">{h.changed_by_name} · {fmt.datetime(h.changed_at)}</span>
-                </div>
-              ))}
-            </div>
-          )}
           {activeTab === 'history' && history.length === 0 && (
             <div className="empty">No history yet.</div>
+          )}
+          {activeTab === 'history' && history.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {history.map((h, idx) => {
+                const cfg = {
+                  // contract events
+                  created:          { icon: '◈', color: '#16a34a', label: 'Contract created' },
+                  edited:           { icon: '✎', color: '#2563eb', label: 'Contract edited'  },
+                  // invoice events
+                  created_invoice:  { icon: '📄', color: '#6b7280', label: 'Invoice submitted' },
+                  approved:         { icon: '✓',  color: '#16a34a', label: 'Approved'          },
+                  rejected:         { icon: '✕',  color: '#dc2626', label: 'Rejected'          },
+                  on_hold:          { icon: '⏸',  color: '#d97706', label: 'Put on hold'       },
+                  pushed:           { icon: '→',  color: '#0891b2', label: 'Pushed to QB'      },
+                  paid:             { icon: '$',  color: '#16a34a', label: 'Marked paid'       },
+                  reverted:         { icon: '↩',  color: '#9333ea', label: 'Reverted'          },
+                  // change order events
+                  created_co:       { icon: '＋', color: '#d97706', label: 'CO submitted'      },
+                  approved_co:      { icon: '✓',  color: '#16a34a', label: 'CO approved'       },
+                  rejected_co:      { icon: '✕',  color: '#dc2626', label: 'CO rejected'       },
+                  // T&M events (written to contract_logs)
+                  tm_added:         { icon: '⏱',  color: '#d97706', label: 'T&M added'         },
+                  tm_approved:      { icon: '✓',  color: '#16a34a', label: 'T&M approved'      },
+                  tm_rejected:      { icon: '✕',  color: '#dc2626', label: 'T&M rejected'      },
+                  tm_deleted:       { icon: '✕',  color: '#9ca3af', label: 'T&M deleted'       },
+                  // Expense events
+                  expense_added:    { icon: '🧾', color: '#d97706', label: 'Expense added'     },
+                  expense_approved: { icon: '✓',  color: '#16a34a', label: 'Expense approved'  },
+                  expense_rejected: { icon: '✕',  color: '#dc2626', label: 'Expense rejected'  },
+                  expense_deleted:  { icon: '✕',  color: '#9ca3af', label: 'Expense deleted'   },
+                }[h.action] || { icon: '·', color: '#9ca3af', label: h.action };
+
+                // Derive a clean action label from source + action for CO/invoice
+                let actionLabel = cfg.label;
+                if (h.source === 'invoice' && h.action === 'created') actionLabel = 'Invoice submitted';
+                if (h.source === 'change_order' && h.action === 'created') actionLabel = 'CO submitted';
+                if (h.source === 'change_order' && h.action === 'approved') actionLabel = 'CO approved';
+                if (h.source === 'change_order' && h.action === 'rejected') actionLabel = 'CO rejected';
+                if (h.source === 'change_order' && h.action === 'edited') actionLabel = 'CO edited';
+
+                return (
+                  <div key={`${h.source}-${h.id}-${idx}`} style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 12,
+                    padding: '10px 14px',
+                    borderRadius: 7,
+                    background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)',
+                    border: '1px solid var(--border)',
+                  }}>
+                    {/* Icon */}
+                    <div style={{
+                      flexShrink: 0, width: 28, height: 28, borderRadius: '50%',
+                      background: `${cfg.color}18`, border: `1px solid ${cfg.color}40`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 12, color: cfg.color, fontWeight: 700, marginTop: 1,
+                    }}>{cfg.icon}</div>
+
+                    {/* Content */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: cfg.color }}>{actionLabel}</span>
+                        {h.amount != null && Number(h.amount) > 0 && (
+                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', fontFamily: 'var(--mono)' }}>
+                            {fmt.moneyPrecise(h.amount)}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 2, lineHeight: 1.4 }}>
+                        {h.detail}
+                      </div>
+                    </div>
+
+                    {/* Who + when */}
+                    <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)' }}>{h.changed_by_name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{fmt.datetime(h.changed_at)}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </>
       )}
