@@ -155,8 +155,14 @@ window.Invoices = function Invoices({ projectId }) {
             <th style={{ width: 28 }}><input type="checkbox" style={{ width: 'auto' }}
               checked={selected.size > 0 && selected.size === invoices.filter(i => i.status === 'pending').length}
               onChange={e => e.target.checked ? selectAll() : setSelected(new Set())} /></th>
-            <th>Invoice #</th><th>Vendor</th><th>Contract</th><th>Date</th>
-            <th className="num">Amount</th><th>Status</th><th>Created by</th><th></th>
+            <th data-tip="Vendor's invoice reference number">Invoice #</th>
+            <th data-tip="Vendor or subcontractor who submitted this invoice">Vendor</th>
+            <th data-tip="The contract this invoice is billed against">Contract</th>
+            <th data-tip="Date on the invoice from the vendor">Date</th>
+            <th className="num" data-tip="Total billed amount on this invoice">Amount</th>
+            <th data-tip="pending = awaiting approval · approved = ready to pay · paid = check sent · rejected = sent back to vendor">Status</th>
+            <th data-tip="Team member who entered this invoice">Created by</th>
+            <th></th>
           </tr></thead>
           <tbody>
             {invoices.map(i => (
@@ -276,11 +282,11 @@ function InvoiceEdit({ invoiceId, projectId, contracts, onClose }) {
         </table>
       </div>}
       <div className="form-grid">
-        <div><label>Invoice number</label><input value={form.invoice_number} disabled={locked} onChange={e => setForm({ ...form, invoice_number: e.target.value })} /></div>
-        <div><label>Vendor</label><SmartSearch value={form.vendor_name} onChange={v => setForm({ ...form, vendor_name: v })} fetcher={q => api.searchVendors(q)} placeholder="Vendor" /></div>
-        <div><label>Amount</label><input type="number" step="0.01" value={form.amount} disabled={locked} onChange={e => setForm({ ...form, amount: e.target.value })} /></div>
-        <div><label>Date</label><input type="date" value={form.invoice_date} disabled={locked} onChange={e => setForm({ ...form, invoice_date: e.target.value })} /></div>
-        <div className="full"><label>Description / notes</label><textarea rows={4} value={form.description} disabled={locked} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+        <div><label data-tip="The invoice number from the vendor's document — used for duplicate detection">Invoice number</label><input value={form.invoice_number} disabled={locked} onChange={e => setForm({ ...form, invoice_number: e.target.value })} /></div>
+        <div><label data-tip="Vendor or subcontractor submitting this invoice">Vendor</label><SmartSearch value={form.vendor_name} onChange={v => setForm({ ...form, vendor_name: v })} fetcher={q => api.searchVendors(q)} placeholder="Vendor" /></div>
+        <div><label data-tip="Total dollar amount billed on this invoice">Amount</label><input type="number" step="0.01" value={form.amount} disabled={locked} onChange={e => setForm({ ...form, amount: e.target.value })} /></div>
+        <div><label data-tip="Date printed on the vendor's invoice — may differ from the date it was received">Date</label><input type="date" value={form.invoice_date} disabled={locked} onChange={e => setForm({ ...form, invoice_date: e.target.value })} /></div>
+        <div className="full"><label data-tip="Internal notes about what this invoice covers — not visible to the vendor">Description / notes</label><textarea rows={4} value={form.description} disabled={locked} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
         {!locked && <div className="full"><button className="primary" onClick={save}>Save changes</button></div>}
       </div>
 
@@ -301,11 +307,21 @@ function InvoiceEdit({ invoiceId, projectId, contracts, onClose }) {
   );
 }
 
+// Expose InvoiceEdit globally so ContractDetail can use it without duplication.
+window.InvoiceEdit = InvoiceEdit;
+
 // --- New invoice modal ---
-function NewInvoiceModal({ projectId, contracts, onClose, onSaved }) {
-  const [mode, setMode] = React.useState('contract'); // contract | multi | standalone
-  const [contractId, setContractId] = React.useState('');
-  const [context, setContext] = React.useState(null);
+// defaultContractId: pre-selects and locks the contract (used when entering from ContractDetail)
+// lockedContract: { id, vendor_name, total_value, remaining_amount } — display info when locked
+window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClose, onSaved, defaultContractId, lockedContract }) {
+  const [mode, setMode] = React.useState(defaultContractId ? 'contract' : 'contract');
+  const [contractId, setContractId] = React.useState(defaultContractId || '');
+  const [context, setContext] = React.useState(lockedContract ? {
+    total: Number(lockedContract.total_value),
+    invoiced: Number(lockedContract.invoiced_amount || 0),
+    remaining: Number(lockedContract.remaining_amount || lockedContract.total_value),
+    vendor: lockedContract.vendor_name,
+  } : null);
   const [allocs, setAllocs] = React.useState([{ contract_id: '', amount: '' }]);
   const [invoiceNumber, setInvoiceNumber] = React.useState('');
   const [amount, setAmount] = React.useState('');
@@ -380,80 +396,183 @@ function NewInvoiceModal({ projectId, contracts, onClose, onSaved }) {
     finally { setSaving(false); }
   }
 
-  const overspend = mode === 'contract' && context && Number(amount) > context.remaining;
+  const overspend = mode === 'contract' && context && Number(amount) > context.remaining + 0.01;
+  const pdfUrl = fileRef ? `/api/files/${encodeURIComponent(fileRef.file_reference)}` : null;
+  const hasPdf = !!pdfUrl;
+  const isLocked = !!defaultContractId; // contract context — locked to this contract
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 640 }}>
-        <div className="modal-header"><strong>New Invoice</strong><button onClick={onClose}>×</button></div>
-        <div className="modal-body">
-          <div className="tabs" style={{ marginBottom: 12 }}>
-            <button className={mode === 'contract' ? 'active' : ''} onClick={() => setMode('contract')}>Single contract</button>
-            <button className={mode === 'multi' ? 'active' : ''} onClick={() => setMode('multi')}>Split across contracts</button>
-            <button className={mode === 'standalone' ? 'active' : ''} onClick={() => setMode('standalone')}>Standalone</button>
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000,
+      background: 'rgba(0,0,0,0.75)',
+      display: 'flex', flexDirection: 'column',
+    }} onClick={onClose}>
+      <div style={{
+        flex: 1, display: 'flex', flexDirection: 'column',
+        margin: hasPdf ? '20px' : 'auto',
+        width: hasPdf ? 'calc(100% - 40px)' : '660px',
+        maxHeight: hasPdf ? 'calc(100% - 40px)' : 'calc(100% - 60px)',
+        background: 'var(--surface)', borderRadius: 10,
+        border: '1px solid var(--border)', overflow: 'hidden',
+      }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <div>
+            <strong style={{ fontSize: 15 }}>New Invoice</strong>
+            {isLocked && context && (
+              <span style={{ marginLeft: 10, fontSize: 12, color: 'var(--text-3)' }}>
+                against <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{lockedContract?.vendor_name}</span>
+                {' — '}{fmt.money(context.remaining)} remaining
+              </span>
+            )}
           </div>
-          <div className="form-grid">
-            {mode === 'contract' && <>
-              <div className="full"><label>Contract</label>
-                <select value={contractId} onChange={e => setContractId(e.target.value)}>
+          <button onClick={onClose} style={{ fontSize: 18, lineHeight: 1, padding: '2px 8px' }}>×</button>
+        </div>
+
+        {/* Mode tabs — only shown when not locked to a contract */}
+        {!isLocked && (
+          <div style={{ padding: '10px 20px 0', borderBottom: '1px solid var(--border)', display: 'flex', gap: 0, flexShrink: 0 }}>
+            {[
+              { k: 'contract', label: 'Against a contract' },
+              { k: 'multi',    label: 'Split across contracts' },
+              { k: 'standalone', label: 'Standalone (no contract)' },
+            ].map(t => (
+              <button key={t.k} onClick={() => setMode(t.k)} style={{
+                padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer',
+                fontSize: 13, fontWeight: mode === t.k ? 600 : 400,
+                color: mode === t.k ? 'var(--accent)' : 'var(--text-2)',
+                borderBottom: mode === t.k ? '2px solid var(--accent)' : '2px solid transparent',
+                marginBottom: -1,
+              }}>{t.label}</button>
+            ))}
+          </div>
+        )}
+
+        {/* Body */}
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
+
+          {/* PDF viewer */}
+          {hasPdf && (
+            <div style={{ flex: '0 0 55%', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: '#1a1a1a' }}>
+              <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>📄</span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileRef.filename}</span>
+                <a href={pdfUrl} target="_blank" style={{ fontSize: 11 }}>Open ↗</a>
+                <button onClick={() => setFileRef(null)} style={{ fontSize: 11, color: 'var(--text-3)' }}>Remove</button>
+              </div>
+              <iframe src={pdfUrl} style={{ flex: 1, border: 'none', width: '100%' }} title="Invoice PDF" />
+            </div>
+          )}
+
+          {/* Form */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+
+            {/* Drop zone */}
+            {!hasPdf && (
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 6, display: 'block' }}>Invoice PDF — upload to view alongside form</label>
+                <Dropzone file={null} onFile={onFile} onClear={() => setFileRef(null)} busy={uploading}
+                  accept="application/pdf"
+                  label={uploading ? 'Uploading…' : 'Drop invoice PDF — fields will auto-fill and PDF stays visible while you enter data'} />
+              </div>
+            )}
+            {extractNote && (
+              <div style={{ padding: '8px 12px', marginBottom: 14, borderRadius: 5, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', fontSize: 12, color: 'var(--ok)' }}>
+                {extractNote}
+              </div>
+            )}
+
+            {/* Contract selector — only when NOT locked */}
+            {!isLocked && mode === 'contract' && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Contract</label>
+                <select value={contractId} onChange={e => setContractId(e.target.value)} style={{ width: '100%' }}>
                   <option value="">— Select a contract —</option>
                   {contracts.map(c => <option key={c.id} value={c.id}>{c.vendor_name} — {fmt.money(c.total_value)} ({c.status})</option>)}
-                </select></div>
-              {context && <div className="full hint">
-                Total: <strong>{fmt.money(context.total)}</strong> · Invoiced: <strong>{fmt.money(context.invoiced)}</strong> · Remaining: <strong>{fmt.money(context.remaining)}</strong>
-              </div>}
-            </>}
-            <div className="full"><label>Invoice PDF — auto-fills fields via AI</label>
-              <Dropzone file={fileRef ? { filename: fileRef.filename, download_url: fileRef.download_url } : null}
-                onFile={onFile} onClear={() => setFileRef(null)} busy={uploading} accept="application/pdf"
-                label={uploading ? 'Analyzing with Claude AI…' : 'Drop invoice PDF here — fields will auto-fill'} />
-              {extractNote && <div className="hint" style={{ marginTop: 6 }}>{extractNote}</div>}
+                </select>
+                {context && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-3)' }}>
+                    Initial: <strong style={{ color: 'var(--text-2)' }}>{fmt.money(context.total)}</strong>
+                    {' · '}Invoiced: <strong style={{ color: 'var(--text-2)' }}>{fmt.money(context.invoiced)}</strong>
+                    {' · '}Remaining: <strong style={{ color: context.remaining < 0 ? 'var(--danger)' : 'var(--ok)' }}>{fmt.money(context.remaining)}</strong>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Main fields */}
+            <div className="form-grid">
+              <div>
+                <label data-tip="The invoice number from the vendor's document — used for duplicate detection">Invoice number</label>
+                <input value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="e.g. INV-001" autoFocus={!hasPdf} />
+              </div>
+              <div>
+                <label data-tip="Total dollar amount billed on this invoice">Amount</label>
+                <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+              </div>
+              <div>
+                <label data-tip="Date printed on the vendor's invoice — may differ from today's date">Invoice date</label>
+                <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+              </div>
+              <div>
+                <label data-tip="Vendor or subcontractor submitting this invoice">Vendor</label>
+                <SmartSearch value={vendor} onChange={v => setVendor(v)} fetcher={q => api.searchVendors(q)} placeholder="Vendor name" />
+              </div>
+              <div className="full">
+                <label data-tip="Internal notes about what this invoice covers — visible to the project team only">Description / notes</label>
+                <textarea rows={3} value={description} onChange={e => setDescription(e.target.value)}
+                  placeholder="What is this invoice for?" />
+              </div>
             </div>
-            <div><label>Invoice number</label><input value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="e.g. INV-001" /></div>
-            <div><label>Total amount ($)</label><input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></div>
-            <div><label>Invoice date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
-            <div><label>Vendor</label><SmartSearch value={vendor} onChange={v => setVendor(v)} fetcher={q => api.searchVendors(q)} placeholder="Start typing vendor name" /></div>
-            <div className="full"><label>Notes / description</label>
-              <textarea rows={3} value={description} onChange={e => setDescription(e.target.value)} placeholder="AI will generate a summary when you upload a PDF" /></div>
+
+            {/* Multi-contract split */}
+            {mode === 'multi' && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Split across contracts</div>
+                <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 10 }}>Amounts must sum to {fmt.money(Number(amount) || 0)}</div>
+                <table className="data">
+                  <thead><tr><th>Contract</th><th className="num">Amount</th><th></th></tr></thead>
+                  <tbody>
+                    {allocs.map((a, i) => (
+                      <tr key={i}>
+                        <td>
+                          <select value={a.contract_id} onChange={e => setAlloc(i, { contract_id: e.target.value })} style={{ minWidth: 260 }}>
+                            <option value="">— Select —</option>
+                            {contracts.map(c => <option key={c.id} value={c.id}>{c.vendor_name} — {fmt.money(c.total_value)}</option>)}
+                          </select>
+                        </td>
+                        <td className="num">
+                          <input type="number" step="0.01" value={a.amount}
+                            onChange={e => setAlloc(i, { amount: e.target.value })} style={{ textAlign: 'right', maxWidth: 120 }} />
+                        </td>
+                        <td><button onClick={() => setAllocs(allocs.filter((_, j) => j !== i))}>✕</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr>
+                    <td><button onClick={() => setAllocs([...allocs, { contract_id: '', amount: '' }])}>+ Add contract</button></td>
+                    <td className="num"><strong style={{ color: Math.abs(allocDiff) > 0.01 ? 'var(--danger)' : 'var(--ok)' }}>{fmt.moneyPrecise(allocSum)}</strong></td>
+                    <td></td>
+                  </tr></tfoot>
+                </table>
+              </div>
+            )}
+
+            {overspend && (
+              <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 5, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', fontSize: 12, color: 'var(--warn)' }}>
+                ⚠️ Amount exceeds remaining contract balance ({fmt.moneyPrecise(context.remaining)})
+              </div>
+            )}
+            {err && <div className="error" style={{ marginTop: 12 }}>{err}</div>}
           </div>
-
-          {mode === 'multi' && <>
-            <h3 style={{ marginTop: 16, fontSize: 14 }}>Contract allocations</h3>
-            <div className="hint" style={{ marginBottom: 8 }}>Split this invoice across multiple contracts. Amounts must sum to the total above.</div>
-            <table className="data">
-              <thead><tr><th>Contract</th><th className="num">Amount</th><th></th></tr></thead>
-              <tbody>
-                {allocs.map((a, i) => (
-                  <tr key={i}>
-                    <td><select value={a.contract_id} onChange={e => setAlloc(i, { contract_id: e.target.value })} style={{ minWidth: 280 }}>
-                      <option value="">— Select —</option>
-                      {contracts.map(c => <option key={c.id} value={c.id}>{c.vendor_name} — {fmt.money(c.total_value)}</option>)}
-                    </select></td>
-                    <td className="num"><input type="number" step="0.01" value={a.amount}
-                      onChange={e => setAlloc(i, { amount: e.target.value })} style={{ textAlign: 'right', maxWidth: 140 }} /></td>
-                    <td><button onClick={() => setAllocs(allocs.filter((_, j) => j !== i))}>✕</button></td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot><tr>
-                <td><button onClick={() => setAllocs([...allocs, { contract_id: '', amount: '' }])}>+ Add contract</button></td>
-                <td className="num"><strong>{fmt.moneyPrecise(allocSum)}</strong></td><td></td>
-              </tr></tfoot>
-            </table>
-            {Math.abs(allocDiff) > 0.01 && <div className="hint" style={{ marginTop: 6, color: 'var(--danger)' }}>
-              Off by {fmt.moneyPrecise(allocDiff)} — must match total amount.
-            </div>}
-          </>}
-
-          {overspend && <div className="error" style={{ marginTop: 10 }}>
-            This amount exceeds the remaining contract balance ({fmt.moneyPrecise(context.remaining)}). The server will block this — reduce the amount or update the contract.
-          </div>}
-          {err && <div className="error" style={{ marginTop: 10 }}>{err}</div>}
         </div>
-        <div className="modal-footer">
+
+        {/* Footer */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0, background: 'var(--surface)' }}>
           <button onClick={onClose}>Cancel</button>
           <button className="primary" disabled={saving} onClick={save}>
-            {saving ? <><span className="spinner"></span>Creating…</> : 'Create Invoice'}
+            {saving ? 'Creating…' : 'Create Invoice'}
           </button>
         </div>
       </div>

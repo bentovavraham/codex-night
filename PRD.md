@@ -171,6 +171,147 @@ The dashboard is the most important screen. It must answer these questions in un
 
 ---
 
+## 6a. Application Architecture — Data Hierarchy & UI Flow
+
+*Added 2026-04-20 — supersedes any earlier UI structure notes.*
+
+### The Hierarchy (single source of truth)
+
+```
+PROJECT
+  └── CONTRACT (one per vendor/scope agreement)
+        ├── Initial Contract Amount      ← the signed dollar amount
+        ├── Earmarked Amount             ← internal budget (always ≥ contract amount)
+        │
+        ├── CHANGE ORDERS                ← formal scope/cost modifications
+        │     └── CO#, description, amount, status (pending → approved | rejected)
+        │
+        ├── T&M CHARGES                  ← time & material, non-contract work
+        │     └── description, hours, rate, amount, date
+        │
+        ├── CONTRACT EXPENSES            ← reimbursables billed on top of contract
+        │     └── category: travel | hotel | tolls | copies | food | other
+        │     └── amount, date, receipt
+        │
+        └── INVOICES                     ← payment requests (against this contract)
+              └── invoice#, vendor, amount, date, QB code
+              └── status: pending → approved → pushed → paid
+
+  STANDALONE INVOICES (no contract)    ← tax bills, utilities, one-off payments
+    └── linked directly to project, no contract_id
+    └── same invoice fields, same approval flow
+```
+
+### The Math Per Contract
+
+```
+Initial Contract Amount:        $350,000   ← signed agreement
++ Approved Change Orders:       $ 40,000   ← formal scope changes (approved only)
++ Approved T&M Charges:         $ 15,000   ← time & material (approved only)
++ Approved Contract Expenses:   $  5,000   ← reimbursables (approved only)
+══════════════════════════════════════════
+= COMMITMENT:                   $410,000   ← what we're legally on the hook for
+
+  Earmarked Amount:             $500,000   ← internal budget ceiling
+  Earmark Buffer:               $ 90,000   ← earmark minus commitment (shrinks with COs)
+
+  Invoiced to Date:             $380,000   ← what has been billed
+  Paid to Date:                 $350,000   ← cash actually out the door
+  Outstanding:                  $ 30,000   ← invoiced but not yet paid
+
+ALERTS (automatic, unavoidable):
+  🔴 Cost Creep  → Commitment > Earmarked Amount
+  🔴 Overrun     → Invoiced > Commitment
+  ⚠️ Pending COs → Show what commitment becomes IF all pending COs are approved
+```
+
+### Project Level = Rollup of All Contracts
+
+```
+PROJECT SUMMARY
+  Total Earmarked      = SUM of all contract earmarked amounts
+  Total Commitment     = SUM of all contract commitments
+  Total Invoiced       = SUM of all invoices (approved+)
+  Total Paid           = SUM of all paid invoices
+  Projects in Creep    = Contracts where commitment > earmarked
+  Projects with Overrun= Contracts where invoiced > commitment
+```
+
+### Invoice Entry — Two Paths, One Record
+
+**Path 1 — From Contract Detail (Invoices tab):**
+- Contract is pre-filled and locked. User enters: invoice#, amount, date, vendor, QB code, PDF.
+- Invoice is created with `contract_id` set. Appears in both the contract's Invoices tab AND the project's Invoices tab.
+
+**Path 2 — From Project Invoices tab:**
+- Three modes: Single Contract / Split across contracts / Standalone (no contract)
+- Standalone invoices: `contract_id` is null, linked to project only (e.g. tax payment, utility bill)
+- All invoices appear in the project Invoices tab regardless of type
+
+**Rule:** One invoice = one record. No duplication. The contract Invoices tab is a filtered view of the same data.
+
+### Invoice Lifecycle — Available at Both Contract and Project Level
+
+Every invoice action must be available wherever invoices are displayed. The contract-level Invoices tab is NOT read-only — it provides the full workflow:
+
+| Action | When Available | Result |
+|--------|---------------|--------|
+| **Edit** | Any status (locked if pushed/paid) | Update invoice number, amount, date, vendor, notes |
+| **Approve** | `pending` or `on_hold` | Status → `approved`. Flags as committed. |
+| **Hold** | `pending` | Status → `on_hold`. Optional hold reason saved. |
+| **Reject** | `pending` | Status → `rejected`. Rejection reason required. |
+| **Release** | `on_hold` | Status → `pending`. Clears hold. |
+| **Revert** | `approved`, `rejected`, `pushed`, `paid` | Status → `pending`. Reopens for review. |
+| **Push** | `approved` | Status → `pushed`. Marks as sent to accounting/QB. |
+| **Mark Paid** | `approved` or `pushed` | Status → `paid`. Registers payment. |
+
+The contract-level Invoices tab also shows:
+- A summary strip: Pending total / Approved+ total / Paid total
+- Rejection note row inline below rejected invoices
+- Hold reason row inline below held invoices
+
+### UI Navigation Flow
+
+```
+1. PROJECTS LIST
+   → Click project → PROJECT DASHBOARD
+
+2. PROJECT DASHBOARD
+   → Shows: total earmarked / committed / invoiced / paid (rollup)
+   → Shows: each contract as a card with its own health status
+   → Red/yellow alerts bubble up from any contract
+   → Click a contract → CONTRACT DETAIL
+
+3. CONTRACT DETAIL (the command center for one contract)
+   → Header strip: Vendor | Initial Amount | Earmarked | Status
+   → Cost ledger: Initial + COs + T&M + Expenses = Commitment vs Earmark
+   → Tabs:
+       [Change Orders]  — add/approve/reject formal scope changes
+       [T&M Charges]    — add time & material work
+       [Expenses]       — add reimbursables (travel / hotel / tolls / copies / food)
+       [Invoices]       — submit payment requests against this contract
+       [History]        — full audit trail
+```
+
+### Nomenclature Enforcement in UI
+
+Every label in the application must use these exact terms. No deviations:
+
+| UI Label | Meaning |
+|----------|---------|
+| Initial Contract Amount | The signed dollar amount of the base contract |
+| Earmarked Amount | Internal budget — always ≥ Initial Contract Amount |
+| Commitment | Initial Contract Amount + all approved COs + T&M + Expenses |
+| Earmark Buffer | Earmarked Amount minus Commitment |
+| Change Order | Formal modification — must be approved before affecting Commitment |
+| T&M Charge | Time & Material — non-contract work billed by hour/rate |
+| Contract Expense | Reimbursable: travel, hotel, tolls, copies, food, other |
+| Invoice | Payment request. QB code required. Against contract, CO, T&M, or Expense |
+| Cost Creep | Commitment > Earmarked Amount |
+| Overrun | Invoiced > Commitment |
+
+---
+
 ## 7. Development Phases
 
 ---
@@ -347,6 +488,68 @@ Based on Phase 1, here is the build order:
 7. **Duplicate detection** — automatic, on every invoice entry
 8. **QB code enforcement** — disabled submit until code selected
 9. **Dashboard redesign** — tells the story described above
+
+---
+
+## 12. The "Lowball and Run" Problem — Mixed Contract Spend Story
+
+A significant portion of Active Acquisitions' vendor contracts follow a predictable pattern:
+
+1. Vendor quotes a low fixed-fee lump sum to win the engagement (e.g., $6,300 for Tasks 1+2)
+2. Additional work is scoped as open-ended T&M (Task 3, Meetings)
+3. Monthly T&M invoices arrive for months — often exceeding the initial fixed fee within the first billing cycle
+4. By end of engagement, actual spend may be 2-5x the initial contract amount
+
+**Example (Bright View Engineering, Project 203010):**
+- Initial lump sum contract: $6,300
+- Invoice 203010a-4 alone (one month): $4,132.50
+- This is invoice #4 — total billing likely $15,000–$25,000+ for a "small" engagement
+
+### The Questions the Contract Dashboard Must Answer
+
+For any contract, Seth needs to see instantly:
+1. **What did we sign for?** → Initial Contract Amount
+2. **What have we been billed?** → Total Invoiced (may far exceed the initial)
+3. **How far over the signed amount are we?** → $ and % over initial contract
+4. **How much budget do we have left?** → Earmarked − Invoiced (internal budget vs. reality)
+5. **Are we on track to stay within our internal budget?** → Burn rate signal
+
+### How the System Models This
+
+| Concept | Field | Who Sets It |
+|---|---|---|
+| What was signed | `total_value` (Initial Contract Amount) | PM when creating contract |
+| Internal budget for total expected spend (incl. T&M tail) | `earmarked_amount` | Seth / PM at contract creation |
+| What's actually been billed | Sum of approved invoices | Arrives via Richard's invoice entry |
+| Over/under initial contract | `invoiced − original_contract` | Computed |
+| Over/under internal budget | `invoiced − earmarked_amount` | Computed |
+
+### Key UX Decision: Earmarked = Total Expected Spend
+
+For mixed lump-sum + T&M contracts, the Earmarked Amount field is the PM's best estimate of total expected spend, including the open-ended T&M tail. When entering a contract like Bright View:
+- Initial Contract Amount: $6,300 (what the proposal says)
+- Earmarked Amount: $22,000 (what Seth actually expects to spend by end of engagement)
+
+The contract dashboard burn bar uses the Earmarked Amount as the full scale, with the Initial Contract Amount marked as a reference line. This makes the T&M creep visually obvious.
+
+---
+
+## 13. Future Phase — Email Invoice Ingestion (Phase 3)
+
+**The problem:** Richard Maser (PM) is the primary person entering invoices. He is frequently on the road and currently emails invoices to `invoices@activeacq.com`. Someone then manually enters them into the system.
+
+**The goal:** Richard forwards an invoice PDF to `invoices@activeacq.com` → system auto-creates a pending invoice record with fields extracted from the PDF → Seth reviews and approves.
+
+**How it works (when built):**
+1. Inbound email webhook (Mailgun or SendGrid) receives forwarded PDF
+2. Attachment is passed to the existing `/api/invoices/extract` AI pipeline
+3. A pending invoice record is created, linked to the correct project/contract via the vendor name and account number match
+4. Seth receives an in-app notification: "New invoice pending review — Bright View Engineering, $4,132.50"
+5. Seth approves or rejects from the desktop app
+
+**Why deferred:** The extraction pipeline already exists. The missing piece is the email receiver infrastructure and the project/contract matching logic. Prioritized after the desktop experience is stable.
+
+**Mobile companion (Phase 4):** A simplified mobile view where Richard can see pending invoices he's submitted and their approval status. Not a full mobile app — just the entry and status view.
 
 ---
 

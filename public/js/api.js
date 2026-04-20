@@ -116,7 +116,7 @@ window.api = {
   createTMCharge:   (contractId, data) => request('POST', `/api/contracts/${contractId}/tm-charges`, data),
   updateTMCharge:   (id, data)         => request('PUT',  `/api/tm-charges/${id}`, data),
   approveTMCharge:  (id)               => request('POST', `/api/tm-charges/${id}/approve`),
-  rejectTMCharge:   (id)               => request('POST', `/api/tm-charges/${id}/reject`),
+  rejectTMCharge:   (id, note)         => request('POST', `/api/tm-charges/${id}/reject`, { rejection_note: note }),
   deleteTMCharge:   (id)               => request('DELETE',`/api/tm-charges/${id}`),
 
   // Expenses
@@ -124,7 +124,7 @@ window.api = {
   createExpense:    (contractId, data) => request('POST', `/api/contracts/${contractId}/expenses`, data),
   updateExpense:    (id, data)         => request('PUT',  `/api/expenses/${id}`, data),
   approveExpense:   (id)               => request('POST', `/api/expenses/${id}/approve`),
-  rejectExpense:    (id)               => request('POST', `/api/expenses/${id}/reject`),
+  rejectExpense:    (id, note)         => request('POST', `/api/expenses/${id}/reject`, { rejection_note: note }),
   deleteExpense:    (id)               => request('DELETE',`/api/expenses/${id}`),
 
   searchVendors:    (q='')              => request('GET', `/api/vendors${q ? '?q=' + encodeURIComponent(q) : ''}`),

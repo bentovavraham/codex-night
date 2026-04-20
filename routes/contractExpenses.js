@@ -48,16 +48,16 @@ router.post('/contracts/:id/expenses', requireAuth, async (req, res, next) => {
     const contractId = Number(req.params.id);
     const access = await userCanAccessContract(req.session.userId, contractId);
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
-    const { category, description, amount, expense_date, qb_code_id, file_reference } = req.body || {};
+    const { category, description, amount, expense_date, qb_code_id, file_reference, notes } = req.body || {};
     if (amount == null) return res.status(400).json({ error: 'amount required' });
     const amt = Number(amount);
     if (!Number.isFinite(amt)) return res.status(400).json({ error: 'invalid amount' });
     const cat = VALID_CATEGORIES.includes(category) ? category : 'other';
     const result = await pool.query(
-      `INSERT INTO contract_expenses (contract_id, category, description, amount, expense_date, qb_code_id, file_reference, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      `INSERT INTO contract_expenses (contract_id, category, description, amount, expense_date, qb_code_id, file_reference, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [contractId, cat, description || null, amt,
-       expense_date || null, qb_code_id || null, file_reference || null, req.session.userId]);
+       expense_date || null, qb_code_id || null, file_reference || null, notes || null, req.session.userId]);
     res.status(201).json(result.rows[0]);
   } catch (err) { next(err); }
 });
@@ -105,8 +105,10 @@ router.post('/expenses/:id/reject', requireAuth, async (req, res, next) => {
     const expenseId = Number(req.params.id);
     const access = await userCanAccessExpense(req.session.userId, expenseId);
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
+    const { rejection_note } = req.body;
     const result = await pool.query(
-      `UPDATE contract_expenses SET status = 'rejected' WHERE id = $1 RETURNING *`, [expenseId]);
+      `UPDATE contract_expenses SET status = 'rejected', rejection_note = $2 WHERE id = $1 RETURNING *`,
+      [expenseId, rejection_note || null]);
     res.json(result.rows[0]);
   } catch (err) { next(err); }
 });

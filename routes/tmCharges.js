@@ -46,15 +46,15 @@ router.post('/contracts/:id/tm-charges', requireAuth, async (req, res, next) => 
     const contractId = Number(req.params.id);
     const access = await userCanAccessContract(req.session.userId, contractId);
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
-    const { description, hours, rate, amount, charge_date, qb_code_id, file_reference } = req.body || {};
+    const { description, hours, rate, amount, charge_date, qb_code_id, file_reference, notes } = req.body || {};
     if (!description || amount == null) return res.status(400).json({ error: 'description and amount required' });
     const amt = Number(amount);
     if (!Number.isFinite(amt)) return res.status(400).json({ error: 'invalid amount' });
     const result = await pool.query(
-      `INSERT INTO tm_charges (contract_id, description, hours, rate, amount, charge_date, qb_code_id, file_reference, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO tm_charges (contract_id, description, hours, rate, amount, charge_date, qb_code_id, file_reference, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [contractId, description, hours ?? null, rate ?? null, amt,
-       charge_date || null, qb_code_id || null, file_reference || null, req.session.userId]);
+       charge_date || null, qb_code_id || null, file_reference || null, notes || null, req.session.userId]);
     res.status(201).json(result.rows[0]);
   } catch (err) { next(err); }
 });
@@ -102,8 +102,10 @@ router.post('/tm-charges/:id/reject', requireAuth, async (req, res, next) => {
     const tmId = Number(req.params.id);
     const access = await userCanAccessTM(req.session.userId, tmId);
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
+    const { rejection_note } = req.body;
     const result = await pool.query(
-      `UPDATE tm_charges SET status = 'rejected' WHERE id = $1 RETURNING *`, [tmId]);
+      `UPDATE tm_charges SET status = 'rejected', rejection_note = $2 WHERE id = $1 RETURNING *`,
+      [tmId, rejection_note || null]);
     res.json(result.rows[0]);
   } catch (err) { next(err); }
 });

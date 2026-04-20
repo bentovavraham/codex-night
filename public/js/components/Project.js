@@ -1,9 +1,13 @@
-// Top-level project view with tabbed navigation + inline editing.
+// Project view — tab navigation is driven by the sidebar in app.js.
 
-window.Project = function Project({ project, onBack, onProjectUpdate }) {
-  const [tab, setTab] = React.useState('dashboard');
+window.Project = function Project({ project, tab, onTabChange, onProjectUpdate }) {
+  const [selectedContractId, setSelectedContractId] = React.useState(null);
   const [editing, setEditing] = React.useState(false);
-  const [form, setForm] = React.useState({ name: project.name, description: project.description || '', status: project.status });
+  const [form, setForm] = React.useState({
+    name: project.name,
+    description: project.description || '',
+    status: project.status,
+  });
   const [saving, setSaving] = React.useState(false);
 
   async function save() {
@@ -13,65 +17,57 @@ window.Project = function Project({ project, onBack, onProjectUpdate }) {
       toast('Project updated');
       setEditing(false);
       if (onProjectUpdate) onProjectUpdate(updated);
-    } catch (e) { toast(e.message, 'error'); }
-    finally { setSaving(false); }
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setSaving(false);
+    }
   }
-
-  const tabs = [
-    { k: 'dashboard', label: 'Dashboard' },
-    { k: 'budget',    label: 'Budget' },
-    { k: 'contracts', label: 'Contracts' },
-    { k: 'invoices',  label: 'Invoices' },
-  ];
 
   return (
     <div className="container">
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 8 }}>
-        <a onClick={onBack}>← All projects</a>
+      {/* Page header */}
+      <div style={{ marginBottom: 24 }}>
         {editing ? (
-          <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-            style={{ fontSize: 20, fontWeight: 700, flex: 1 }} autoFocus />
-        ) : (
-          <h1 style={{ margin: 0, fontSize: 20 }}>{project.name}</h1>
-        )}
-        {editing ? (
-          <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
-            <option value="active">Active</option>
-            <option value="on_hold">On Hold</option>
-            <option value="completed">Completed</option>
-            <option value="archived">Archived</option>
-          </select>
-        ) : (
-          <span className={`badge ${project.status}`}>{project.status}</span>
-        )}
-        {editing ? (
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+              style={{ fontSize: 20, fontWeight: 700, flex: 1, minWidth: 200 }} autoFocus />
+            <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} style={{ width: 140 }}>
+              <option value="active">Active</option>
+              <option value="on_hold">On Hold</option>
+              <option value="completed">Completed</option>
+              <option value="archived">Archived</option>
+            </select>
             <button className="primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
-            <button onClick={() => { setEditing(false); setForm({ name: project.name, description: project.description || '', status: project.status }); }}>Cancel</button>
+            <button onClick={() => {
+              setEditing(false);
+              setForm({ name: project.name, description: project.description || '', status: project.status });
+            }}>Cancel</button>
           </div>
         ) : (
-          <button onClick={() => setEditing(true)} style={{ fontSize: 12 }}>Edit</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>{project.name}</h1>
+            <span className={`badge ${project.status}`}>{project.status}</span>
+            <button className="ghost" style={{ fontSize: 12, marginLeft: 4 }} onClick={() => setEditing(true)}>Edit</button>
+          </div>
+        )}
+
+        {editing ? (
+          <textarea rows={2} value={form.description}
+            onChange={e => setForm({ ...form, description: e.target.value })}
+            placeholder="Project description"
+            style={{ marginTop: 10, width: '100%', maxWidth: 600 }} />
+        ) : (
+          project.description && (
+            <div style={{ marginTop: 6, color: 'var(--text-2)', fontSize: 13 }}>{project.description}</div>
+          )
         )}
       </div>
 
-      {editing ? (
-        <textarea rows={2} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-          placeholder="Project description" style={{ marginBottom: 12, width: '100%' }} />
-      ) : (
-        project.description && <div className="hint" style={{ marginBottom: 12 }}>{project.description}</div>
-      )}
-
-      <div className="tabs">
-        {tabs.map((t) => (
-          <button key={t.k} className={tab === t.k ? 'active' : ''} onClick={() => setTab(t.k)}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'dashboard' && <Dashboard projectId={project.id} />}
+      {/* Tab content */}
+      {tab === 'dashboard' && <Dashboard projectId={project.id} onOpenContract={id => { setSelectedContractId(id); onTabChange('contracts'); }} />}
       {tab === 'budget'    && <Budget    projectId={project.id} />}
-      {tab === 'contracts' && <Contracts projectId={project.id} />}
+      {tab === 'contracts' && <Contracts projectId={project.id} initialContractId={selectedContractId} onContractOpened={() => setSelectedContractId(null)} />}
       {tab === 'invoices'  && <Invoices  projectId={project.id} />}
     </div>
   );

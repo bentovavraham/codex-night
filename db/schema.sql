@@ -285,6 +285,12 @@ CREATE TABLE IF NOT EXISTS contract_expenses (
 );
 CREATE INDEX IF NOT EXISTS idx_contract_expenses_contract ON contract_expenses(contract_id);
 
+-- Additional columns for T&M charges and expenses (rejection notes, notes field).
+DO $$ BEGIN ALTER TABLE tm_charges ADD COLUMN rejection_note TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE tm_charges ADD COLUMN notes TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN rejection_note TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN notes TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
 -- File storage in Postgres (replaces ephemeral local disk).
 CREATE TABLE IF NOT EXISTS files (
     id VARCHAR(36) PRIMARY KEY,

@@ -76,11 +76,11 @@ window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedg
         <table className="data">
           <thead>
             <tr>
-              <th>CO #</th>
-              <th>Description</th>
-              <th className="num">Amount</th>
-              <th>Status</th>
-              <th>Created by</th>
+              <th data-tip="Change order reference number">CO #</th>
+              <th data-tip="Scope change description">Description</th>
+              <th className="num" data-tip="Dollar value added to or removed from the contract">Amount</th>
+              <th data-tip="pending = awaiting approval · approved = added to contract value · rejected = declined">Status</th>
+              <th data-tip="Team member who entered this change order">Created by</th>
               <th></th>
             </tr>
           </thead>
@@ -175,39 +175,70 @@ function NewCOModal({ contractId, onClose, onSaved }) {
     finally { setSaving(false); }
   }
 
+  const pdfUrl = fileRef ? `/api/files/${encodeURIComponent(fileRef.file_reference)}` : null;
+  const hasPdf = !!pdfUrl;
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 560 }}>
-        <div className="modal-header">
-          <strong>New Change Order</strong>
-          <button onClick={onClose}>×</button>
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000,
+      background: 'rgba(0,0,0,0.75)',
+      display: 'flex', flexDirection: 'column',
+    }} onClick={onClose}>
+      <div style={{
+        flex: 1, display: 'flex', flexDirection: 'column',
+        margin: hasPdf ? '20px' : 'auto',
+        width: hasPdf ? 'calc(100% - 40px)' : '560px',
+        maxHeight: hasPdf ? 'calc(100% - 40px)' : '90vh',
+        background: 'var(--surface)', borderRadius: 10,
+        border: '1px solid var(--border)', overflow: 'hidden',
+      }} onClick={e => e.stopPropagation()}>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <strong style={{ fontSize: 15 }}>New Change Order</strong>
+          <button onClick={onClose} style={{ fontSize: 18, lineHeight: 1, padding: '2px 8px' }}>×</button>
         </div>
-        <div className="modal-body">
-          <div className="form-grid">
-            <div>
-              <label>CO Number (optional)</label>
-              <input value={coNumber} onChange={e => setCoNumber(e.target.value)} placeholder="e.g. CO-001" />
+
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
+          {/* PDF viewer */}
+          {hasPdf && (
+            <div style={{ flex: '0 0 55%', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: '#1a1a1a' }}>
+              <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>📄</span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileRef.filename}</span>
+                <a href={pdfUrl} target="_blank" style={{ fontSize: 11 }}>Open ↗</a>
+                <button onClick={() => setFileRef(null)} style={{ fontSize: 11, color: 'var(--text-3)' }}>Remove</button>
+              </div>
+              <iframe src={pdfUrl} style={{ flex: 1, border: 'none', width: '100%' }} title="CO document" />
             </div>
-            <div>
-              <label>Amount</label>
-              <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+          )}
+
+          {/* Form */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+            {!hasPdf && (
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 6, display: 'block' }}>Supporting document (optional)</label>
+                <Dropzone file={null} onFile={onFile} onClear={() => setFileRef(null)} busy={uploading} label="Drop PDF — view alongside form" />
+              </div>
+            )}
+            <div className="form-grid">
+              <div>
+                <label data-tip="Vendor's change order reference number — if blank, one will be auto-assigned">CO Number (optional)</label>
+                <input value={coNumber} onChange={e => setCoNumber(e.target.value)} placeholder="e.g. CO-001" />
+              </div>
+              <div>
+                <label data-tip="Dollar value of this change order — positive adds to contract total, negative is a credit">Amount</label>
+                <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+              </div>
+              <div className="full">
+                <label data-tip="Describe what changed in scope and why — used for audit trail and reporting">Description</label>
+                <textarea rows={4} value={description} onChange={e => setDescription(e.target.value)} placeholder="Describe the scope change…" />
+              </div>
             </div>
-            <div className="full">
-              <label>Description</label>
-              <textarea rows={3} value={description} onChange={e => setDescription(e.target.value)}
-                placeholder="Describe the scope change…" />
-            </div>
-            <div className="full">
-              <label>Supporting document (optional)</label>
-              <Dropzone
-                file={fileRef ? { filename: fileRef.filename, download_url: `/api/files/${encodeURIComponent(fileRef.file_reference)}` } : null}
-                onFile={onFile} onClear={() => setFileRef(null)} busy={uploading}
-                label="Drop PDF or image" />
-            </div>
+            {err && <div className="error" style={{ marginTop: 16 }}>{err}</div>}
           </div>
-          {err && <div className="error" style={{ marginTop: 10 }}>{err}</div>}
         </div>
-        <div className="modal-footer">
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0, background: 'var(--surface)' }}>
           <button onClick={onClose}>Cancel</button>
           <button className="primary" disabled={saving || uploading} onClick={save}>
             {saving ? 'Saving…' : 'Create Change Order'}
