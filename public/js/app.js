@@ -132,10 +132,11 @@ function App() {
 
           {/* User footer */}
           <div className="sidebar-footer">
-            {/* DROP IT — small circle trigger, lives in sidebar footer */}
+            {/* DROP IT — big circle, same as the drop screen button */}
             <button className="sidebar-drop-circle" onClick={triggerDrop}
               title="Drop it" aria-label="Drop the container">
-              ⬇
+              <span className="ds-btn-icon">⬇</span>
+              <span className="ds-btn-label">DROP IT</span>
             </button>
 
             <div className="sidebar-user">
