@@ -337,43 +337,37 @@ select option { background: white; color: var(--text); }
   flex-shrink: 0;
 }
 
-/* ── DROP IT button — the always-accessible trigger ────────
-   Lives in the sidebar footer. Industrial raised button look.
+/* ── DROP IT circle — small raised circle in sidebar footer ──
+   Looks like a mini version of the big DROP button on the screen.
+   Triggers the manual drop animation (big button, no auto-fire).
    ──────────────────────────────────────────────────────── */
-.sidebar-drop-btn {
+.sidebar-drop-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, rgba(255,255,255,0.22), rgba(255,255,255,0.08));
+  border: 1.5px solid rgba(255,255,255,0.35);
+  color: #ffffff;
+  font-size: 14px;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  width: 100%;
-  padding: 9px 12px;
   margin-bottom: 10px;
-  border-radius: 8px;
-  border: 1.5px solid rgba(255,255,255,0.35);
-  background: rgba(255,255,255,0.12);
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: background .12s, border-color .12s, transform .08s, box-shadow .08s;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.12);
+  box-shadow: 0 3px 0 rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15);
+  transition: transform .08s ease, box-shadow .08s ease, background .12s;
+  flex-shrink: 0;
 }
-.sidebar-drop-btn:hover {
-  background: rgba(255,255,255,0.2);
+.sidebar-drop-circle:hover {
+  background: radial-gradient(circle at 38% 32%, rgba(255,255,255,0.32), rgba(255,255,255,0.14));
   border-color: rgba(255,255,255,0.6);
-  box-shadow: 0 4px 0 rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.18);
-  transform: translateY(-1px);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.2);
+  transform: translateY(-2px);
   color: #ffffff;
 }
-.sidebar-drop-btn:active {
+.sidebar-drop-circle:active {
   transform: translateY(3px) !important;
-  box-shadow: 0 1px 0 rgba(0,0,0,0.18), inset 0 1px 3px rgba(0,0,0,0.15) !important;
-}
-.sidebar-drop-icon {
-  font-size: 14px;
-  line-height: 1;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.2), inset 0 1px 3px rgba(0,0,0,0.2) !important;
 }
 
 .sidebar-user {
@@ -1324,6 +1318,62 @@ button .spinner {
   padding: 4px 8px;
 }
 .ds-skip:hover { color: rgba(255,255,255,0.75); }
+
+/* ── Auto-fire layout ───────────────────────────────────────
+   Upper area: wordmark + project name — fades when container drops.
+   Center: "SMASH THESE INVOICES IN" sits at the landing zone.
+   Container drops ON the text. Literally smashes the words.
+   ──────────────────────────────────────────────────────── */
+.ds-auto-upper {
+  position: absolute;
+  top: 28%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  white-space: nowrap;
+}
+.ds-auto-upper--gone {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-10px);
+  pointer-events: none;
+}
+.ds-wordmark--sm { gap: 3px; }
+.ds-word-main--sm { font-size: 32px; }
+
+/* Project name — the destination you're dropping into */
+.ds-project-label {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: rgba(255,255,255,0.95);
+  text-transform: uppercase;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.2);
+}
+
+/* Landing zone text — container drops RIGHT HERE, smashing the words */
+.ds-landing-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.9);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Container in auto mode sits above the landing text */
+.ds-ctr-wrap--auto { z-index: 2; }
 
 /* ── Shipping Container ─────────────────────────────────────
    440 × 200px CSS-drawn box.

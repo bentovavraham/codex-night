@@ -8,9 +8,9 @@ function App() {
   const [projectTab, setProjectTab] = React.useState('dashboard');
 
   // Drop screen state
-  // pendingProject: project waiting to open after the animation completes
   const [showDrop, setShowDrop] = React.useState(false);
   const [dropLabel, setDropLabel] = React.useState(null);
+  const [dropAutoFire, setDropAutoFire] = React.useState(false);
   const [pendingProject, setPendingProject] = React.useState(null);
 
   React.useEffect(() => {
@@ -26,10 +26,11 @@ function App() {
     setShowDrop(false); setPendingProject(null);
   }
 
-  // Opening a project always goes through the drop screen
+  // Opening a project: auto-fire drop screen, project name as label
   function openProject(p) {
     setPendingProject(p);
     setDropLabel(p.name.toUpperCase());
+    setDropAutoFire(true);
     setShowDrop(true);
   }
 
@@ -42,13 +43,15 @@ function App() {
       setPendingProject(null);
     }
     setDropLabel(null);
+    setDropAutoFire(false);
     setShowDrop(false);
   }
 
-  // Manual trigger from the sidebar DROP IT button
+  // Manual trigger from the sidebar circle — manual mode (big button, no auto-fire)
   function triggerDrop() {
     setPendingProject(null);
-    setDropLabel('SMASH THESE INVOICES IN');
+    setDropLabel(null);
+    setDropAutoFire(false);
     setShowDrop(true);
   }
 
@@ -58,10 +61,10 @@ function App() {
     </div>
   );
 
-  if (!user) return <Login onLoggedIn={u => { setUser(u); setDropLabel(null); setShowDrop(true); }} />;
+  if (!user) return <Login onLoggedIn={u => { setUser(u); setDropAutoFire(false); setDropLabel(null); setShowDrop(true); }} />;
 
-  // Drop screen — shown on fresh login, on every project open, or manual trigger
-  if (showDrop) return <DropScreen onEnter={onDropComplete} label={dropLabel} />;
+  // Drop screen — login (manual), project open (auto), or sidebar circle (manual)
+  if (showDrop) return <DropScreen onEnter={onDropComplete} label={dropLabel} autoFire={dropAutoFire} />;
 
   const initials = user.name ? user.name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase() : '?';
 
@@ -129,11 +132,10 @@ function App() {
 
           {/* User footer */}
           <div className="sidebar-footer">
-            {/* DROP IT — manual trigger button */}
-            <button className="sidebar-drop-btn" onClick={triggerDrop}
-              title="Drop it">
-              <span className="sidebar-drop-icon">⬇</span>
-              DROP IT
+            {/* DROP IT — small circle trigger, lives in sidebar footer */}
+            <button className="sidebar-drop-circle" onClick={triggerDrop}
+              title="Drop it" aria-label="Drop the container">
+              ⬇
             </button>
 
             <div className="sidebar-user">
