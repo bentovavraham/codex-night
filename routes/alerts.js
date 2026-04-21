@@ -84,11 +84,13 @@ router.get('/alerts', requireAuth, async (req, res, next) => {
     const flags = [];
 
     for (const row of result.rows) {
-      const invoiced    = parseFloat(row.invoiced_amount) || 0;
-      const initial     = parseFloat(row.total_value) || 0;
-      const earmarked   = parseFloat(row.earmarked_amount) || 0;
-      const commitment  = invoiced
-        + (parseFloat(row.co_total)  || 0)
+      const invoiced      = parseFloat(row.invoiced_amount) || 0;
+      const initial       = parseFloat(row.total_value) || 0;
+      const earmarked     = parseFloat(row.earmarked_amount) || 0;
+      // Commitment = initial contract + approved COs only (legal obligation)
+      const commitment    = initial + (parseFloat(row.co_total) || 0);
+      // Total Exposure = commitment + approved T&M + approved expenses (full spend risk)
+      const totalExposure = commitment
         + (parseFloat(row.tm_total)  || 0)
         + (parseFloat(row.exp_total) || 0);
 
@@ -97,8 +99,8 @@ router.get('/alerts', requireAuth, async (req, res, next) => {
       const overInitialPct = initial > 0 ? (overInitialAmt / initial) * 100 : 0;
       const oisev = overInitialSeverity(overInitialPct);
 
-      // Commitment vs internal budget
-      const budgetUsedPct = earmarked > 0 ? (commitment / earmarked) * 100 : 0;
+      // Budget pressure: total exposure vs internal budget
+      const budgetUsedPct = earmarked > 0 ? (totalExposure / earmarked) * 100 : 0;
       const bsev = earmarked > 0 ? budgetSeverity(budgetUsedPct) : null;
 
       if (oisev || bsev) {
@@ -112,6 +114,7 @@ router.get('/alerts', requireAuth, async (req, res, next) => {
           earmarked_amount:  earmarked,
           invoiced_amount:   invoiced,
           commitment:        commitment,
+          total_exposure:    totalExposure,
           // over-initial
           over_initial_amt:  overInitialAmt,
           over_initial_pct:  Math.round(overInitialPct * 10) / 10,

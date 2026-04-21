@@ -549,7 +549,7 @@ function ContractDetail({ contractId, projectId, onClose }) {
             { label: 'Initial Contract Amt', val: ledger.original_contract, color: 'var(--text-1)', tip: 'The dollar amount on the signed contract.' },
             { label: '+ Approved COs', val: ledger.approved_cos, color: ledger.approved_cos > 0 ? 'var(--warn)' : 'var(--text-3)', show: true, tip: 'Sum of all approved change orders added to this contract.' },
             { label: '+ T&M', val: ledger.tm_approved, color: ledger.tm_approved > 0 ? 'var(--warn)' : 'var(--text-3)', show: true, tip: 'Approved time & material charges logged against this contract.' },
-            { label: '= Commitment', val: ledger.commitment, color: ledger.cost_creep ? 'var(--danger)' : 'var(--accent)', bold: true, tip: 'Total you are committed to pay: Initial + Approved COs + Approved T&M + Approved Expenses.' },
+            { label: '= Commitment', val: ledger.commitment, color: ledger.cost_creep ? 'var(--danger)' : 'var(--accent)', bold: true, tip: 'Legal obligation: Initial contract + Approved Change Orders only. Does not include T&M or expenses.' },
             { label: 'Internal Budget', val: ledger.earmarked_amount, color: 'var(--text-2)', show: true, tip: 'Your internal estimate for total expected spend, including open-ended T&M. Set when creating the contract.' },
             { label: 'Invoiced', val: ledger.invoiced, color: 'var(--text-1)', tip: 'Sum of all approved, pushed, or paid invoices against this contract.' },
             { label: 'Paid', val: ledger.paid, color: 'var(--ok)', tip: 'Amount confirmed paid to the vendor.' },
@@ -567,7 +567,7 @@ function ContractDetail({ contractId, projectId, onClose }) {
       {/* Alerts */}
       {ledger && ledger.cost_creep && (
         <div style={{ padding: '8px 14px', marginBottom: 12, borderRadius: 5, background: 'rgba(220,55,55,0.1)', border: '1px solid rgba(220,55,55,0.3)', fontSize: 12, color: 'var(--danger)' }}>
-          🔴 Cost creep: commitment {fmt.money(ledger.commitment)} exceeds earmark {fmt.money(ledger.earmarked_amount)}
+          🔴 Cost creep: total exposure {fmt.money(ledger.total_exposure)} exceeds earmark {fmt.money(ledger.earmarked_amount)}
         </div>
       )}
       {ledger && ledger.pending_co_count > 0 && (
@@ -919,8 +919,8 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
   // Budget callout config
   const budgetCallout = overBudget ? {
     bg: '#fef2f2', border: '#fecaca', color: '#dc2626',
-    title: 'GET MORE MONEY',
-    body: `Commitment exceeds budget by ${fmt.money(commitment - earmarked)}`,
+    title: 'CONTINGENCY DEPLETED',
+    body: `Total exposure exceeds budget by ${fmt.money(totalExposure - earmarked)}`,
     icon: '🔴',
   } : budgetPressure === 'warning' ? {
     bg: '#fff7ed', border: '#fed7aa', color: '#c2410c',
@@ -959,7 +959,7 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
             <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Over by</div>
               <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'var(--mono)', color: '#dc2626', letterSpacing: '-0.02em' }}>
-                {fmt.money(commitment - earmarked)}
+                {fmt.money(totalExposure - earmarked)}
               </div>
             </div>
           )}
@@ -1230,7 +1230,7 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                {overBudget ? 'OVER BUDGET — GET MORE MONEY' : 'Buffer Remaining'}
+                {overBudget ? 'CONTINGENCY DEPLETED' : 'Buffer Remaining'}
               </div>
               <div style={{
                 fontSize: 30, fontWeight: 800, fontFamily: 'var(--mono)',
