@@ -1628,3 +1628,4 @@ button .spinner {
   40%  { opacity: 0.7; }
   100% { transform: translate(var(--tx), var(--ty)) scale(1.9); opacity: 0; }
 }
+

@@ -252,7 +252,7 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
           {!loading && !err && data && (
             <>
               <Section
-                title="Contract Overrun"
+                title="Banging Us Out"
                 subtitle="Invoiced exceeds the initial contract amount"
                 icon="⚠"
                 flags={overInitialFlags}

@@ -1159,8 +1159,13 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
 
       {/* ── The full spend story — ALWAYS shown ── */}
       <div style={{ background: 'var(--surface)', border: `1px solid ${overBudget ? '#fecaca' : 'var(--border)'}`, borderRadius: 10, padding: '16px 20px' }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 14 }}>
-          How we got here
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em', marginBottom: 4 }}>
+            How we got here
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5 }}>
+            A full breakdown of every dollar committed, billed, and paid against this contract.
+          </div>
         </div>
 
         {/* TIER 1: Commitment (legal) */}
