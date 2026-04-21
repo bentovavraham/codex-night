@@ -1,12 +1,13 @@
-// AlertsDrawer — right-side slide-in panel.
-// Two sections:
-//   1. "GETTING BANGED OUT" — contracts being invoiced above initial contract amount
-//   2. "BUDGET PRESSURE"   — contracts where total commitment approaches/exceeds internal budget
+// AlertsDrawer — right-side slide-in panel showing flags across ALL projects.
+// Three sections:
+//   1. "BANGING US OUT"  — COs have significantly grown commitment beyond initial scope
+//   2. "OVERBILLED"      — vendor invoiced more than the initial contract amount
+//   3. "BUDGET PRESSURE" — total exposure approaching/exceeding internal budget
 
 window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
-  const [data, setData]     = React.useState(null);
+  const [data, setData]       = React.useState(null);
   const [loading, setLoading] = React.useState(false);
-  const [err, setErr]       = React.useState(null);
+  const [err, setErr]         = React.useState(null);
 
   React.useEffect(() => {
     if (!open) return;
@@ -17,7 +18,6 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
       .finally(() => setLoading(false));
   }, [open]);
 
-  // Severity → visual config
   const sevConfig = {
     low:      { label: 'LOW',      color: '#d97706', bg: '#fffbeb', border: '#fde68a', bar: '#f59e0b' },
     moderate: { label: 'MODERATE', color: '#c4522a', bg: '#fff7f4', border: '#fcd9cc', bar: '#e8921a' },
@@ -41,10 +41,7 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
   function PctBar({ pct, sev, label }) {
     if (!sev) return null;
     const cfg = sevConfig[sev];
-    // Bar fills relative to overage — cap display at ~200%
-    const filled = Math.min(pct, 200);
-    const barPct = Math.min(100, (filled / 200) * 100);  // 200% = full bar
-
+    const barPct = Math.min(100, (Math.min(pct, 200) / 200) * 100);
     return (
       <div style={{ marginTop: 6 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3, fontSize: 11, color: '#6b7280' }}>
@@ -54,31 +51,17 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
           </span>
         </div>
         <div style={{ height: 7, background: '#f0ede8', borderRadius: 4, overflow: 'hidden' }}>
-          <div style={{
-            height: '100%', borderRadius: 4,
-            width: `${barPct}%`,
-            background: cfg.bar,
-            transition: 'width 0.5s ease',
-          }} />
+          <div style={{ height: '100%', borderRadius: 4, width: `${barPct}%`, background: cfg.bar, transition: 'width 0.5s ease' }} />
         </div>
       </div>
     );
   }
 
-  // Group contract flags by project
-  function groupByProject(flags) {
-    const map = {};
-    for (const f of flags) {
-      if (!map[f.project_id]) map[f.project_id] = { name: f.project_name, contracts: [] };
-      map[f.project_id].contracts.push(f);
-    }
-    return Object.entries(map).map(([pid, g]) => ({ pid: Number(pid), ...g }));
-  }
-
   const flags = data?.contract_flags || [];
 
-  const overInitialFlags = flags.filter(f => f.over_initial_sev);
-  const budgetFlags      = flags.filter(f => f.budget_sev);
+  const scopeCreepFlags = flags.filter(f => f.scope_creep_sev);
+  const overbilledFlags = flags.filter(f => f.overbilled_sev);
+  const budgetFlags     = flags.filter(f => f.budget_sev);
 
   const sevOrder = ['critical','high','moderate','low'];
   function sortBySev(arr, sevKey) {
@@ -86,17 +69,16 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
   }
 
   function ContractAlertCard({ flag, type }) {
-    const sev = type === 'over_initial' ? flag.over_initial_sev : flag.budget_sev;
+    const sev = type === 'scope_creep' ? flag.scope_creep_sev
+              : type === 'overbilled'  ? flag.overbilled_sev
+              : flag.budget_sev;
     const cfg = sevConfig[sev];
     return (
       <div
         onClick={() => onGoToContract && onGoToContract(flag.project_id, flag.contract_id)}
         style={{
-          padding: '12px 14px',
-          marginBottom: 8,
-          borderRadius: 8,
-          border: `1px solid ${cfg.border}`,
-          background: cfg.bg,
+          padding: '12px 14px', marginBottom: 8, borderRadius: 8,
+          border: `1px solid ${cfg.border}`, background: cfg.bg,
           cursor: onGoToContract ? 'pointer' : 'default',
           borderLeft: `4px solid ${cfg.bar}`,
         }}
@@ -114,23 +96,34 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
           <SevBadge sev={sev} />
         </div>
 
-        {type === 'over_initial' && flag.over_initial_sev && (
+        {type === 'scope_creep' && (
           <>
-            <PctBar pct={flag.over_initial_pct} sev={flag.over_initial_sev} label="Over initial contract" />
+            <PctBar pct={flag.scope_creep_pct} sev={flag.scope_creep_sev} label="CO growth above initial contract" />
             <div style={{ marginTop: 6, fontSize: 11, color: '#6b7280', display: 'flex', gap: 12 }}>
               <span>Initial: <strong style={{ color: '#1c1814' }}>{fmt.money(flag.total_value)}</strong></span>
-              <span>Invoiced: <strong style={{ color: cfg.color }}>{fmt.money(flag.invoiced_amount)}</strong></span>
-              <span>Over: <strong style={{ color: cfg.color }}>{fmt.money(flag.over_initial_amt)}</strong></span>
+              <span>Commitment: <strong style={{ color: cfg.color }}>{fmt.money(flag.commitment)}</strong></span>
+              <span>COs: <strong style={{ color: cfg.color }}>{fmt.money(flag.scope_creep_amt)}</strong></span>
             </div>
           </>
         )}
 
-        {type === 'budget' && flag.budget_sev && (
+        {type === 'overbilled' && (
+          <>
+            <PctBar pct={flag.overbilled_pct} sev={flag.overbilled_sev} label="Invoiced above initial contract" />
+            <div style={{ marginTop: 6, fontSize: 11, color: '#6b7280', display: 'flex', gap: 12 }}>
+              <span>Initial: <strong style={{ color: '#1c1814' }}>{fmt.money(flag.total_value)}</strong></span>
+              <span>Invoiced: <strong style={{ color: cfg.color }}>{fmt.money(flag.invoiced_amount)}</strong></span>
+              <span>Over: <strong style={{ color: cfg.color }}>{fmt.money(flag.overbilled_amt)}</strong></span>
+            </div>
+          </>
+        )}
+
+        {type === 'budget' && (
           <>
             <PctBar pct={flag.budget_used_pct} sev={flag.budget_sev} label="Budget utilisation" />
             <div style={{ marginTop: 6, fontSize: 11, color: '#6b7280', display: 'flex', gap: 12 }}>
               <span>Budget: <strong style={{ color: '#1c1814' }}>{fmt.money(flag.earmarked_amount)}</strong></span>
-              <span>Commitment: <strong style={{ color: cfg.color }}>{fmt.money(flag.commitment)}</strong></span>
+              <span>Exposure: <strong style={{ color: cfg.color }}>{fmt.money(flag.total_exposure)}</strong></span>
             </div>
           </>
         )}
@@ -138,16 +131,14 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
     );
   }
 
-  function Section({ title, subtitle, icon, flags: sectionFlags, type }) {
+  function Section({ title, subtitle, icon, flags: sectionFlags, type, sevKey }) {
     if (sectionFlags.length === 0) return (
       <div style={{ marginBottom: 28 }}>
         <SectionHeader title={title} icon={icon} count={0} />
-        <div style={{ padding: '18px 0', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-          No issues detected
-        </div>
+        <div style={{ padding: '18px 0', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>No issues detected</div>
       </div>
     );
-    const sorted = sortBySev(sectionFlags, type === 'over_initial' ? 'over_initial_sev' : 'budget_sev');
+    const sorted = sortBySev(sectionFlags, sevKey);
     return (
       <div style={{ marginBottom: 28 }}>
         <SectionHeader title={title} icon={icon} subtitle={subtitle} count={sectionFlags.length} />
@@ -180,61 +171,45 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
     );
   }
 
+  const totalFlagged = flags.length;
+
   return (
     <>
-      {/* Backdrop */}
       {open && (
-        <div
-          onClick={onClose}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 1000,
-            background: 'rgba(28,24,20,0.35)',
-            animation: 'fadeIn 0.18s ease',
-          }}
-        />
+        <div onClick={onClose} style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(28,24,20,0.35)', animation: 'fadeIn 0.18s ease',
+        }} />
       )}
 
-      {/* Drawer */}
       <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0,
-        width: 420,
-        zIndex: 1001,
-        background: 'var(--surface)',
-        borderLeft: '1px solid var(--border)',
-        boxShadow: '-6px 0 28px rgba(28,24,20,0.14)',
-        display: 'flex', flexDirection: 'column',
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: 420,
+        zIndex: 1001, background: 'var(--surface)', borderLeft: '1px solid var(--border)',
+        boxShadow: '-6px 0 28px rgba(28,24,20,0.14)', display: 'flex', flexDirection: 'column',
         transform: open ? 'translateX(0)' : 'translateX(100%)',
         transition: 'transform 0.28s cubic-bezier(0.32, 0, 0.12, 1)',
       }}>
 
         {/* Header */}
         <div style={{
-          padding: '18px 20px 16px',
-          borderBottom: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          flexShrink: 0,
+          padding: '18px 20px 16px', borderBottom: '1px solid var(--border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
         }}>
           <div>
             <div style={{ fontWeight: 700, fontSize: 15, color: '#1c1814', letterSpacing: '-0.01em' }}>
-              Alerts
+              Alerts: All Projects
             </div>
-            {data && (
-              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                {flags.length === 0
-                  ? 'All contracts look healthy'
-                  : `${flags.length} contract${flags.length !== 1 ? 's' : ''} flagged`}
-              </div>
-            )}
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+              {!data ? 'Scanning contracts…'
+                : totalFlagged === 0 ? 'All contracts look healthy'
+                : `${totalFlagged} contract${totalFlagged !== 1 ? 's' : ''} flagged across all projects`}
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              width: 32, height: 32, borderRadius: '50%', border: 'none',
-              background: 'var(--surface-2)', cursor: 'pointer', fontSize: 16,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: '#6b7280',
-            }}
-            aria-label="Close alerts">✕</button>
+          <button onClick={onClose} style={{
+            width: 32, height: 32, borderRadius: '50%', border: 'none',
+            background: 'var(--surface-2)', cursor: 'pointer', fontSize: 16,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280',
+          }} aria-label="Close alerts">✕</button>
         </div>
 
         {/* Body */}
@@ -253,17 +228,27 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
             <>
               <Section
                 title="Banging Us Out"
-                subtitle="Invoiced exceeds the initial contract amount"
+                subtitle="Change orders have grown the contract significantly above the initial signed amount"
                 icon="⚠"
-                flags={overInitialFlags}
-                type="over_initial"
+                flags={scopeCreepFlags}
+                type="scope_creep"
+                sevKey="scope_creep_sev"
+              />
+              <Section
+                title="Overbilled"
+                subtitle="Vendor has invoiced more than the initial contract value"
+                icon="🧾"
+                flags={overbilledFlags}
+                type="overbilled"
+                sevKey="overbilled_sev"
               />
               <Section
                 title="Budget Pressure"
-                subtitle="Total commitment approaching or exceeding internal budget"
+                subtitle="Total exposure approaching or exceeding internal budget"
                 icon="◎"
                 flags={budgetFlags}
                 type="budget"
+                sevKey="budget_sev"
               />
             </>
           )}

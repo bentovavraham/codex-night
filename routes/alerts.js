@@ -1,4 +1,7 @@
-// GET /api/alerts — contracts being over-invoiced vs initial and/or approaching budget limits.
+// GET /api/alerts — three alert types:
+//   1. "Banging Us Out"  — COs have significantly grown the contract beyond initial scope
+//   2. "Overbilled"      — vendor has invoiced more than the initial contract amount
+//   3. "Budget Pressure" — total exposure approaching or exceeding internal budget
 
 const express = require('express');
 const pool = require('../db/pool');
@@ -6,16 +9,16 @@ const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Severity tiers for "banging us out" (invoiced > initial contract)
-function overInitialSeverity(pct) {
-  if (pct <= 0)   return null;
-  if (pct < 10)   return 'low';       // 1–10%
-  if (pct < 25)   return 'moderate';  // 10–25%
-  if (pct < 50)   return 'high';      // 25–50%
-  return 'critical';                   // 50%+
+// Severity tiers — shared by scope creep and overbilled (both measured as % above initial)
+function overageSeverity(pct) {
+  if (pct <= 0)  return null;
+  if (pct < 10)  return 'low';       // 1–10%
+  if (pct < 25)  return 'moderate';  // 10–25%
+  if (pct < 50)  return 'high';      // 25–50%
+  return 'critical';                  // 50%+
 }
 
-// Severity tiers for budget pressure (commitment vs earmarked / internal budget)
+// Severity tiers for budget pressure (total exposure vs earmarked)
 function budgetSeverity(pct) {
   if (pct < 75)  return null;
   if (pct < 90)  return 'low';
@@ -28,7 +31,6 @@ router.get('/alerts', requireAuth, async (req, res, next) => {
   try {
     const userId = req.session.userId;
 
-    // Check admin
     const adminCheck = await pool.query(`SELECT role FROM users WHERE id = $1`, [userId]);
     const isAdmin = adminCheck.rows[0]?.role === 'admin';
 
@@ -87,62 +89,70 @@ router.get('/alerts', requireAuth, async (req, res, next) => {
       const invoiced      = parseFloat(row.invoiced_amount) || 0;
       const initial       = parseFloat(row.total_value) || 0;
       const earmarked     = parseFloat(row.earmarked_amount) || 0;
-      // Commitment = initial contract + approved COs only (legal obligation)
-      const commitment    = initial + (parseFloat(row.co_total) || 0);
-      // Total Exposure = commitment + approved T&M + approved expenses (full spend risk)
+      const coTotal       = parseFloat(row.co_total) || 0;
+      // Commitment = initial + approved COs (legal obligation)
+      const commitment    = initial + coTotal;
+      // Total Exposure = commitment + approved T&M + approved expenses
       const totalExposure = commitment
         + (parseFloat(row.tm_total)  || 0)
         + (parseFloat(row.exp_total) || 0);
 
-      // Over-invoiced vs initial contract ("banging us out")
-      const overInitialAmt = initial > 0 ? invoiced - initial : 0;
-      const overInitialPct = initial > 0 ? (overInitialAmt / initial) * 100 : 0;
-      const oisev = overInitialSeverity(overInitialPct);
+      // ── 1. Banging Us Out: COs have inflated the commitment beyond initial scope ──
+      const scopeCreepAmt = initial > 0 ? coTotal : 0;
+      const scopeCreepPct = initial > 0 ? (scopeCreepAmt / initial) * 100 : 0;
+      const scopeSev      = overageSeverity(scopeCreepPct);
 
-      // Budget pressure: total exposure vs internal budget
+      // ── 2. Overbilled: vendor invoiced more than the initial contract ──
+      const overbilledAmt = initial > 0 ? invoiced - initial : 0;
+      const overbilledPct = initial > 0 ? (overbilledAmt / initial) * 100 : 0;
+      const overbilledSev = overageSeverity(overbilledPct);
+
+      // ── 3. Budget Pressure: total exposure vs internal budget ──
       const budgetUsedPct = earmarked > 0 ? (totalExposure / earmarked) * 100 : 0;
-      const bsev = earmarked > 0 ? budgetSeverity(budgetUsedPct) : null;
+      const budgetSev     = earmarked > 0 ? budgetSeverity(budgetUsedPct) : null;
 
-      if (oisev || bsev) {
+      if (scopeSev || overbilledSev || budgetSev) {
         flags.push({
-          contract_id:       row.id,
-          vendor_name:       row.vendor_name,
-          description:       row.description,
-          project_id:        row.project_id,
-          project_name:      row.project_name,
-          total_value:       initial,
-          earmarked_amount:  earmarked,
-          invoiced_amount:   invoiced,
-          commitment:        commitment,
-          total_exposure:    totalExposure,
-          // over-initial
-          over_initial_amt:  overInitialAmt,
-          over_initial_pct:  Math.round(overInitialPct * 10) / 10,
-          over_initial_sev:  oisev,
-          // budget
-          budget_used_pct:   Math.round(budgetUsedPct * 10) / 10,
-          budget_sev:        bsev,
+          contract_id:      row.id,
+          vendor_name:      row.vendor_name,
+          description:      row.description,
+          project_id:       row.project_id,
+          project_name:     row.project_name,
+          total_value:      initial,
+          earmarked_amount: earmarked,
+          invoiced_amount:  invoiced,
+          commitment,
+          total_exposure:   totalExposure,
+          // banging us out (scope creep via COs)
+          scope_creep_amt:  scopeCreepAmt,
+          scope_creep_pct:  Math.round(scopeCreepPct * 10) / 10,
+          scope_creep_sev:  scopeSev,
+          // overbilled (invoiced > initial)
+          overbilled_amt:   overbilledAmt,
+          overbilled_pct:   Math.round(overbilledPct * 10) / 10,
+          overbilled_sev:   overbilledSev,
+          // budget pressure
+          budget_used_pct:  Math.round(budgetUsedPct * 10) / 10,
+          budget_sev:       budgetSev,
         });
       }
     }
 
-    // Roll up project-level budget danger
+    // Roll up worst severity per project across all alert types
     const projectMap = {};
+    const sevOrder = ['low','moderate','high','critical'];
     for (const f of flags) {
       const pid = f.project_id;
       if (!projectMap[pid]) {
-        projectMap[pid] = {
-          project_id:   pid,
-          project_name: f.project_name,
-          flagged_count: 0,
-          worst_sev:    null,
-        };
+        projectMap[pid] = { project_id: pid, project_name: f.project_name, flagged_count: 0, worst_sev: null };
       }
       projectMap[pid].flagged_count++;
-      const sevOrder = ['low','moderate','high','critical'];
+      const worstOfFlag = [f.scope_creep_sev, f.overbilled_sev, f.budget_sev]
+        .filter(Boolean)
+        .sort((a, b) => sevOrder.indexOf(b) - sevOrder.indexOf(a))[0] || null;
       const cur  = sevOrder.indexOf(projectMap[pid].worst_sev);
-      const next = sevOrder.indexOf(f.over_initial_sev || f.budget_sev);
-      if (next > cur) projectMap[pid].worst_sev = f.over_initial_sev || f.budget_sev;
+      const next = sevOrder.indexOf(worstOfFlag);
+      if (next > cur) projectMap[pid].worst_sev = worstOfFlag;
     }
 
     res.json({

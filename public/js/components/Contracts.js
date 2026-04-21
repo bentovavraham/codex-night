@@ -36,6 +36,7 @@ window.Contracts = function Contracts({ projectId, initialContractId, onContract
   const [showNew, setShowNew] = React.useState(false);
   const [selected, setSelected] = React.useState(initialContractId || null);
   const [filter, setFilter] = React.useState({ vendor: '', status: '', sort: '' });
+  const [projectAlerts, setProjectAlerts] = React.useState(null);
 
   React.useEffect(() => {
     if (initialContractId) { setSelected(initialContractId); if (onContractOpened) onContractOpened(); }
@@ -48,6 +49,16 @@ window.Contracts = function Contracts({ projectId, initialContractId, onContract
     finally { setLoading(false); }
   }
   React.useEffect(() => { load(); }, [projectId, filter.vendor, filter.status, filter.sort]);
+
+  // Load project-scoped alerts
+  React.useEffect(() => {
+    api.getAlerts()
+      .then(d => {
+        const flags = (d.contract_flags || []).filter(f => f.project_id === projectId);
+        setProjectAlerts(flags);
+      })
+      .catch(() => setProjectAlerts([]));
+  }, [projectId]);
 
   if (selected) {
     return <ContractDetail contractId={selected} projectId={projectId}
@@ -75,6 +86,49 @@ window.Contracts = function Contracts({ projectId, initialContractId, onContract
           <button className="primary" onClick={() => setShowNew(true)}>+ New Contract</button>
         </div>
       </div>
+
+      {/* Project alert strip */}
+      {projectAlerts && projectAlerts.length > 0 && (() => {
+        const scopeCount     = projectAlerts.filter(f => f.scope_creep_sev).length;
+        const overbilledCount = projectAlerts.filter(f => f.overbilled_sev).length;
+        const budgetCount    = projectAlerts.filter(f => f.budget_sev).length;
+        const hasCritical    = projectAlerts.some(f =>
+          f.scope_creep_sev === 'critical' || f.overbilled_sev === 'critical' || f.budget_sev === 'critical'
+        );
+        const hasHigh        = !hasCritical && projectAlerts.some(f =>
+          f.scope_creep_sev === 'high' || f.overbilled_sev === 'high' || f.budget_sev === 'high'
+        );
+        const stripColor     = hasCritical ? '#dc2626' : hasHigh ? '#c4522a' : '#d97706';
+        const stripBg        = hasCritical ? '#fef2f2' : hasHigh ? '#fef3ee' : '#fffbeb';
+        const stripBorder    = hasCritical ? '#fecaca' : hasHigh ? '#f9b49a' : '#fde68a';
+        const pills = [
+          scopeCount     > 0 && { label: `${scopeCount} banging us out`,  key: 'scope' },
+          overbilledCount > 0 && { label: `${overbilledCount} overbilled`, key: 'over' },
+          budgetCount    > 0 && { label: `${budgetCount} budget pressure`, key: 'budget' },
+        ].filter(Boolean);
+        return (
+          <div style={{
+            marginBottom: 16, padding: '10px 16px',
+            borderRadius: 8, border: `1px solid ${stripBorder}`,
+            background: stripBg, borderLeft: `4px solid ${stripColor}`,
+            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          }}>
+            <span style={{ fontSize: 14 }}>⚠</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: stripColor }}>
+              {projectAlerts.length} contract{projectAlerts.length !== 1 ? 's' : ''} need attention
+            </span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {pills.map(p => (
+                <span key={p.key} style={{
+                  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
+                  background: 'rgba(255,255,255,0.7)', color: stripColor,
+                  border: `1px solid ${stripBorder}`,
+                }}>{p.label}</span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Summary strip */}
       {contracts.length > 0 && (
