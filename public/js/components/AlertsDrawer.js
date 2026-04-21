@@ -99,10 +99,19 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
         {type === 'scope_creep' && (
           <>
             <PctBar pct={flag.scope_creep_pct} sev={flag.scope_creep_sev} label="CO growth above initial contract" />
-            <div style={{ marginTop: 6, fontSize: 11, color: '#6b7280', display: 'flex', gap: 12 }}>
-              <span>Initial: <strong style={{ color: '#1c1814' }}>{fmt.money(flag.total_value)}</strong></span>
-              <span>Commitment: <strong style={{ color: cfg.color }}>{fmt.money(flag.commitment)}</strong></span>
-              <span>COs: <strong style={{ color: cfg.color }}>{fmt.money(flag.scope_creep_amt)}</strong></span>
+            <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280', display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Initial Contract <span style={{ fontSize: 10, opacity: 0.7 }}>— what was signed</span></span>
+                <strong style={{ color: '#1c1814', fontFamily: 'var(--mono)' }}>{fmt.money(flag.total_value)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: cfg.color }}>+ Change Orders</span>
+                <strong style={{ color: cfg.color, fontFamily: 'var(--mono)' }}>+{fmt.money(flag.scope_creep_amt)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: `1px solid ${cfg.border}`, paddingTop: 4, marginTop: 2 }}>
+                <span style={{ fontWeight: 700, color: '#1c1814' }}>Commitment</span>
+                <strong style={{ color: cfg.color, fontFamily: 'var(--mono)', fontSize: 13 }}>{fmt.money(flag.commitment)}</strong>
+              </div>
             </div>
           </>
         )}
