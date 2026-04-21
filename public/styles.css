@@ -80,65 +80,7 @@ body {
 a { color: var(--accent); text-decoration: none; cursor: pointer; }
 a:hover { color: var(--accent-hover); text-decoration: underline; }
 
-/* ── Tooltip system ─────────────────────────────────────────
-   Add data-tip="Your explanation here" to any element.
-   Tooltip background matches sidebar — same warm charcoal.
-   ──────────────────────────────────────────────────────── */
-[data-tip] {
-  position: relative;
-  cursor: help;
-}
-[data-tip]::before {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
-  background: var(--sidebar-bg);
-  color: #f9fafb;
-  padding: 7px 11px;
-  border-radius: 7px;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.45;
-  white-space: normal;
-  max-width: 240px;
-  text-align: center;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 9999;
-  box-shadow: var(--shadow-md);
-}
-[data-tip]::after {
-  content: '';
-  position: absolute;
-  bottom: calc(100% + 3px);
-  left: 50%;
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-  border-top-color: var(--sidebar-bg);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  z-index: 9999;
-}
-[data-tip]:hover::before { opacity: 1; transform: translateX(-50%) translateY(0); }
-[data-tip]:hover::after  { opacity: 1; transform: translateX(-50%); }
-
-/* Tooltip that appears below instead of above */
-[data-tip-below]::before {
-  bottom: auto;
-  top: calc(100% + 8px);
-  transform: translateX(-50%) translateY(-4px);
-}
-[data-tip-below]::after {
-  bottom: auto;
-  top: calc(100% + 3px);
-  border-top-color: transparent;
-  border-bottom-color: var(--sidebar-bg);
-}
-[data-tip-below]:hover::before { transform: translateX(-50%) translateY(0); }
+/* Tooltips handled by JS in util.js — appended to document.body to avoid overflow clipping */
 
 /* ── Buttons ── */
 button, .btn {
