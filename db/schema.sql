@@ -315,6 +315,10 @@ DO $$ BEGIN ALTER TABLE tm_charges ADD COLUMN partner_approved_at TIMESTAMPTZ; E
 -- Link T&M charges to a specific change order (when they bill against CO scope).
 DO $$ BEGIN ALTER TABLE tm_charges ADD COLUMN change_order_id INTEGER REFERENCES change_orders(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
+-- Invoice type: 'fixed' invoices count against contract value; 'tm' and 'expense' invoices
+-- represent additional costs (T&M hours billed, reimbursables) and do NOT erode the fixed commitment.
+DO $$ BEGIN ALTER TABLE invoices ADD COLUMN invoice_type VARCHAR(16) NOT NULL DEFAULT 'fixed'; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
 -- contract_expenses
 DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN pm_approved_by INTEGER REFERENCES users(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN pm_approved_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;

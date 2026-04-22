@@ -756,7 +756,8 @@ function ContractDetail({ contractId, projectId, onClose }) {
         const tm         = Number(ledger.tm_approved) || 0;
         const commitment = Number(ledger.commitment) || 0;
         const earmarked  = Number(ledger.earmarked_amount) || 0;
-        const invoiced   = Number(ledger.invoiced) || 0;
+        const invoiced   = Number(ledger.invoiced) || 0;       // fixed-scope only
+        const tmInvoiced = Number(ledger.tm_invoiced) || 0;    // T&M / expense invoices
         const paid       = Number(ledger.paid) || 0;
         const exposure   = Number(ledger.total_exposure) || commitment;
         const buffer     = earmarked > 0 ? earmarked - exposure : null;
@@ -825,10 +826,13 @@ function ContractDetail({ contractId, projectId, onClose }) {
               <KpiBlock
                 label="Invoiced to Date"
                 value={invoiced}
-                sub={invoiced > 0 ? `${invPct}% of commitment` : 'No invoices yet'}
+                sub={invoiced > 0
+                  ? `${invPct}% of commitment${tmInvoiced > 0 ? ` · +${fmt.money(tmInvoiced)} T&M billed` : ''}`
+                  : tmInvoiced > 0 ? `+${fmt.money(tmInvoiced)} T&M billed` : 'No invoices yet'}
+                subColor={tmInvoiced > 0 ? 'var(--amber)' : 'var(--text-3)'}
                 accent="var(--amber)"
-                muted={invoiced === 0}
-                tip="Total billed by this vendor — includes all approved invoices."
+                muted={invoiced === 0 && tmInvoiced === 0}
+                tip="Fixed-scope invoices count against commitment. T&M invoices are shown separately — they represent additional project cost beyond the fixed contract value."
               />
               <KpiBlock
                 label="Paid"

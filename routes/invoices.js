@@ -145,10 +145,11 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const { contract_id, contracts: contractAllocs, project_id, invoice_number, vendor_name, amount,
-            invoice_date, description, file_reference, qb_code_id } = req.body || {};
+            invoice_date, description, file_reference, qb_code_id, invoice_type: invoiceTypeRaw } = req.body || {};
     if (!invoice_number || amount == null) return res.status(400).json({ error: 'invoice_number and amount required' });
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount must be > 0' });
+    const invoiceType = ['fixed', 'tm', 'expense'].includes(invoiceTypeRaw) ? invoiceTypeRaw : 'fixed';
 
     // Build allocation list: either from contracts array or single contract_id.
     let allocs = [];
@@ -177,18 +178,23 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
       const invoiced = await pool.query(
         `SELECT COALESCE(SUM(ic.amount),0)::numeric AS total
          FROM invoice_contracts ic JOIN invoices i ON i.id = ic.invoice_id
-         WHERE ic.contract_id = $1 AND i.status NOT IN ('rejected')`, [alloc.contract_id]);
+         WHERE ic.contract_id = $1 AND i.status NOT IN ('rejected')
+         AND COALESCE(i.invoice_type,'fixed') = 'fixed'`, [alloc.contract_id]);
       // Also count legacy invoices that only use contract_id directly.
       const legacyInvoiced = await pool.query(
         `SELECT COALESCE(SUM(amount),0)::numeric AS total FROM invoices
          WHERE contract_id = $1 AND status NOT IN ('rejected')
+         AND COALESCE(invoice_type,'fixed') = 'fixed'
          AND id NOT IN (SELECT invoice_id FROM invoice_contracts)`, [alloc.contract_id]);
-      const totalInvoiced = Number(invoiced.rows[0].total) + Number(legacyInvoiced.rows[0].total);
-      const remaining = Number(c.rows[0].total_value) - totalInvoiced;
-      if (alloc.amount > remaining + 0.01) {
-        return res.status(400).json({
-          error: `Allocation of $${alloc.amount.toFixed(2)} to contract "${c.rows[0].vendor_name}" exceeds remaining balance ($${remaining.toFixed(2)}).`,
-        });
+      if (invoiceType === 'fixed') {
+        // Only fixed-scope invoices count against the contract's committed value.
+        const totalInvoiced = Number(invoiced.rows[0].total) + Number(legacyInvoiced.rows[0].total);
+        const remaining = Number(c.rows[0].total_value) - totalInvoiced;
+        if (alloc.amount > remaining + 0.01) {
+          return res.status(400).json({
+            error: `Allocation of $${alloc.amount.toFixed(2)} to contract "${c.rows[0].vendor_name}" exceeds remaining balance ($${remaining.toFixed(2)}).`,
+          });
+        }
       }
     }
 
@@ -199,11 +205,11 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
     await client.query('BEGIN');
     const result = await client.query(
       `INSERT INTO invoices (contract_id, project_id, invoice_number, vendor_name, amount,
-          invoice_date, description, file_reference, qb_code_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+          invoice_date, description, file_reference, qb_code_id, invoice_type, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [primaryContractId, resolvedProjectId, invoice_number, resolvedVendor, amt,
        invoice_date || null, description || null, file_reference || null,
-       qb_code_id || null, req.session.userId]);
+       qb_code_id || null, invoiceType, req.session.userId]);
     const invoiceId = result.rows[0].id;
     // Insert allocation rows.
     for (const alloc of allocs) {

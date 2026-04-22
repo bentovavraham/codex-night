@@ -460,6 +460,7 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
     remaining: Number(lockedContract.remaining_amount || lockedContract.total_value),
     vendor: lockedContract.vendor_name,
   } : null);
+  const [invoiceType, setInvoiceType] = React.useState('fixed');
   const [allocs, setAllocs] = React.useState([{ contract_id: '', amount: '' }]);
   const [invoiceNumber, setInvoiceNumber] = React.useState('');
   const [amount, setAmount] = React.useState('');
@@ -485,11 +486,13 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
     if (mode !== 'contract' || !contractId) { setContext(null); return; }
     api.getContract(contractId).then(c => {
       const remaining = Number(c.remaining_amount);
-      setContext({ total: Number(c.total_value), invoiced: Number(c.invoiced_amount), remaining });
+      const tmInvoiced = Number(c.tm_invoiced_amount || 0);
+      setContext({ total: Number(c.total_value), invoiced: Number(c.invoiced_amount), remaining, tmInvoiced });
       if (!vendor) setVendor(c.vendor_name);
-      if (!amount || Number(amount) === 0) setAmount(String(remaining));
+      // Only prefill amount with remaining for fixed-scope invoices
+      if (invoiceType === 'fixed' && (!amount || Number(amount) === 0)) setAmount(String(remaining));
     }).catch(e => setErr(e.message));
-  }, [contractId, mode]);
+  }, [contractId, mode, invoiceType]);
 
   async function onFile(f) {
     setErr(null); setExtractNote(null); setUploading(true);
@@ -550,6 +553,7 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
         project_id: projectId, invoice_number: invoiceNumber, vendor_name: vendor,
         amount: Number(amount), invoice_date: date || null,
         description: description || null, file_reference: fileRef?.file_reference || null,
+        invoice_type: invoiceType,
       };
       if (mode === 'contract') {
         body.contract_id = Number(contractId);
@@ -564,7 +568,7 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
     finally { setSaving(false); }
   }
 
-  const overspend = mode === 'contract' && context && Number(amount) > context.remaining + 0.01;
+  const overspend = mode === 'contract' && invoiceType === 'fixed' && context && Number(amount) > context.remaining + 0.01;
   const pdfUrl = fileRef ? `/api/files/${encodeURIComponent(fileRef.file_reference)}` : null;
   const hasPdf = !!pdfUrl;
   const isLocked = !!defaultContractId; // contract context — locked to this contract
@@ -651,6 +655,32 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
               </div>
             )}
 
+            {/* Invoice type selector */}
+            {mode !== 'standalone' && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>Invoice type</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[
+                    { k: 'fixed',   label: 'Fixed scope',  tip: 'Counts against the contract value — lump-sum work billed per contract line items' },
+                    { k: 'tm',      label: 'T&M',          tip: 'Time & Materials billing — does not erode the fixed contract value, shows as additional project cost' },
+                    { k: 'expense', label: 'Expense',      tip: 'Reimbursable expenses (travel, tolls, etc.) — does not erode the fixed contract value' },
+                  ].map(t => (
+                    <button key={t.k} type="button" title={t.tip} onClick={() => setInvoiceType(t.k)} style={{
+                      flex: 1, padding: '7px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                      border: invoiceType === t.k ? '2px solid var(--accent)' : '1.5px solid var(--border)',
+                      background: invoiceType === t.k ? 'rgba(196,82,42,0.08)' : 'var(--surface)',
+                      color: invoiceType === t.k ? 'var(--accent)' : 'var(--text-2)',
+                    }}>{t.label}</button>
+                  ))}
+                </div>
+                {invoiceType !== 'fixed' && (
+                  <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-3)', padding: '5px 10px', background: 'rgba(232,146,26,0.06)', borderRadius: 5, border: '1px solid rgba(232,146,26,0.2)' }}>
+                    {invoiceType === 'tm' ? 'T&M invoices track additional hours billed — they do not count against the fixed contract value.' : 'Expense invoices track reimbursables — they do not count against the fixed contract value.'}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Contract selector — only when NOT locked */}
             {!isLocked && mode === 'contract' && (
               <div style={{ marginBottom: 16 }}>
@@ -659,11 +689,18 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
                   <option value="">— Select a contract —</option>
                   {contracts.map(c => <option key={c.id} value={c.id}>{c.vendor_name} — {fmt.money(c.total_value)} ({c.status})</option>)}
                 </select>
-                {context && (
+                {context && invoiceType === 'fixed' && (
                   <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-3)' }}>
                     Initial: <strong style={{ color: 'var(--text-2)' }}>{fmt.money(context.total)}</strong>
-                    {' · '}Invoiced: <strong style={{ color: 'var(--text-2)' }}>{fmt.money(context.invoiced)}</strong>
+                    {' · '}Fixed invoiced: <strong style={{ color: 'var(--text-2)' }}>{fmt.money(context.invoiced)}</strong>
                     {' · '}Remaining: <strong style={{ color: context.remaining < 0 ? 'var(--danger)' : 'var(--ok)' }}>{fmt.money(context.remaining)}</strong>
+                  </div>
+                )}
+                {context && invoiceType !== 'fixed' && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-3)' }}>
+                    Initial: <strong style={{ color: 'var(--text-2)' }}>{fmt.money(context.total)}</strong>
+                    {' · '}T&M billed to date: <strong style={{ color: 'var(--amber)' }}>{fmt.money(context.tmInvoiced || 0)}</strong>
+                    {' · '}Fixed remaining: <strong>{fmt.money(context.remaining)}</strong>
                   </div>
                 )}
               </div>

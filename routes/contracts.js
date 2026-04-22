@@ -124,7 +124,11 @@ router.get('/projects/:id/contracts', requireAuth, async (req, res, next) => {
     const result = await pool.query(
       `SELECT c.*,
               (SELECT COALESCE(SUM(amount),0) FROM invoices
-                 WHERE contract_id = c.id AND status IN ('approved','pushed','paid')) AS invoiced_amount
+                 WHERE contract_id = c.id AND status IN ('approved','pushed','paid')
+                 AND invoice_type = 'fixed') AS invoiced_amount,
+              (SELECT COALESCE(SUM(amount),0) FROM invoices
+                 WHERE contract_id = c.id AND status IN ('approved','pushed','paid')
+                 AND invoice_type != 'fixed') AS tm_invoiced_amount
        FROM contracts c
        WHERE ${filters.join(' AND ')}
        ORDER BY ${order}`,
@@ -228,14 +232,19 @@ router.get('/contracts/:id', requireAuth, async (req, res, next) => {
       ),
     ]);
     const c = contract.rows[0];
-    const invoicedAgainst = invoices.rows
-      .filter((i) => ['approved', 'pushed', 'paid'].includes(i.status))
+    const activeInvoices = invoices.rows.filter((i) => ['approved', 'pushed', 'paid'].includes(i.status));
+    const invoicedAgainst = activeInvoices
+      .filter((i) => i.invoice_type === 'fixed')
+      .reduce((s, i) => s + Number(i.amount), 0);
+    const tmInvoiced = activeInvoices
+      .filter((i) => i.invoice_type !== 'fixed')
       .reduce((s, i) => s + Number(i.amount), 0);
     res.json({
       ...c,
       lines: lines.rows,
       invoices: invoices.rows,
       invoiced_amount: invoicedAgainst,
+      tm_invoiced_amount: tmInvoiced,
       remaining_amount: Number(c.total_value) - invoicedAgainst,
     });
   } catch (err) { next(err); }
@@ -452,7 +461,7 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
     const access = await userCanAccessContract(req.session.userId, contractId);
     if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Not found' : 'Forbidden' });
 
-    const [contractR, cosR, tmR, expR, invoicedR, paidR] = await Promise.all([
+    const [contractR, cosR, tmR, expR, invoicedR, tmInvoicedR, paidR] = await Promise.all([
       pool.query('SELECT total_value, earmarked_amount FROM contracts WHERE id = $1', [contractId]),
       // Approved change orders only count toward commitment
       pool.query(`SELECT
@@ -470,7 +479,11 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
           COALESCE(SUM(CASE WHEN status='pending'  THEN amount ELSE 0 END),0) AS pending_total
         FROM contract_expenses WHERE contract_id = $1`, [contractId]),
       pool.query(`SELECT COALESCE(SUM(amount),0) AS total
-        FROM invoices WHERE contract_id = $1 AND status IN ('approved','pushed','paid')`, [contractId]),
+        FROM invoices WHERE contract_id = $1 AND status IN ('approved','pushed','paid')
+        AND invoice_type = 'fixed'`, [contractId]),
+      pool.query(`SELECT COALESCE(SUM(amount),0) AS total
+        FROM invoices WHERE contract_id = $1 AND status IN ('approved','pushed','paid')
+        AND invoice_type != 'fixed'`, [contractId]),
       pool.query(`SELECT COALESCE(SUM(amount),0) AS total
         FROM invoices WHERE contract_id = $1 AND status = 'paid'`, [contractId]),
     ]);
@@ -484,7 +497,8 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
     const tmPending   = Number(tmR.rows[0].pending_total);
     const expApproved = Number(expR.rows[0].approved_total);
     const expPending  = Number(expR.rows[0].pending_total);
-    const invoiced    = Number(invoicedR.rows[0].total);
+    const invoiced    = Number(invoicedR.rows[0].total);   // fixed-scope invoices only
+    const tmInvoiced  = Number(tmInvoicedR.rows[0].total); // T&M/expense invoices
     const paid        = Number(paidR.rows[0].total);
 
     // Commitment = contract + approved COs only (legal obligation on signed scope).
@@ -493,10 +507,9 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
     const totalExposure  = commitment + tmApproved + expApproved;   // full spend risk
     const remaining      = totalExposure - invoiced;
     const earmarkRemaining = earmarked != null ? earmarked - totalExposure : null;
-    // Cost creep: total expected spend exceeds internal budget
     const costCreep      = earmarked != null && totalExposure > earmarked;
-    // Overrun: vendor has invoiced more than what was committed + approved extras
-    const overrun        = invoiced > totalExposure;
+    // Overrun: fixed-scope invoices exceed commitment (T&M invoices are excluded — open-ended by nature)
+    const overrun        = invoiced > commitment;
 
     res.json({
       original_contract: original,
@@ -506,16 +519,17 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
       pending_co_count: pendingCOCount,
       tm_approved: tmApproved,
       tm_pending: tmPending,
+      tm_invoiced: tmInvoiced,   // T&M/expense invoices billed (additional to fixed commitment)
       expense_approved: expApproved,
       expense_pending: expPending,
       commitment,        // contract + approved COs only
-      total_exposure: totalExposure,  // commitment + T&M + expenses
-      invoiced,
+      total_exposure: totalExposure,  // commitment + T&M charges + expenses
+      invoiced,          // fixed-scope invoices only
       paid,
-      remaining,         // total_exposure - invoiced
-      earmark_remaining: earmarkRemaining,  // earmarked - total_exposure
-      cost_creep: costCreep,  // total_exposure > earmarked
-      overrun,           // invoiced > total_exposure
+      remaining,         // total_exposure - fixed invoiced
+      earmark_remaining: earmarkRemaining,
+      cost_creep: costCreep,
+      overrun,           // fixed invoiced > commitment
     });
   } catch (err) { next(err); }
 });
