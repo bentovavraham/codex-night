@@ -398,7 +398,10 @@ router.post('/invoices/:id/revert', requireAuth, async (req, res, next) => {
       return res.status(400).json({ error: 'Invoice is already pending.' });
     await client.query('BEGIN');
     const result = await client.query(
-      `UPDATE invoices SET status = 'pending', approved_by = NULL, approved_at = NULL,
+      `UPDATE invoices SET status = 'pending',
+         pm_approved_by = NULL, pm_approved_at = NULL,
+         partner_approved_by = NULL, partner_approved_at = NULL,
+         approved_by = NULL, approved_at = NULL,
          rejection_note = NULL, paid_date = NULL, qb_reference_id = NULL, updated_at = NOW()
        WHERE id = $1 RETURNING *`, [invId]);
     await logInvoice(client, invId, 'reverted', `Reverted from ${inv.status} to pending`, req.session.userId);
@@ -444,9 +447,9 @@ router.post('/invoices/bulk-approve', requireAuth, async (req, res, next) => {
       if (!inv || inv.status !== 'pending') continue;
       if (!(await projects.userCanAccess(req.session.userId, inv.project_id))) continue;
       await client.query(
-        `UPDATE invoices SET status = 'approved', approved_by = $2, approved_at = NOW(),
+        `UPDATE invoices SET status = 'pm_approved', pm_approved_by = $2, pm_approved_at = NOW(),
            rejection_note = NULL, updated_at = NOW() WHERE id = $1`, [id, req.session.userId]);
-      await logInvoice(client, id, 'approved', `Bulk approved $${Number(inv.amount).toFixed(2)}`, req.session.userId);
+      await logInvoice(client, id, 'pm_approved', `Bulk PM-approved $${Number(inv.amount).toFixed(2)}`, req.session.userId);
       approved++;
     }
     await client.query('COMMIT');

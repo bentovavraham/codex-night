@@ -906,16 +906,23 @@ function ContractDetail({ contractId, projectId, onClose }) {
           )}
 
           {activeTab === 'invoices' && (() => {
-            // Full invoice action handlers — mirrors the project-level Invoices component.
+            const userRole = window.__userRole || 'pm';
+            const IN_PROGRESS_INV = ['pending','pm_approved','partner_approved'];
             async function invAction(label, fn, id, ...args) {
               setBusyInvoice(b => ({ ...b, [id]: true }));
               try { await fn(id, ...args); toast(label); await load(); }
               catch (e) { toast(e.message, 'error'); }
               finally { setBusyInvoice(b => { const n = { ...b }; delete n[id]; return n; }); }
             }
+            async function handleInvPmApprove(inv) {
+              await invAction(`${inv.invoice_number} PM approved`, api.pmApproveInvoice, inv.id);
+            }
+            async function handleInvPartnerApprove(inv) {
+              await invAction(`${inv.invoice_number} partner approved`, api.partnerApproveInvoice, inv.id);
+            }
             async function handleInvApprove(inv) {
-              const ok = await confirmDialog('Approve invoice?',
-                `Approve ${inv.invoice_number} for ${fmt.moneyPrecise(inv.amount)}?`);
+              const ok = await confirmDialog('Final approve invoice?',
+                `Final-approve ${inv.invoice_number} for ${fmt.moneyPrecise(inv.amount)}?`);
               if (!ok) return;
               await invAction(`${inv.invoice_number} approved`, api.approveInvoice, inv.id);
             }
@@ -948,9 +955,9 @@ function ContractDetail({ contractId, projectId, onClose }) {
             }
 
             const invoices = data.invoices || [];
-            const totalApproved = invoices.filter(i => ['approved','pushed','paid'].includes(i.status)).reduce((s,i) => s + Number(i.amount), 0);
-            const totalPending  = invoices.filter(i => i.status === 'pending').reduce((s,i) => s + Number(i.amount), 0);
-            const totalPaid     = invoices.filter(i => i.status === 'paid').reduce((s,i) => s + Number(i.amount), 0);
+            const totalApproved   = invoices.filter(i => ['approved','pushed','paid'].includes(i.status)).reduce((s,i) => s + Number(i.amount), 0);
+            const totalInProgress = invoices.filter(i => IN_PROGRESS_INV.includes(i.status)).reduce((s,i) => s + Number(i.amount), 0);
+            const totalPaid       = invoices.filter(i => i.status === 'paid').reduce((s,i) => s + Number(i.amount), 0);
 
             return (
               <>
@@ -958,7 +965,7 @@ function ContractDetail({ contractId, projectId, onClose }) {
                 {invoices.length > 0 && (
                   <div style={{ display: 'flex', gap: 1, background: 'var(--border)', marginBottom: 14, borderRadius: 6, overflow: 'hidden' }}>
                     {[
-                      { label: 'Pending', val: totalPending, color: totalPending > 0 ? 'var(--warn)' : 'var(--text-3)' },
+                      { label: 'In Progress', val: totalInProgress, color: totalInProgress > 0 ? 'var(--warn)' : 'var(--text-3)' },
                       { label: 'Approved+', val: totalApproved, color: totalApproved > 0 ? 'var(--ok)' : 'var(--text-3)' },
                       { label: 'Paid', val: totalPaid, color: totalPaid > 0 ? 'var(--ok)' : 'var(--text-3)' },
                     ].map(item => (
@@ -999,31 +1006,43 @@ function ContractDetail({ contractId, projectId, onClose }) {
                             <td>{i.vendor_name}</td>
                             <td style={{ whiteSpace: 'nowrap' }}>{fmt.date(i.invoice_date)}</td>
                             <td className="num">{fmt.moneyPrecise(i.amount)}</td>
-                            <td><span className={`badge ${i.status}`}>{i.status}</span></td>
+                            <td>
+                              {IN_PROGRESS_INV.includes(i.status)
+                                ? <ApprovalPipeline status={i.status} />
+                                : <span className={`badge ${i.status}`}>{i.status.replace('_',' ')}</span>}
+                            </td>
                             <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                              <button style={{ fontSize: 11, marginRight: 4 }} onClick={() => setEditingInvoiceId(i.id)}>Edit</button>
-                              {i.status === 'pending' && <>
-                                <button className="primary" style={{ fontSize: 11 }} disabled={busyInvoice[i.id]} onClick={() => handleInvApprove(i)}>
-                                  {busyInvoice[i.id] ? <span className="spinner"></span> : null}Approve
-                                </button>
-                                <button style={{ fontSize: 11, marginLeft: 4 }} disabled={busyInvoice[i.id]} onClick={() => handleInvHold(i)}>Hold</button>
-                                <button className="danger" style={{ fontSize: 11, marginLeft: 4 }} disabled={busyInvoice[i.id]} onClick={() => handleInvReject(i)}>Reject</button>
-                              </>}
-                              {i.status === 'on_hold' && <>
-                                <button className="primary" style={{ fontSize: 11 }} disabled={busyInvoice[i.id]} onClick={() => handleInvApprove(i)}>Approve</button>
-                                <button style={{ fontSize: 11, marginLeft: 4 }} disabled={busyInvoice[i.id]} onClick={() => handleInvRevert(i)}>Release</button>
-                              </>}
-                              {['approved','rejected','pushed','paid'].includes(i.status) && (
-                                <button style={{ fontSize: 11, marginLeft: 4 }} disabled={busyInvoice[i.id]} onClick={() => handleInvRevert(i)}>Revert</button>
-                              )}
-                              {i.status === 'approved' && (
-                                <button style={{ fontSize: 11, marginLeft: 4 }} disabled={busyInvoice[i.id]}
-                                  onClick={() => invAction(`${i.invoice_number} pushed`, api.markPushed, i.id)}>Push</button>
-                              )}
-                              {(i.status === 'approved' || i.status === 'pushed') && (
-                                <button style={{ fontSize: 11, marginLeft: 4 }} disabled={busyInvoice[i.id]}
-                                  onClick={() => invAction(`${i.invoice_number} marked paid`, api.markPaid, i.id, null)}>Paid</button>
-                              )}
+                              <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                                <button style={{ fontSize: 11 }} onClick={() => setEditingInvoiceId(i.id)}>Edit</button>
+                                {IN_PROGRESS_INV.includes(i.status) && (
+                                  <>
+                                    <ApprovalActions
+                                      item={i} userRole={userRole}
+                                      onPmApprove={() => handleInvPmApprove(i)}
+                                      onPartnerApprove={() => handleInvPartnerApprove(i)}
+                                      onApprove={() => handleInvApprove(i)}
+                                      onReject={() => handleInvReject(i)}
+                                      size="small"
+                                    />
+                                    {i.status === 'pending' && <button style={{ fontSize: 11 }} disabled={busyInvoice[i.id]} onClick={() => handleInvHold(i)}>Hold</button>}
+                                  </>
+                                )}
+                                {i.status === 'on_hold' && <>
+                                  <button className="primary" style={{ fontSize: 11 }} disabled={busyInvoice[i.id]} onClick={() => handleInvApprove(i)}>Approve</button>
+                                  <button style={{ fontSize: 11 }} disabled={busyInvoice[i.id]} onClick={() => handleInvRevert(i)}>Release</button>
+                                </>}
+                                {['approved','rejected','pushed','paid'].includes(i.status) && (
+                                  <button style={{ fontSize: 11 }} disabled={busyInvoice[i.id]} onClick={() => handleInvRevert(i)}>Revert</button>
+                                )}
+                                {i.status === 'approved' && (
+                                  <button style={{ fontSize: 11 }} disabled={busyInvoice[i.id]}
+                                    onClick={() => invAction(`${i.invoice_number} pushed`, api.markPushed, i.id)}>Push</button>
+                                )}
+                                {(i.status === 'approved' || i.status === 'pushed') && (
+                                  <button style={{ fontSize: 11 }} disabled={busyInvoice[i.id]}
+                                    onClick={() => invAction(`${i.invoice_number} marked paid`, api.markPaid, i.id, null)}>Paid</button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                           {i.rejection_note && (

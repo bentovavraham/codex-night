@@ -670,7 +670,9 @@ tr.row-over .num-over      { color: var(--danger); font-weight: 600; }
 .badge.rejected  { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-border); }
 .badge.pushed    { background: var(--info-bg);   color: var(--info);   border-color: var(--info-border); }
 .badge.paid      { background: #ecfdf5; color: #059669; border-color: #a7f3d0; }
-.badge.on_hold   { background: var(--warn-bg);   color: var(--warn);   border-color: var(--warn-border); }
+.badge.on_hold          { background: var(--warn-bg);   color: var(--warn);   border-color: var(--warn-border); }
+.badge.pm_approved      { background: var(--warn-bg);   color: var(--warn);   border-color: var(--warn-border); }
+.badge.partner_approved { background: var(--warn-bg);   color: var(--warn);   border-color: var(--warn-border); }
 .badge.draft     { background: #f7f5f2; color: #a09890; border-color: #e8e3dc; }
 .badge.active    { background: var(--ok-bg);     color: var(--ok);     border-color: var(--ok-border); }
 .badge.closed    { background: #f5f3ff; color: #7c3aed; border-color: #ddd6fe; }
