@@ -65,8 +65,10 @@ window.api = {
   getInvoice:        (id)               => request('GET',  `/api/invoices/${id}`),
   updateInvoice:     (id, data)         => request('PUT',  `/api/invoices/${id}`, data),
   getInvoiceHistory: (id)               => request('GET',  `/api/invoices/${id}/history`),
-  approveInvoice:    (id)               => request('POST', `/api/invoices/${id}/approve`),
-  rejectInvoice:     (id, note)         => request('POST', `/api/invoices/${id}/reject`, { note }),
+  pmApproveInvoice:     (id)            => request('POST', `/api/invoices/${id}/pm-approve`),
+  partnerApproveInvoice:(id)            => request('POST', `/api/invoices/${id}/partner-approve`),
+  approveInvoice:       (id)            => request('POST', `/api/invoices/${id}/approve`),
+  rejectInvoice:        (id, note)      => request('POST', `/api/invoices/${id}/reject`, { note }),
   holdInvoice:       (id, note)         => request('POST', `/api/invoices/${id}/hold`, { note }),
   revertInvoice:     (id)               => request('POST', `/api/invoices/${id}/revert`),
   bulkApprove:       (ids)              => request('POST', '/api/invoices/bulk-approve', { ids }),
@@ -98,33 +100,57 @@ window.api = {
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
     return payload;
   },
+  extractTMCharge: async (file, contractId) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (contractId) form.append('contract_id', String(contractId));
+    const res = await fetch('/api/tm-charges/extract', { method: 'POST', credentials: 'same-origin', body: form });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    return payload;
+  },
+  extractExpense: async (file, contractId) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (contractId) form.append('contract_id', String(contractId));
+    const res = await fetch('/api/expenses/extract', { method: 'POST', credentials: 'same-origin', body: form });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    return payload;
+  },
 
   // Cost control
   getCostSummary:   (pid)              => request('GET',  `/api/projects/${pid}/cost-summary`),
   getContractLedger:(id)               => request('GET',  `/api/contracts/${id}/ledger`),
 
   // Change orders
-  listChangeOrders: (contractId)       => request('GET',  `/api/contracts/${contractId}/change-orders`),
-  createChangeOrder:(contractId, data) => request('POST', `/api/contracts/${contractId}/change-orders`, data),
-  updateChangeOrder:(id, data)         => request('PUT',  `/api/change-orders/${id}`, data),
-  approveChangeOrder:(id)              => request('POST', `/api/change-orders/${id}/approve`),
-  rejectChangeOrder: (id, note)        => request('POST', `/api/change-orders/${id}/reject`, { note }),
-  deleteChangeOrder: (id)              => request('DELETE',`/api/change-orders/${id}`),
+  listChangeOrders:        (contractId)  => request('GET',  `/api/contracts/${contractId}/change-orders`),
+  createChangeOrder:       (cid, data)   => request('POST', `/api/contracts/${cid}/change-orders`, data),
+  updateChangeOrder:       (id, data)    => request('PUT',  `/api/change-orders/${id}`, data),
+  pmApproveChangeOrder:    (id)          => request('POST', `/api/change-orders/${id}/pm-approve`),
+  partnerApproveChangeOrder:(id)         => request('POST', `/api/change-orders/${id}/partner-approve`),
+  approveChangeOrder:      (id)          => request('POST', `/api/change-orders/${id}/approve`),
+  rejectChangeOrder:       (id, note)    => request('POST', `/api/change-orders/${id}/reject`, { note }),
+  deleteChangeOrder:       (id)          => request('DELETE',`/api/change-orders/${id}`),
 
   // T&M charges
-  listTMCharges:    (contractId)       => request('GET',  `/api/contracts/${contractId}/tm-charges`),
-  createTMCharge:   (contractId, data) => request('POST', `/api/contracts/${contractId}/tm-charges`, data),
-  updateTMCharge:   (id, data)         => request('PUT',  `/api/tm-charges/${id}`, data),
-  approveTMCharge:  (id)               => request('POST', `/api/tm-charges/${id}/approve`),
-  rejectTMCharge:   (id, note)         => request('POST', `/api/tm-charges/${id}/reject`, { rejection_note: note }),
-  deleteTMCharge:   (id)               => request('DELETE',`/api/tm-charges/${id}`),
+  listTMCharges:           (contractId)  => request('GET',  `/api/contracts/${contractId}/tm-charges`),
+  createTMCharge:          (cid, data)   => request('POST', `/api/contracts/${cid}/tm-charges`, data),
+  updateTMCharge:          (id, data)    => request('PUT',  `/api/tm-charges/${id}`, data),
+  pmApproveTMCharge:       (id)          => request('POST', `/api/tm-charges/${id}/pm-approve`),
+  partnerApproveTMCharge:  (id)          => request('POST', `/api/tm-charges/${id}/partner-approve`),
+  approveTMCharge:         (id)          => request('POST', `/api/tm-charges/${id}/approve`),
+  rejectTMCharge:          (id, note)    => request('POST', `/api/tm-charges/${id}/reject`, { rejection_note: note }),
+  deleteTMCharge:          (id)          => request('DELETE',`/api/tm-charges/${id}`),
 
   // Expenses
-  listExpenses:     (contractId)       => request('GET',  `/api/contracts/${contractId}/expenses`),
-  createExpense:    (contractId, data) => request('POST', `/api/contracts/${contractId}/expenses`, data),
-  updateExpense:    (id, data)         => request('PUT',  `/api/expenses/${id}`, data),
-  approveExpense:   (id)               => request('POST', `/api/expenses/${id}/approve`),
-  rejectExpense:    (id, note)         => request('POST', `/api/expenses/${id}/reject`, { rejection_note: note }),
+  listExpenses:            (contractId)  => request('GET',  `/api/contracts/${contractId}/expenses`),
+  createExpense:           (cid, data)   => request('POST', `/api/contracts/${cid}/expenses`, data),
+  updateExpense:           (id, data)    => request('PUT',  `/api/expenses/${id}`, data),
+  pmApproveExpense:        (id)          => request('POST', `/api/expenses/${id}/pm-approve`),
+  partnerApproveExpense:   (id)          => request('POST', `/api/expenses/${id}/partner-approve`),
+  approveExpense:          (id)          => request('POST', `/api/expenses/${id}/approve`),
+  rejectExpense:           (id, note)    => request('POST', `/api/expenses/${id}/reject`, { rejection_note: note }),
   deleteExpense:    (id)               => request('DELETE',`/api/expenses/${id}`),
 
   getAlerts:        ()                  => request('GET', '/api/alerts'),

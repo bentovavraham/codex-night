@@ -194,7 +194,7 @@ function ProjectHealthCard({ project: p, onOpen }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11, color: 'var(--text-3)' }}>
             <span>
               {pct !== null && !isNaN(pct) ? (
-                <span style={{ fontWeight: 600, color: h.dot }}>{pct.toFixed(0)}% of budget used</span>
+                <span style={{ fontWeight: 600, color: h.dot }}>{pct.toFixed(0)}% of internal budget used</span>
               ) : '—'}
             </span>
             <span>
@@ -212,7 +212,7 @@ function ProjectHealthCard({ project: p, onOpen }) {
 
       {/* Stats row */}
       <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 4 }}>
-        {earmarked > 0 && <Stat label="Budget" value={fmt.money(earmarked)} />}
+        {earmarked > 0 && <Stat label="Internal Budget" value={fmt.money(earmarked)} />}
         {exposure > 0  && <Stat label="Total Exposure" value={fmt.money(exposure)} highlight={h.dot} />}
         {invoiced > 0  && <Stat label="Invoiced" value={fmt.money(invoiced)} />}
         {Number(p.active_contracts) > 0 && <Stat label="Contracts" value={p.active_contracts} />}

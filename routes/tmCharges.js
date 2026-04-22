@@ -1,9 +1,13 @@
 const express = require('express');
+const multer = require('multer');
 const pool = require('../db/pool');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, hasMinRole } = require('../middleware/auth');
 const projects = require('./projects');
+const storage = require('../lib/storage');
+const { extractTMCharge } = require('../lib/extract');
 
 const router = express.Router();
+const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 async function userCanAccessContract(userId, contractId) {
   const r = await pool.query('SELECT project_id FROM contracts WHERE id = $1', [contractId]);
@@ -28,6 +32,71 @@ function logContract(client, contractId, action, detail, userId) {
     'INSERT INTO contract_logs (contract_id, action, detail, changed_by) VALUES ($1,$2,$3,$4)',
     [contractId, action, detail, userId]);
 }
+
+// Vendor knowledge helpers --------------------------------------------------
+
+async function getVendorContext(vendorName, limit = 5) {
+  if (!vendorName) return { examples: [], vendorNotes: null };
+  const [examplesResult, profileResult] = await Promise.all([
+    pool.query(
+      `SELECT fields_json FROM extraction_examples
+       WHERE LOWER(vendor_name) = LOWER($1) AND document_type = 'tm_charge'
+       ORDER BY created_at DESC LIMIT $2`,
+      [vendorName, limit]
+    ),
+    pool.query(
+      `SELECT notes FROM vendor_profiles WHERE LOWER(vendor_name) = LOWER($1)`,
+      [vendorName]
+    ),
+  ]);
+  return {
+    examples: examplesResult.rows,
+    vendorNotes: profileResult.rows[0]?.notes || null,
+  };
+}
+
+async function saveExtractionExample(client, vendorName, fields, userId) {
+  if (!vendorName) return;
+  await client.query(
+    `INSERT INTO extraction_examples (vendor_name, document_type, fields_json, confirmed_by)
+     VALUES ($1, 'tm_charge', $2, $3)`,
+    [vendorName, JSON.stringify(fields), userId]
+  );
+}
+
+// POST /api/tm-charges/extract
+router.post('/tm-charges/extract', requireAuth, pdfUpload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'file field required' });
+    const saved = await storage.save(req.file.buffer, {
+      filename: req.file.originalname || 'tm.pdf',
+      mimeType: req.file.mimetype || 'application/pdf',
+    });
+    let extracted = null, extract_error = null;
+    try {
+      // Look up contract vendor for context if contract_id provided.
+      let vendorName = null;
+      const contractId = req.body?.contract_id ? Number(req.body.contract_id) : null;
+      if (contractId) {
+        const c = await pool.query('SELECT vendor_name FROM contracts WHERE id = $1', [contractId]);
+        vendorName = c.rows[0]?.vendor_name || null;
+      }
+      const pass1 = await extractTMCharge(req.file.buffer);
+      const ctx = await getVendorContext(vendorName || pass1.description?.split(' ')[0]);
+      if (ctx.examples.length > 0 || ctx.vendorNotes) {
+        extracted = await extractTMCharge(req.file.buffer, ctx);
+      } else {
+        extracted = pass1;
+      }
+    }
+    catch (err) { console.error('T&M extraction failed:', err.message); extract_error = err.message; }
+    res.status(201).json({
+      file_reference: saved.reference,
+      download_url: `/api/files/${encodeURIComponent(saved.reference)}`,
+      filename: saved.filename, size: saved.size, extracted, extract_error,
+    });
+  } catch (err) { next(err); }
+});
 
 // GET /api/contracts/:id/tm-charges
 router.get('/contracts/:id/tm-charges', requireAuth, async (req, res, next) => {
@@ -66,6 +135,17 @@ router.post('/contracts/:id/tm-charges', requireAuth, async (req, res, next) => 
     const hoursStr = hours ? ` (${hours}h @ $${Number(rate||0).toFixed(2)}/h)` : '';
     await logContract(client, contractId, 'tm_added',
       `T&M added: ${description}${hoursStr} — $${amt.toFixed(2)}`, req.session.userId);
+    // Save to knowledge base when a PDF was attached (PM confirmed fields).
+    if (file_reference) {
+      const cv = await pool.query('SELECT vendor_name FROM contracts WHERE id = $1', [contractId]);
+      const vendorName = cv.rows[0]?.vendor_name || null;
+      if (vendorName) {
+        await saveExtractionExample(client, vendorName, {
+          description, hours: hours ?? null, rate: rate ?? null,
+          amount: amt, charge_date: charge_date || null,
+        }, req.session.userId);
+      }
+    }
     await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); next(err); }
@@ -95,8 +175,8 @@ router.put('/tm-charges/:id', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/tm-charges/:id/approve
-router.post('/tm-charges/:id/approve', requireAuth, async (req, res, next) => {
+// POST /api/tm-charges/:id/pm-approve
+router.post('/tm-charges/:id/pm-approve', requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const tmId = Number(req.params.id);
@@ -104,12 +184,56 @@ router.post('/tm-charges/:id/approve', requireAuth, async (req, res, next) => {
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
     await client.query('BEGIN');
     const result = await client.query(
-      `UPDATE tm_charges SET status = 'approved' WHERE id = $1 AND status = 'pending' RETURNING *`,
+      `UPDATE tm_charges SET status = 'pm_approved', pm_approved_by = $2, pm_approved_at = NOW()
+       WHERE id = $1 AND status = 'pending' RETURNING *`, [tmId, req.session.userId]);
+    if (!result.rows[0]) return res.status(400).json({ error: 'T&M charge must be pending for PM approval' });
+    const tm = result.rows[0];
+    await logContract(client, tm.contract_id, 'tm_pm_approved',
+      `PM approved T&M: ${tm.description} — $${Number(tm.amount).toFixed(2)}`, req.session.userId);
+    await client.query('COMMIT');
+    res.json(tm);
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
+});
+
+// POST /api/tm-charges/:id/partner-approve
+router.post('/tm-charges/:id/partner-approve', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    if (!hasMinRole(req.session.role, 'partner')) return res.status(403).json({ error: 'Requires partner role or above' });
+    const tmId = Number(req.params.id);
+    const access = await userCanAccessTM(req.session.userId, tmId);
+    if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE tm_charges SET status = 'partner_approved', partner_approved_by = $2, partner_approved_at = NOW()
+       WHERE id = $1 AND status = 'pm_approved' RETURNING *`, [tmId, req.session.userId]);
+    if (!result.rows[0]) return res.status(400).json({ error: 'T&M charge must be PM-approved first' });
+    const tm = result.rows[0];
+    await logContract(client, tm.contract_id, 'tm_partner_approved',
+      `Partner approved T&M: ${tm.description} — $${Number(tm.amount).toFixed(2)}`, req.session.userId);
+    await client.query('COMMIT');
+    res.json(tm);
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
+});
+
+// POST /api/tm-charges/:id/approve  (admin only — final)
+router.post('/tm-charges/:id/approve', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    if (!hasMinRole(req.session.role, 'admin')) return res.status(403).json({ error: 'Requires admin role' });
+    const tmId = Number(req.params.id);
+    const access = await userCanAccessTM(req.session.userId, tmId);
+    if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE tm_charges SET status = 'approved' WHERE id = $1 AND status = 'partner_approved' RETURNING *`,
       [tmId]);
-    if (!result.rows[0]) return res.status(400).json({ error: 'T&M charge is not pending' });
+    if (!result.rows[0]) return res.status(400).json({ error: 'T&M charge must be partner-approved first' });
     const tm = result.rows[0];
     await logContract(client, tm.contract_id, 'tm_approved',
-      `T&M approved: ${tm.description} — $${Number(tm.amount).toFixed(2)}`, req.session.userId);
+      `Final approval T&M: ${tm.description} — $${Number(tm.amount).toFixed(2)}`, req.session.userId);
     await client.query('COMMIT');
     res.json(tm);
   } catch (err) { await client.query('ROLLBACK'); next(err); }
@@ -126,8 +250,10 @@ router.post('/tm-charges/:id/reject', requireAuth, async (req, res, next) => {
     const { rejection_note } = req.body;
     await client.query('BEGIN');
     const result = await client.query(
-      `UPDATE tm_charges SET status = 'rejected', rejection_note = $2 WHERE id = $1 RETURNING *`,
+      `UPDATE tm_charges SET status = 'rejected', rejection_note = $2
+       WHERE id = $1 AND status NOT IN ('approved','rejected') RETURNING *`,
       [tmId, rejection_note || null]);
+    if (!result.rows[0]) return res.status(400).json({ error: 'T&M charge cannot be rejected in its current state' });
     const tm = result.rows[0];
     await logContract(client, tm.contract_id, 'tm_rejected',
       `T&M rejected: ${tm.description}${rejection_note ? ' — ' + rejection_note : ''}`, req.session.userId);

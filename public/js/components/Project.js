@@ -1,7 +1,11 @@
 // Project view — tab navigation is driven by the sidebar in app.js.
 
-window.Project = function Project({ project, tab, onTabChange, onProjectUpdate }) {
-  const [selectedContractId, setSelectedContractId] = React.useState(null);
+window.Project = function Project({ project, tab, onTabChange, onProjectUpdate, initialContractId, onContractOpened }) {
+  const [selectedContractId, setSelectedContractId] = React.useState(initialContractId || null);
+
+  React.useEffect(() => {
+    if (initialContractId) setSelectedContractId(initialContractId);
+  }, [initialContractId]);
   const [editing, setEditing] = React.useState(false);
   const [form, setForm] = React.useState({
     name: project.name,
@@ -67,7 +71,7 @@ window.Project = function Project({ project, tab, onTabChange, onProjectUpdate }
       {/* Tab content */}
       {tab === 'dashboard' && <Dashboard projectId={project.id} onOpenContract={id => { setSelectedContractId(id); onTabChange('contracts'); }} />}
       {tab === 'budget'    && <Budget    projectId={project.id} />}
-      {tab === 'contracts' && <Contracts projectId={project.id} initialContractId={selectedContractId} onContractOpened={() => setSelectedContractId(null)} />}
+      {tab === 'contracts' && <Contracts projectId={project.id} initialContractId={selectedContractId} onContractOpened={() => { setSelectedContractId(null); if (onContractOpened) onContractOpened(); }} />}
       {tab === 'invoices'  && <Invoices  projectId={project.id} />}
     </div>
   );

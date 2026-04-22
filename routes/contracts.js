@@ -4,13 +4,40 @@ const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const projects = require('./projects');
 const storage = require('../lib/storage');
-const { extractContract } = require('../lib/extract');
+const { extractContract, suggestContractLines } = require('../lib/extract');
 
 const router = express.Router();
 
 const APPROX = 0.01; // Allow 1-cent rounding tolerance when validating allocations.
 
 const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+// Fetch up to `limit` confirmed examples + vendor notes for a given vendor.
+async function getVendorContext(vendorName, documentType, limit = 3) {
+  if (!vendorName) return { examples: [], vendorNotes: null };
+  const [ex, prof] = await Promise.all([
+    pool.query(
+      `SELECT fields_json FROM extraction_examples
+       WHERE LOWER(vendor_name) = LOWER($1) AND document_type = $2
+       ORDER BY created_at DESC LIMIT $3`,
+      [vendorName, documentType, limit]
+    ),
+    pool.query(
+      `SELECT notes FROM vendor_profiles WHERE LOWER(vendor_name) = LOWER($1)`,
+      [vendorName]
+    ),
+  ]);
+  return { examples: ex.rows, vendorNotes: prof.rows[0]?.notes || null };
+}
+
+// Save a confirmed extraction as a future few-shot example.
+async function saveExtractionExample(client, vendorName, documentType, fields, userId) {
+  await client.query(
+    `INSERT INTO extraction_examples (vendor_name, document_type, fields_json, confirmed_by)
+     VALUES ($1, $2, $3, $4)`,
+    [vendorName, documentType, JSON.stringify(fields), userId]
+  );
+}
 
 // POST /api/contracts/extract — upload contract PDF → store + Claude extraction
 router.post('/contracts/extract', requireAuth, pdfUpload.single('file'), async (req, res, next) => {
@@ -20,15 +47,44 @@ router.post('/contracts/extract', requireAuth, pdfUpload.single('file'), async (
       filename: req.file.originalname || 'contract.pdf',
       mimeType: req.file.mimetype || 'application/pdf',
     });
-    let extracted = null;
-    let extract_error = null;
-    try { extracted = await extractContract(req.file.buffer); }
-    catch (err) { console.error('Contract extraction failed:', err.message); extract_error = err.message; }
+    let extracted = null, extract_error = null, suggested_lines = null;
+    try {
+      // Pass 1 — extract without context to get vendor name
+      extracted = await extractContract(req.file.buffer);
+
+      // Pass 2 — if we recognise the vendor, re-extract with their examples + profile
+      if (extracted && extracted.vendor_name) {
+        const ctx = await getVendorContext(extracted.vendor_name, 'contract');
+        if (ctx.examples.length > 0 || ctx.vendorNotes) {
+          extracted = await extractContract(req.file.buffer, ctx);
+        }
+      }
+
+      // QB line suggestions
+      if (extracted && extracted.total_value > 0) {
+        const codesResult = await pool.query(`
+          SELECT id, code, name FROM qb_codes
+          WHERE id NOT IN (SELECT DISTINCT parent_id FROM qb_codes WHERE parent_id IS NOT NULL)
+          ORDER BY code
+        `);
+        if (codesResult.rows.length > 0) {
+          const raw = await suggestContractLines(req.file.buffer, codesResult.rows, extracted.total_value);
+          const byId = {};
+          codesResult.rows.forEach(c => { byId[c.id] = c; });
+          suggested_lines = raw
+            .filter(l => byId[l.qb_code_id])
+            .map(l => ({ ...l, qb_code: byId[l.qb_code_id].code, qb_name: byId[l.qb_code_id].name }));
+        }
+      }
+    } catch (err) {
+      console.error('Contract extraction failed:', err.message);
+      extract_error = err.message;
+    }
     res.status(201).json({
       file_reference: saved.reference,
       download_url: `/api/files/${encodeURIComponent(saved.reference)}`,
       filename: saved.filename, size: saved.size,
-      extracted, extract_error,
+      extracted, extract_error, suggested_lines,
     });
   } catch (err) { next(err); }
 });
@@ -127,6 +183,15 @@ router.post('/projects/:id/contracts', requireAuth, async (req, res, next) => {
       );
     }
     await client.query('COMMIT');
+
+    // Save extraction example if a PDF was attached (PM confirmed AI-filled fields)
+    if (file_reference && vendor_name) {
+      saveExtractionExample(pool, vendor_name, 'contract', {
+        vendor_name, total_value: total, contract_date: contract_date || null,
+        reference_number: reference_number || null, description: description || null,
+      }, req.session.userId).catch(e => console.warn('Failed to save extraction example:', e.message));
+    }
+
     // Log creation (outside transaction is fine — contract is committed).
     await pool.query(
       `INSERT INTO contract_logs (contract_id, action, detail, changed_by)

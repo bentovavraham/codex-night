@@ -100,13 +100,13 @@ function ProjectRollup({ summary: s, health }) {
           {health === 'clear' ? 'Project on track' : health === 'warn' ? 'Attention needed' : 'Action required'}
         </span>
         <div style={{ display: 'flex', gap: 16, marginLeft: 4, flexWrap: 'wrap' }}>
-          {s.cost_creep && <AlertPill color="var(--danger)" text={`Cost creep — ${fmt.money(s.commitment - s.earmarked_total)} over earmark`} />}
+          {s.cost_creep && <AlertPill color="var(--danger)" text={`Cost creep — ${fmt.money(s.commitment - s.earmarked_total)} over internal budget`} />}
           {s.overrun && <AlertPill color="var(--danger)" text={`Overrun — invoiced ${fmt.money(s.invoiced)} exceeds commitment ${fmt.money(s.commitment)}`} />}
           {s.pending_co_count > 0 && <AlertPill color="var(--warn)" text={`${s.pending_co_count} change order${s.pending_co_count > 1 ? 's' : ''} pending (${fmt.money(s.pending_cos)})`} />}
           {s.pending_invoice_count > 0 && <AlertPill color="var(--warn)" text={`${s.pending_invoice_count} invoice${s.pending_invoice_count > 1 ? 's' : ''} pending (${fmt.money(s.pending_invoice_amount)})`} />}
           {health === 'clear' && s.commitment > 0 && (
             <span style={{ fontSize: 12, color: 'var(--text-2)' }}>
-              {hasEarmark ? `${earmarkPct}% of earmark committed — ${fmt.money(s.earmark_remaining)} buffer remaining` : `${fmt.money(s.commitment)} committed`}
+              {hasEarmark ? `${earmarkPct}% of internal budget committed — ${fmt.money(s.earmark_remaining)} buffer remaining` : `${fmt.money(s.commitment)} committed`}
             </span>
           )}
         </div>
@@ -114,8 +114,8 @@ function ProjectRollup({ summary: s, health }) {
 
       {/* Rollup numbers */}
       <div style={{ display: 'grid', gridTemplateColumns: hasEarmark ? 'repeat(4,1fr)' : 'repeat(3,1fr)', gap: 1, background: 'var(--border)' }}>
-        {hasEarmark && <RollupCell label="Earmarked" value={s.earmarked_total} sub={s.earmark_remaining != null ? (s.earmark_remaining >= 0 ? `${fmt.money(s.earmark_remaining)} buffer` : `${fmt.money(Math.abs(s.earmark_remaining))} OVER`) : null} subColor={s.earmark_remaining < 0 ? 'var(--danger)' : 'var(--text-3)'} tip="Sum of all internal budget estimates across contracts — your total expected spend including T&M and overages" />}
-        <RollupCell label="Commitment" value={s.commitment} sub={hasEarmark && s.earmarked_total > 0 ? `${Math.min(Math.round((s.commitment/s.earmarked_total)*100),999)}% of earmark` : null} accent={s.cost_creep ? 'var(--danger)' : s.commitment > 0 ? 'var(--accent)' : null} tip="Sum of all contract values including approved change orders — what you've legally agreed to pay" />
+        {hasEarmark && <RollupCell label="Internal Budget" value={s.earmarked_total} sub={s.earmark_remaining != null ? (s.earmark_remaining >= 0 ? `${fmt.money(s.earmark_remaining)} buffer` : `${fmt.money(Math.abs(s.earmark_remaining))} OVER`) : null} subColor={s.earmark_remaining < 0 ? 'var(--danger)' : 'var(--text-3)'} tip="Sum of all internal budget estimates across contracts — your total expected spend including T&M and overages" />}
+        <RollupCell label="Commitment" value={s.commitment} sub={hasEarmark && s.earmarked_total > 0 ? `${Math.min(Math.round((s.commitment/s.earmarked_total)*100),999)}% of internal budget` : null} accent={s.cost_creep ? 'var(--danger)' : s.commitment > 0 ? 'var(--accent)' : null} tip="Sum of all contract values including approved change orders — what you've legally agreed to pay" />
         <RollupCell label="Invoiced" value={s.invoiced} sub={s.commitment > 0 && s.invoiced > 0 ? `${Math.min(Math.round((s.invoiced/s.commitment)*100),999)}% of commitment` : null} accent={s.overrun ? 'var(--danger)' : null} tip="Total billed by all vendors to date — includes T&M and additional services beyond initial contract amounts" />
         <RollupCell label="Paid" value={s.paid} sub={s.invoiced > 0 && s.paid > 0 ? `${Math.round((s.paid/s.invoiced)*100)}% of invoiced` : null} accent={s.paid > 0 ? 'var(--ok)' : null} tip="Cash actually sent — approved invoices that have been marked as paid" />
       </div>
@@ -181,7 +181,7 @@ function ContractHealthCard({ contract: c, ledger: l, onClick }) {
           </div>
           {earmarked && (
             <div style={{ fontSize: 11, color: commitmentPct > 100 ? 'var(--danger)' : commitmentPct > 85 ? 'var(--warn)' : 'var(--text-3)' }}>
-              {commitmentPct}% of {fmt.money(earmarked)} earmarked
+              {commitmentPct}% of {fmt.money(earmarked)} internal budget
             </div>
           )}
         </div>
@@ -190,7 +190,7 @@ function ContractHealthCard({ contract: c, ledger: l, onClick }) {
       {/* Numbers row */}
       <div style={{ display: 'grid', gridTemplateColumns: earmarked ? 'repeat(4,1fr)' : 'repeat(3,1fr)', background: 'var(--border)', gap: 1, borderTop: '1px solid var(--border)' }}>
         <MiniCell label="Initial Contract Amt" value={Number(c.total_value)} tip="Original signed contract value — the number the vendor committed to at execution" />
-        {earmarked && <MiniCell label="Earmarked" value={earmarked} sub={l && l.earmark_remaining != null ? (l.earmark_remaining >= 0 ? `${fmt.money(l.earmark_remaining)} buffer` : `${fmt.money(Math.abs(l.earmark_remaining))} over`) : null} subColor={l && l.earmark_remaining < 0 ? 'var(--danger)' : 'var(--text-3)'} tip="Internal budget estimate including T&M tail and overages — set above the initial contract" />}
+        {earmarked && <MiniCell label="Internal Budget" value={earmarked} sub={l && l.earmark_remaining != null ? (l.earmark_remaining >= 0 ? `${fmt.money(l.earmark_remaining)} buffer` : `${fmt.money(Math.abs(l.earmark_remaining))} over`) : null} subColor={l && l.earmark_remaining < 0 ? 'var(--danger)' : 'var(--text-3)'} tip="Internal budget estimate including T&M tail and overages — set above the initial contract" />}
         <MiniCell label="Invoiced" value={invoiced} tip="Total billed by this vendor to date — includes all T&M and additional services" />
         <MiniCell label="Paid" value={paid} color={paid > 0 ? 'var(--ok)' : null} tip="Cash actually sent to this vendor" />
       </div>

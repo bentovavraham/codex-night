@@ -102,7 +102,7 @@ window.Contracts = function Contracts({ projectId, initialContractId, onContract
         const stripBg        = hasCritical ? '#fef2f2' : hasHigh ? '#fef3ee' : '#fffbeb';
         const stripBorder    = hasCritical ? '#fecaca' : hasHigh ? '#f9b49a' : '#fde68a';
         const pills = [
-          scopeCount     > 0 && { label: `${scopeCount} banging us out`,  key: 'scope' },
+          scopeCount     > 0 && { label: `${scopeCount} change order creep`,  key: 'scope' },
           overbilledCount > 0 && { label: `${overbilledCount} overbilled`, key: 'over' },
           budgetCount    > 0 && { label: `${budgetCount} budget pressure`, key: 'budget' },
         ].filter(Boolean);
@@ -283,9 +283,18 @@ function NewContractModal({ projectId, onClose, onSaved }) {
   const [uploading, setUploading] = React.useState(false);
   const [extractNote, setExtractNote] = React.useState(null);
   const [confidence, setConfidence] = React.useState({});
+  const [confirmed, setConfirmed] = React.useState(false);
   const [status, setStatus] = React.useState('draft');
   const [lines, setLines] = React.useState([{qb_code_id:'',amount:''}]);
   const [err, setErr] = React.useState(null);
+
+  // Returns border/background style for AI-filled fields based on confidence level
+  function aiFieldStyle(field) {
+    const c = confidence[field];
+    if (c === 'low')    return { border: '1.5px solid #dc2626', background: '#fef2f2' };
+    if (c === 'medium') return { border: '1.5px solid #d97706', background: '#fffbeb' };
+    return {};
+  }
 
   React.useEffect(()=>{
     if(lines.length===1&&total&&(!lines[0].amount||Number(lines[0].amount)===0)){
@@ -314,10 +323,19 @@ function NewContractModal({ projectId, onClose, onSaved }) {
         if(e.description) setDescription(d=>d?`${d}\n\n${e.description}`:e.description);
         if(e.confidence){
           const conf={};
-          filled.forEach(f=>{if(e.confidence[f])conf[f]=e.confidence[f];});
+          filled.forEach(fld=>{if(e.confidence[fld])conf[fld]=e.confidence[fld];});
           setConfidence(conf);
         }
-        setExtractNote('Fields pre-filled from PDF — colored dots show extraction confidence.');
+        // Pre-populate QB allocation lines if Claude suggested them
+        if(resp.suggested_lines && resp.suggested_lines.length > 0){
+          setLines(resp.suggested_lines.map(l=>({qb_code_id:String(l.qb_code_id),amount:String(l.amount),_suggested:true,_reason:l.reason,_confidence:l.confidence})));
+          const linesNote = resp.suggested_lines.length === 1
+            ? `QB code suggested: ${resp.suggested_lines[0].qb_code} — ${resp.suggested_lines[0].qb_name}`
+            : `${resp.suggested_lines.length} QB codes suggested — review allocations below`;
+          setExtractNote(`Fields pre-filled from PDF · ${linesNote}`);
+        } else {
+          setExtractNote('Fields pre-filled from PDF — colored dots show extraction confidence.');
+        }
       }
     } catch(e){setErr(e.message);}
     finally{setUploading(false);}
@@ -427,19 +445,19 @@ function NewContractModal({ projectId, onClose, onSaved }) {
                 <label data-tip="The company or individual you are contracting with. Type to search existing vendors.">
                   Vendor <ContractConfidenceDot level={confidence.vendor_name} />
                 </label>
-                <SmartSearch value={vendor} onChange={v => { setVendor(v); setConfidence(c=>({...c,vendor_name:undefined})); }} fetcher={q => api.searchVendors(q)} placeholder="Search vendors" />
+                <SmartSearch value={vendor} onChange={v => { setVendor(v); setConfidence(c=>({...c,vendor_name:undefined})); setConfirmed(false); }} fetcher={q => api.searchVendors(q)} placeholder="Search vendors" style={aiFieldStyle('vendor_name')} />
               </div>
               <div>
                 <label data-tip="The vendor's own reference number or proposal number. Used for matching their invoices later.">
                   Reference number <ContractConfidenceDot level={confidence.reference_number} />
                 </label>
-                <input value={ref} onChange={e => { setRef(e.target.value); setConfidence(c=>({...c,reference_number:undefined})); }} />
+                <input value={ref} onChange={e => { setRef(e.target.value); setConfidence(c=>({...c,reference_number:undefined})); setConfirmed(false); }} style={aiFieldStyle('reference_number')} />
               </div>
               <div>
                 <label data-tip="The dollar amount on the signed contract — the fixed lump sum only. Do not include estimated T&M.">
                   Initial Contract Amount <ContractConfidenceDot level={confidence.total_value} />
                 </label>
-                <input type="number" step="0.01" value={total} onChange={e => { setTotal(e.target.value); setConfidence(c=>({...c,total_value:undefined})); }} placeholder="0.00" />
+                <input type="number" step="0.01" value={total} onChange={e => { setTotal(e.target.value); setConfidence(c=>({...c,total_value:undefined})); setConfirmed(false); }} placeholder="0.00" style={aiFieldStyle('total_value')} />
               </div>
               <div>
                 <label data-tip="Your internal budget for what this vendor will actually cost you — including open-ended T&M, meetings, and additional services. Leave blank if truly unknown. The dashboard uses this as the warning threshold.">Internal Budget</label>
@@ -449,7 +467,7 @@ function NewContractModal({ projectId, onClose, onSaved }) {
                 <label data-tip="The date the contract was signed or became effective.">
                   Contract date <ContractConfidenceDot level={confidence.contract_date} />
                 </label>
-                <input type="date" value={date} onChange={e => { setDate(e.target.value); setConfidence(c=>({...c,contract_date:undefined})); }} />
+                <input type="date" value={date} onChange={e => { setDate(e.target.value); setConfidence(c=>({...c,contract_date:undefined})); setConfirmed(false); }} style={aiFieldStyle('contract_date')} />
               </div>
               <div>
                 <label data-tip="Draft = not yet active. Active = work in progress. Closed = complete or terminated.">Status</label>
@@ -498,16 +516,154 @@ function NewContractModal({ projectId, onClose, onSaved }) {
 
         {/* Footer */}
         <div style={{
-          display: 'flex', justifyContent: 'flex-end', gap: 10,
           padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0,
-          background: 'var(--surface)',
+          background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12,
         }}>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" disabled={Math.abs(diff) > 0.01 || !vendor || !total} onClick={save}>
+          {fileRef && (
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 14px', borderRadius: 6,
+              background: confirmed ? 'rgba(34,197,94,0.09)' : 'rgba(220,38,38,0.07)',
+              border: `1.5px solid ${confirmed ? 'rgba(34,197,94,0.35)' : 'rgba(220,38,38,0.35)'}`,
+              cursor: 'pointer', userSelect: 'none', flexShrink: 0,
+            }}>
+              <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)}
+                style={{ width: 15, height: 15, accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
+              <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                color: confirmed ? '#16a34a' : '#dc2626' }}>
+                {confirmed ? '✓ Details confirmed' : 'Confirm details are correct'}
+              </span>
+            </label>
+          )}
+          <button className="primary"
+            disabled={Math.abs(diff) > 0.01 || !vendor || !total || (!!fileRef && !confirmed)}
+            onClick={save}>
             Create Contract
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Burn bar — budget utilization only (payment detail lives in Invoices tab) ──
+function ContractBurnBar({ ledger: l }) {
+  if (!l) return null;
+  const original      = Number(l.original_contract) || 0;
+  const commitment    = Number(l.commitment) || 0;
+  const totalExposure = Number(l.total_exposure) || commitment;
+  const earmarked     = Number(l.earmarked_amount) || 0;
+
+  const overBudget    = earmarked > 0 && totalExposure > earmarked;
+  const overAmt       = overBudget ? totalExposure - earmarked : 0;
+  const budgetUsedPct = earmarked > 0 ? (totalExposure / earmarked) * 100 : null;
+
+  const severityColor = !budgetUsedPct ? '#4d9e6f'
+    : budgetUsedPct >= 100 ? '#dc2626'
+    : budgetUsedPct >= 90  ? '#c2410c'
+    : budgetUsedPct >= 75  ? '#d97706'
+    : '#4d9e6f';
+
+  const barMax = earmarked > 0
+    ? Math.max(earmarked * 1.15, totalExposure * 1.05)
+    : Math.max(original * 1.5, totalExposure * 1.2, 100);
+
+  function pct(val) { return !barMax || val <= 0 ? 0 : Math.min((val / barMax) * 100, 100); }
+
+  const pCommitment  = pct(Math.min(totalExposure, earmarked > 0 ? earmarked : totalExposure));
+  const pOver        = overBudget ? pct(overAmt) : 0;
+  const pInitialTick = pct(original);
+  const pBudgetTick  = earmarked > 0 ? pct(earmarked) : null;
+
+  const BAR_H      = 20;
+  const TICK_BLEED = 5;
+
+  function TickLabel({ p, children, color, bold }) {
+    const nearRight = p > 78;
+    const nearLeft  = p < 12;
+    const anchor = nearRight
+      ? { right: `${(100 - p).toFixed(1)}%` }
+      : nearLeft
+        ? { left: `${p.toFixed(1)}%` }
+        : { left: `${p.toFixed(1)}%`, transform: 'translateX(-50%)' };
+    return (
+      <span style={{
+        position: 'absolute', top: 0, ...anchor,
+        fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
+        color: color || 'var(--text-3)', fontWeight: bold ? 700 : 400,
+      }}>{children}</span>
+    );
+  }
+
+  return (
+    <div style={{ padding: '12px 20px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          Budget Utilization
+        </span>
+        {budgetUsedPct !== null && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: severityColor, fontVariantNumeric: 'tabular-nums' }}>
+            {budgetUsedPct.toFixed(1)}% of internal budget
+            {overBudget && <span style={{ marginLeft: 6 }}>· over by {fmt.money(overAmt)}</span>}
+          </span>
+        )}
+      </div>
+
+      {/* Bar + ticks */}
+      <div style={{ position: 'relative', paddingTop: TICK_BLEED }}>
+
+        {/* Track */}
+        <div style={{ position: 'relative', height: BAR_H, borderRadius: 4, background: 'var(--surface-3)', overflow: 'hidden' }}>
+          {/* Commitment fill */}
+          {pCommitment > 0 && (
+            <div title={`Commitment: ${fmt.money(Math.min(totalExposure, earmarked || totalExposure))}`} style={{
+              position: 'absolute', left: 0, top: 0, bottom: 0, width: `${pCommitment}%`,
+              background: severityColor, transition: 'width 0.55s ease',
+            }} />
+          )}
+          {/* Over-budget segment */}
+          {overBudget && pOver > 0 && (
+            <div title={`Over budget: ${fmt.money(overAmt)}`} style={{
+              position: 'absolute', left: `${pCommitment}%`, top: 0, bottom: 0, width: `${pOver}%`,
+              background: '#dc2626',
+              backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.2) 4px, rgba(255,255,255,0.2) 8px)',
+              transition: 'width 0.55s ease',
+            }} />
+          )}
+        </div>
+
+        {/* Tick marks */}
+        {pInitialTick > 0 && (
+          <div style={{
+            position: 'absolute', left: `${pInitialTick}%`, top: 0,
+            height: TICK_BLEED + BAR_H + TICK_BLEED, width: 2, marginLeft: -1,
+            background: 'rgba(28,24,20,0.4)', borderRadius: 1, zIndex: 4,
+          }} />
+        )}
+        {pBudgetTick !== null && (
+          <div style={{
+            position: 'absolute', left: `${pBudgetTick}%`, top: 0,
+            height: TICK_BLEED + BAR_H + TICK_BLEED, width: 2, marginLeft: -1,
+            background: overBudget ? '#dc2626' : 'rgba(28,24,20,0.35)', borderRadius: 1, zIndex: 4,
+          }} />
+        )}
+
+        {/* Tick labels */}
+        <div style={{ position: 'relative', height: 20, marginTop: TICK_BLEED + 3 }}>
+          {pInitialTick > 0 && (
+            <TickLabel p={pInitialTick}>Initial {fmt.money(original)}</TickLabel>
+          )}
+          {pBudgetTick !== null && earmarked > 0 && (
+            <TickLabel p={pBudgetTick} color={overBudget ? '#dc2626' : 'var(--text-3)'} bold={overBudget}>
+              {overBudget ? '⚠ ' : ''}Budget {fmt.money(earmarked)}
+            </TickLabel>
+          )}
+        </div>
+      </div>
+
     </div>
   );
 }
@@ -571,6 +727,7 @@ function ContractDetail({ contractId, projectId, onClose }) {
     { k: 'expenses',      label: `Expenses${pendingExp > 0 ? ` (${fmt.money(pendingExp)} pending)` : ''}` },
     { k: 'invoices',      label: 'Invoices' },
     { k: 'history',       label: 'History' },
+    { k: 'alerts',        label: 'Alert Status' },
   ];
 
   return (
@@ -592,38 +749,104 @@ function ContractDetail({ contractId, projectId, onClose }) {
         </div>
       </div>
 
-      {/* Cost ledger strip */}
-      {ledger && !editing && (
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-          gap: 1, background: 'var(--border)', borderTop: '1px solid var(--border)',
-          borderBottom: '1px solid var(--border)', marginBottom: 16,
-        }}>
-          {[
-            { label: 'Initial Contract Amt', val: ledger.original_contract, color: 'var(--text-1)', tip: 'The dollar amount on the signed contract.' },
-            { label: '+ Approved COs', val: ledger.approved_cos, color: ledger.approved_cos > 0 ? 'var(--warn)' : 'var(--text-3)', show: true, tip: 'Sum of all approved change orders added to this contract.' },
-            { label: '+ T&M', val: ledger.tm_approved, color: ledger.tm_approved > 0 ? 'var(--warn)' : 'var(--text-3)', show: true, tip: 'Approved time & material charges logged against this contract.' },
-            { label: '= Commitment', val: ledger.commitment, color: ledger.cost_creep ? 'var(--danger)' : 'var(--accent)', bold: true, tip: 'Legal obligation: Initial contract + Approved Change Orders only. Does not include T&M or expenses.' },
-            { label: 'Internal Budget', val: ledger.earmarked_amount, color: 'var(--text-2)', show: true, tip: 'Your internal estimate for total expected spend, including open-ended T&M. Set when creating the contract.' },
-            { label: 'Invoiced', val: ledger.invoiced, color: 'var(--text-1)', tip: 'Sum of all approved, pushed, or paid invoices against this contract.' },
-            { label: 'Paid', val: ledger.paid, color: 'var(--ok)', tip: 'Amount confirmed paid to the vendor.' },
-          ].filter(item => item.val > 0 || item.show).map(item => (
-            <div key={item.label} data-tip={item.tip} style={{ background: 'var(--surface)', padding: '10px 14px', textAlign: 'center' }}>
-              <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{item.label}</div>
-              <div style={{ fontSize: 14, fontWeight: item.bold ? 700 : 600, color: item.color, fontFamily: 'var(--mono)' }}>
-                {item.val != null && item.val > 0 ? fmt.money(item.val) : <span style={{ color: 'var(--text-3)' }}>—</span>}
+      {/* 6-block KPI grid + burn bar — persistent across all tabs */}
+      {ledger && !editing && (() => {
+        const orig       = Number(ledger.original_contract) || 0;
+        const cos        = Number(ledger.approved_cos) || 0;
+        const tm         = Number(ledger.tm_approved) || 0;
+        const commitment = Number(ledger.commitment) || 0;
+        const earmarked  = Number(ledger.earmarked_amount) || 0;
+        const invoiced   = Number(ledger.invoiced) || 0;
+        const paid       = Number(ledger.paid) || 0;
+        const exposure   = Number(ledger.total_exposure) || commitment;
+        const buffer     = earmarked > 0 ? earmarked - exposure : null;
+        const overBudget = earmarked > 0 && exposure > earmarked;
+        const cosPct     = orig > 0 && cos > 0 ? Math.round((cos / orig) * 100) : 0;
+        const invPct     = commitment > 0 && invoiced > 0 ? Math.round((invoiced / commitment) * 100) : 0;
+        const paidPct    = invoiced > 0 && paid > 0 ? Math.round((paid / invoiced) * 100) : 0;
+
+        function KpiBlock({ label, value, sub, subColor, accent, tip, muted }) {
+          return (
+            <div data-tip={tip} style={{
+              background: 'var(--surface)', padding: '16px 20px',
+              borderBottom: `3px solid ${accent}`,
+              display: 'flex', flexDirection: 'column', gap: 4,
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{label}</div>
+              <div style={{ fontSize: 26, fontWeight: 800, fontFamily: 'var(--mono)', color: muted ? 'var(--text-3)' : 'var(--text-1)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                {value != null && value > 0 ? fmt.money(value) : <span style={{ color: 'var(--text-3)', fontSize: 20 }}>—</span>}
               </div>
+              {sub && <div style={{ fontSize: 12, color: subColor || 'var(--text-3)', fontWeight: 500 }}>{sub}</div>}
             </div>
-          ))}
-        </div>
-      )}
+          );
+        }
+
+        return (
+          <>
+            {/* Row 1 — the commitment equation */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, background: 'var(--border)', borderTop: '1px solid var(--border)' }}>
+              <KpiBlock
+                label="Initial Contract"
+                value={orig}
+                sub="What was signed"
+                accent="var(--border-2)"
+                tip="The original signed contract value."
+              />
+              <KpiBlock
+                label="+ Change Orders"
+                value={cos}
+                sub={cos > 0 ? `${cosPct}% above initial${tm > 0 ? ` · +${fmt.money(tm)} T&M` : ''}` : tm > 0 ? `+${fmt.money(tm)} T&M in exposure` : 'None yet'}
+                subColor={cos > 0 ? 'var(--warn)' : 'var(--text-3)'}
+                accent={cos > 0 ? 'var(--warn)' : 'var(--border-2)'}
+                muted={cos === 0}
+                tip="Approved change orders added to this contract. T&M is tracked separately as additional exposure."
+              />
+              <KpiBlock
+                label="= Commitment"
+                value={commitment}
+                sub={cos > 0 ? `Initial + ${fmt.money(cos)} COs` : 'Contract only — no COs yet'}
+                subColor={ledger.cost_creep ? 'var(--danger)' : 'var(--text-3)'}
+                accent="rgba(196,82,42,0.7)"
+                tip="Legal obligation: initial contract + all approved change orders."
+              />
+            </div>
+
+            {/* Row 2 — budget & billing health */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, background: 'var(--border)', borderTop: '1px solid var(--border)' }}>
+              <KpiBlock
+                label="Internal Budget"
+                value={earmarked}
+                sub={earmarked > 0 ? (overBudget ? `${fmt.money(Math.abs(buffer))} OVER` : `${fmt.money(buffer)} remaining`) : 'Not set'}
+                subColor={earmarked > 0 ? (overBudget ? '#dc2626' : 'var(--ok)') : 'var(--text-3)'}
+                accent={earmarked > 0 ? (overBudget ? '#dc2626' : 'var(--accent)') : 'var(--border-2)'}
+                muted={earmarked === 0}
+                tip="Your internal estimate for total expected spend — set this above the initial contract to account for T&M and overages."
+              />
+              <KpiBlock
+                label="Invoiced to Date"
+                value={invoiced}
+                sub={invoiced > 0 ? `${invPct}% of commitment` : 'No invoices yet'}
+                accent="var(--amber)"
+                muted={invoiced === 0}
+                tip="Total billed by this vendor — includes all approved invoices."
+              />
+              <KpiBlock
+                label="Paid"
+                value={paid}
+                sub={paid > 0 ? `${paidPct}% of invoiced` : invoiced > 0 ? `${fmt.money(invoiced)} outstanding` : 'Nothing paid yet'}
+                subColor={paid === 0 && invoiced > 0 ? 'var(--amber)' : 'var(--text-3)'}
+                accent={paid > 0 ? 'var(--ok)' : 'var(--border-2)'}
+                muted={paid === 0}
+                tip="Cash actually sent to the vendor."
+              />
+            </div>
+
+            <ContractBurnBar ledger={ledger} />
+          </>
+        );
+      })()}
 
       {/* Alerts */}
-      {ledger && ledger.cost_creep && (
-        <div style={{ padding: '8px 14px', marginBottom: 12, borderRadius: 5, background: 'rgba(220,55,55,0.1)', border: '1px solid rgba(220,55,55,0.3)', fontSize: 12, color: 'var(--danger)' }}>
-          🔴 Cost creep: total exposure {fmt.money(ledger.total_exposure)} exceeds earmark {fmt.money(ledger.earmarked_amount)}
-        </div>
-      )}
       {ledger && ledger.pending_co_count > 0 && (
         <div style={{ padding: '8px 14px', marginBottom: 12, borderRadius: 5, background: 'rgba(230,160,30,0.1)', border: '1px solid rgba(230,160,30,0.3)', fontSize: 12, color: 'var(--warn)' }}>
           ⚠️ {ledger.pending_co_count} change order{ledger.pending_co_count > 1 ? 's' : ''} pending — {fmt.money(ledger.pending_cos)} not yet committed
@@ -835,6 +1058,19 @@ function ContractDetail({ contractId, projectId, onClose }) {
             );
           })()}
 
+          {activeTab === 'alerts' && ledger && (
+            <ContractAlertStrip
+              original={Number(ledger.original_contract) || 0}
+              approvedCOs={Number(ledger.approved_cos) || 0}
+              invoiced={Number(ledger.invoiced) || 0}
+              totalExposure={Number(ledger.total_exposure) || 0}
+              earmarked={Number(ledger.earmarked_amount) || 0}
+            />
+          )}
+          {activeTab === 'alerts' && !ledger && (
+            <div className="empty">Loading…</div>
+          )}
+
           {activeTab === 'history' && history.length === 0 && (
             <div className="empty">No history yet.</div>
           )}
@@ -924,12 +1160,103 @@ function ContractDetail({ contractId, projectId, onClose }) {
   );
 }
 
+// ── Alert status strip — shown in the Alert Status tab ───────────────────────
+function ContractAlertStrip({ original, approvedCOs, invoiced, totalExposure, earmarked }) {
+  function overageSev(pct) {
+    if (pct <= 0)  return null;
+    if (pct < 10)  return 'low';
+    if (pct < 25)  return 'moderate';
+    if (pct < 50)  return 'high';
+    return 'critical';
+  }
+  function budgetSev(pct) {
+    if (!pct || pct < 75) return null;
+    if (pct < 90)  return 'low';
+    if (pct < 100) return 'moderate';
+    if (pct < 110) return 'high';
+    return 'critical';
+  }
+
+  const coCreepPct    = original > 0 ? (approvedCOs / original) * 100 : 0;
+  const overbilledPct = original > 0 ? Math.max((invoiced - original) / original * 100, 0) : 0;
+  const budgetUsedPct = earmarked > 0 ? (totalExposure / earmarked) * 100 : null;
+
+  const coSev     = overageSev(coCreepPct);
+  const obSev     = overageSev(overbilledPct);
+  const budSev    = budgetSev(budgetUsedPct);
+
+  const SEV_COLOR = {
+    low:      { dot: '#d97706', text: '#92400e', bg: '#fffbeb', label: 'LOW' },
+    moderate: { dot: '#c4522a', text: '#9a3412', bg: '#fff7f4', label: 'MODERATE' },
+    high:     { dot: '#b04824', text: '#7c2d12', bg: '#fef3ee', label: 'HIGH' },
+    critical: { dot: '#dc2626', text: '#991b1b', bg: '#fef2f2', label: 'CRITICAL' },
+  };
+  const CLEAR = { dot: '#16a34a', text: 'var(--text-3)', bg: 'transparent' };
+
+  function AlertRow({ label, sev, detail, clearDetail, last }) {
+    const c = sev ? SEV_COLOR[sev] : CLEAR;
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '9px 14px',
+        borderBottom: last ? 'none' : '1px solid var(--border)',
+        background: sev ? c.bg : 'transparent',
+      }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+          background: c.dot,
+          boxShadow: sev ? `0 0 5px ${c.dot}88` : 'none',
+        }} />
+        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)', minWidth: 160 }}>{label}</span>
+        <span style={{ fontSize: 12, color: sev ? c.text : 'var(--text-3)', flex: 1 }}>
+          {sev ? detail : clearDetail}
+        </span>
+        {sev && (
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+            padding: '2px 6px', borderRadius: 3,
+            background: c.dot + '22', color: c.dot, border: `1px solid ${c.dot}44`,
+            flexShrink: 0,
+          }}>{c.label}</span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--surface)' }}>
+      <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-3)' }}>Alert Status</span>
+      </div>
+      <AlertRow
+        label="Change Order Creep"
+        sev={coSev}
+        detail={`COs added ${fmt.money(approvedCOs)} — ${coCreepPct.toFixed(1)}% above initial contract`}
+        clearDetail={approvedCOs > 0 ? `COs added ${fmt.money(approvedCOs)} (${coCreepPct.toFixed(1)}% above initial) — within normal range` : 'No approved change orders'}
+      />
+      <AlertRow
+        label="Overbilled"
+        sev={obSev}
+        detail={`Invoiced ${fmt.money(invoiced)} — ${overbilledPct.toFixed(1)}% above initial contract`}
+        clearDetail={invoiced > 0 ? `Invoiced ${fmt.money(invoiced)} of ${fmt.money(original)} initial — within contract` : 'No invoices yet'}
+      />
+      <AlertRow
+        label="Budget Pressure"
+        sev={budSev}
+        detail={earmarked > 0 ? `${budgetUsedPct.toFixed(1)}% of internal budget used — ${fmt.money(totalExposure)} exposure vs ${fmt.money(earmarked)}` : 'No internal budget set'}
+        clearDetail={earmarked > 0 ? `${budgetUsedPct !== null ? budgetUsedPct.toFixed(1) : '0'}% of internal budget used — ${fmt.money(earmarked - totalExposure)} remaining` : 'No internal budget set'}
+        last
+      />
+    </div>
+  );
+}
+
 // ── Contract-level Dashboard (Overview tab) ──────────────────────────────────
 
 function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
   const original      = Number(l.original_contract) || 0;
-  const commitment    = Number(l.commitment) || 0;      // contract + approved COs only
-  const totalExposure = Number(l.total_exposure) || commitment; // commitment + T&M + expenses
+  const commitment    = Number(l.commitment) || 0;
+  const totalExposure = Number(l.total_exposure) || commitment;
   const invoiced      = Number(l.invoiced) || 0;
   const paid          = Number(l.paid) || 0;
   const earmarked     = Number(l.earmarked_amount) || 0;
@@ -937,281 +1264,21 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
   const tmApproved    = Number(l.tm_approved) || 0;
   const expApproved   = Number(l.expense_approved) || 0;
 
-  const outstanding         = Math.max(invoiced - paid, 0);
-  // Committed-not-invoiced: total exposure minus what's already been invoiced
-  const committedUninvoiced = Math.max(totalExposure - invoiced, 0);
-  const buffer              = earmarked > 0 ? earmarked - totalExposure : null;
-  const overBudget          = earmarked > 0 && totalExposure > earmarked;
-  const overInitial         = commitment > original;
-  const overInitialAmt      = overInitial ? commitment - original : 0;
-
-  // Budget pressure: total_exposure vs earmarked
+  const outstanding   = Math.max(invoiced - paid, 0);
+  const buffer        = earmarked > 0 ? earmarked - totalExposure : null;
+  const overBudget    = earmarked > 0 && totalExposure > earmarked;
   const budgetUsedPct = earmarked > 0 ? (totalExposure / earmarked) * 100 : null;
-  let budgetPressure = null;
+  let budgetPressure  = null;
   if (budgetUsedPct !== null) {
     if (budgetUsedPct >= 100) budgetPressure = 'danger';
     else if (budgetUsedPct >= 90) budgetPressure = 'warning';
     else if (budgetUsedPct >= 75) budgetPressure = 'caution';
   }
 
-  // Burn bar: scale = earmarked if set, otherwise totalExposure * 1.4
-  const barScale = earmarked > 0
-    ? Math.max(earmarked, totalExposure * 1.02)
-    : Math.max(original * 1.5, totalExposure * 1.15, 100);
-
-  function pct(val) {
-    if (!barScale || val <= 0) return 0;
-    return Math.min((val / barScale) * 100, 100);
-  }
-
-  const paidPct              = pct(paid);
-  const outstandingPct       = pct(outstanding);
-  const committedUninvPct    = pct(committedUninvoiced);
-  const initialTickPct       = pct(original);
-  const earmarkedTickPct     = earmarked > 0 ? pct(earmarked) : null;
-
-  // Budget callout config
-  const budgetCallout = overBudget ? {
-    bg: '#fef2f2', border: '#fecaca', color: '#dc2626',
-    title: 'CONTINGENCY DEPLETED',
-    body: `Total exposure exceeds budget by ${fmt.money(totalExposure - earmarked)}`,
-    icon: '🔴',
-  } : budgetPressure === 'warning' ? {
-    bg: '#fff7ed', border: '#fed7aa', color: '#c2410c',
-    title: 'BUDGET RUNNING LOW',
-    body: `Only ${fmt.money(buffer)} left — ${(100 - budgetUsedPct).toFixed(1)}% of budget remaining`,
-    icon: '⚠',
-  } : budgetPressure === 'caution' ? {
-    bg: '#fffbeb', border: '#fde68a', color: '#d97706',
-    title: 'Watch the budget',
-    body: `${fmt.money(buffer)} remaining — ${(100 - budgetUsedPct).toFixed(1)}% of budget left`,
-    icon: '◎',
-  } : null;
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-      {/* ── Budget alert banner — the most important signal ── */}
-      {budgetCallout && (
-        <div style={{
-          padding: '14px 18px',
-          borderRadius: 8,
-          background: budgetCallout.bg,
-          border: `1px solid ${budgetCallout.border}`,
-          display: 'flex', alignItems: 'center', gap: 12,
-        }}>
-          <span style={{ fontSize: 22, lineHeight: 1 }}>{budgetCallout.icon}</span>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 15, color: budgetCallout.color, letterSpacing: '-0.01em' }}>
-              {budgetCallout.title}
-            </div>
-            <div style={{ fontSize: 13, color: budgetCallout.color, opacity: 0.85, marginTop: 2 }}>
-              {budgetCallout.body}
-            </div>
-          </div>
-          {overBudget && (
-            <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Over by</div>
-              <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'var(--mono)', color: '#dc2626', letterSpacing: '-0.02em' }}>
-                {fmt.money(totalExposure - earmarked)}
-              </div>
-            </div>
-          )}
-          {!overBudget && earmarked > 0 && (
-            <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: budgetCallout.color, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Remaining</div>
-              <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'var(--mono)', color: budgetCallout.color, letterSpacing: '-0.02em' }}>
-                {fmt.money(buffer)}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── The full spend story — always shown ── */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
-
-        {/* Story headline row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1, background: 'var(--border)' }}>
-          <ContractStat
-            label="Initial Contract"
-            value={original}
-            sublabel="What was signed"
-            color="var(--text-1)"
-            topBar="var(--border-2)"
-            tip="The original signed contract value — the number the vendor committed to at execution."
-          />
-          <ContractStat
-            label="Commitment"
-            value={commitment}
-            sublabel={approvedCOs > 0 ? `+${fmt.money(approvedCOs)} in COs` : 'Contract + approved COs'}
-            color={overBudget ? 'var(--danger)' : overInitial ? 'var(--warn)' : 'var(--accent)'}
-            topBar={overBudget ? 'var(--danger)' : overInitial ? 'var(--warn)' : 'var(--accent)'}
-            tip="What you are legally on the hook for: Initial contract + all approved change orders. T&M and expenses are tracked separately as additional exposure."
-          />
-          <ContractStat
-            label="Invoiced to Date"
-            value={invoiced}
-            sublabel={commitment > 0 ? `${Math.round((invoiced / commitment) * 100)}% of commitment` : 'no invoices yet'}
-            color={invoiced > commitment ? 'var(--danger)' : 'var(--text-1)'}
-            topBar={null}
-            tip="What vendors have actually billed. Should not exceed Total Commitment."
-          />
-          {earmarked > 0 ? (
-            <ContractStat
-              label="Internal Budget"
-              value={earmarked}
-              sublabel={
-                overBudget
-                  ? `${fmt.money(commitment - earmarked)} OVER budget`
-                  : buffer !== null ? `${fmt.money(buffer)} remaining` : ''
-              }
-              color={overBudget ? 'var(--danger)' : budgetPressure === 'warning' ? 'var(--warn)' : 'var(--text-2)'}
-              topBar={overBudget ? 'var(--danger)' : null}
-              tip="Your internal estimate for total expected spend including T&M, change orders, and buffer. Set when the contract was created."
-            />
-          ) : (
-            <ContractStat
-              label="Paid"
-              value={paid}
-              sublabel={invoiced > 0 && paid > 0 ? `${Math.round((paid / invoiced) * 100)}% of invoiced` : invoiced > 0 ? `${fmt.money(outstanding)} outstanding` : ''}
-              color={paid > 0 ? 'var(--ok)' : 'var(--text-3)'}
-              topBar={paid > 0 ? 'var(--ok)' : null}
-              tip="Cash actually sent to the vendor."
-            />
-          )}
-        </div>
-
-        {/* ── Burn bar — full story ── */}
-        <div style={{ padding: '18px 20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>
-              Commitment vs. Budget
-            </span>
-            {earmarked > 0 && budgetUsedPct !== null && (
-              <span style={{
-                fontSize: 13, fontWeight: 700,
-                color: overBudget ? '#dc2626' : budgetPressure === 'warning' ? '#c2410c' : budgetPressure === 'caution' ? '#d97706' : 'var(--ok)',
-              }}>
-                {budgetUsedPct.toFixed(1)}% of budget used
-              </span>
-            )}
-          </div>
-
-          {/* The bar */}
-          <div style={{ position: 'relative', height: 28, borderRadius: 6, background: 'var(--surface-3)', overflow: 'visible' }}>
-
-            {/* Background track */}
-            <div style={{ position: 'absolute', inset: 0, borderRadius: 6, background: 'var(--surface-3)' }} />
-
-            {/* Paid segment — green */}
-            {paidPct > 0 && (
-              <div style={{
-                position: 'absolute', left: 0, top: 0, bottom: 0,
-                width: `${paidPct}%`,
-                background: 'var(--ok)',
-                borderRadius: outstandingPct > 0 || committedUninvPct > 0 ? '6px 0 0 6px' : 6,
-                transition: 'width 0.6s ease',
-              }} title={`Paid: ${fmt.money(paid)}`} />
-            )}
-
-            {/* Outstanding segment — amber */}
-            {outstandingPct > 0 && (
-              <div style={{
-                position: 'absolute', left: `${paidPct}%`, top: 0, bottom: 0,
-                width: `${outstandingPct}%`,
-                background: 'var(--amber)',
-                borderRadius: committedUninvPct > 0 ? 0 : '0 6px 6px 0',
-                transition: 'width 0.6s ease',
-              }} title={`Invoiced (not yet paid): ${fmt.money(outstanding)}`} />
-            )}
-
-            {/* Committed-not-yet-invoiced — terracotta, slightly transparent */}
-            {committedUninvPct > 0 && (
-              <div style={{
-                position: 'absolute', left: `${paidPct + outstandingPct}%`, top: 0, bottom: 0,
-                width: `${committedUninvPct}%`,
-                background: 'rgba(196,82,42,0.55)',
-                backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.12) 4px, rgba(255,255,255,0.12) 8px)',
-                borderRadius: '0 6px 6px 0',
-                transition: 'width 0.6s ease',
-              }} title={`Committed but not yet invoiced: ${fmt.money(committedUninvoiced)}`} />
-            )}
-
-            {/* Initial contract tick — dark vertical line */}
-            {initialTickPct > 0 && initialTickPct < 99 && (
-              <div style={{
-                position: 'absolute', left: `${initialTickPct}%`,
-                top: -5, bottom: -5,
-                width: 2, background: 'var(--text-1)', opacity: 0.5,
-                borderRadius: 1, zIndex: 3,
-              }} title={`Initial contract: ${fmt.money(original)}`} />
-            )}
-
-            {/* Earmarked (budget) end line — only if earmarked < barScale */}
-            {earmarkedTickPct !== null && earmarkedTickPct < 99 && (
-              <div style={{
-                position: 'absolute', left: `${earmarkedTickPct}%`,
-                top: -7, bottom: -7,
-                width: 2,
-                background: overBudget ? '#dc2626' : 'var(--accent)',
-                opacity: 0.8,
-                borderRadius: 1, zIndex: 3,
-              }} title={`Internal budget: ${fmt.money(earmarked)}`} />
-            )}
-
-            {/* Over-budget overflow zone */}
-            {overBudget && earmarkedTickPct !== null && (
-              <div style={{
-                position: 'absolute', left: `${earmarkedTickPct}%`, right: 0, top: 0, bottom: 0,
-                background: 'rgba(220,38,38,0.15)',
-                border: '2px solid rgba(220,38,38,0.4)',
-                borderLeft: 'none',
-                borderRadius: '0 6px 6px 0',
-              }} />
-            )}
-          </div>
-
-          {/* Tick labels */}
-          <div style={{ position: 'relative', height: 22, marginTop: 6 }}>
-            {initialTickPct > 1 && initialTickPct < 95 && (
-              <div style={{
-                position: 'absolute', left: `${initialTickPct}%`,
-                transform: 'translateX(-50%)',
-                fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap',
-              }}>
-                ↑ Initial {fmt.money(original)}
-              </div>
-            )}
-            {earmarked > 0 && (
-              <div style={{
-                position: 'absolute', right: 0,
-                fontSize: 11,
-                color: overBudget ? '#dc2626' : 'var(--text-3)',
-                fontWeight: overBudget ? 700 : 400,
-              }}>
-                {overBudget ? '⚠ ' : ''}Budget {fmt.money(earmarked)}
-              </div>
-            )}
-          </div>
-
-          {/* Legend */}
-          <div style={{ display: 'flex', gap: 18, marginTop: 6, flexWrap: 'wrap' }}>
-            {[
-              paid > 0.01      && { label: 'Paid',                     val: paid,               color: 'var(--ok)' },
-              outstanding > 0.01 && { label: 'Invoiced – not yet paid',  val: outstanding,        color: 'var(--amber)' },
-              committedUninvoiced > 0.01 && { label: 'Committed – not yet invoiced', val: committedUninvoiced, color: 'rgba(196,82,42,0.55)' },
-            ].filter(Boolean).map(item => (
-              <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-2)' }}>
-                <span style={{ width: 12, height: 12, borderRadius: 3, background: item.color, flexShrink: 0, display: 'inline-block' }} />
-                {item.label}: <strong style={{ color: 'var(--text-1)', fontFamily: 'var(--mono)' }}>{fmt.money(item.val)}</strong>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ── The full spend story — ALWAYS shown ── */}
+      {/* ── How we got here — ALWAYS shown ── */}
       <div style={{ background: 'var(--surface)', border: `1px solid ${overBudget ? '#fecaca' : 'var(--border)'}`, borderRadius: 10, padding: '16px 20px' }}>
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em', marginBottom: 4 }}>
@@ -1236,7 +1303,7 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
         />
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>= Commitment</span>
-          <span style={{ fontSize: 20, fontWeight: 800, fontFamily: 'var(--mono)', color: overInitial ? 'var(--warn)' : 'var(--accent)', letterSpacing: '-0.02em' }}>
+          <span style={{ fontSize: 20, fontWeight: 800, fontFamily: 'var(--mono)', color: commitment > original ? 'var(--warn)' : 'var(--accent)', letterSpacing: '-0.02em' }}>
             {fmt.money(commitment)}
           </span>
         </div>
@@ -1295,7 +1362,7 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
               </div>
               {budgetUsedPct !== null && (
                 <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 1 }}>
-                  {budgetUsedPct.toFixed(1)}% of budget used
+                  {budgetUsedPct.toFixed(1)}% of internal budget used
                 </div>
               )}
             </div>
@@ -1315,7 +1382,7 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
                 If approved: commitment → {fmt.money(commitment + Number(l.pending_cos))}
-                {earmarked > 0 ? ` · exposure → ${fmt.money(totalExposure + Number(l.pending_cos))} (${((totalExposure + Number(l.pending_cos)) / earmarked * 100).toFixed(1)}% of budget)` : ''}
+                {earmarked > 0 ? ` · exposure → ${fmt.money(totalExposure + Number(l.pending_cos))} (${((totalExposure + Number(l.pending_cos)) / earmarked * 100).toFixed(1)}% of internal budget)` : ''}
               </div>
             </div>
             <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>Review →</span>

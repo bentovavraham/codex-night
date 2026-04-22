@@ -291,6 +291,36 @@ DO $$ BEGIN ALTER TABLE tm_charges ADD COLUMN notes TEXT; EXCEPTION WHEN duplica
 DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN rejection_note TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN notes TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
+-- ── 3-tier approval chain (PM → Partner → Admin) ─────────────────────────────
+-- invoices
+DO $$ BEGIN ALTER TABLE invoices ADD COLUMN pm_approved_by INTEGER REFERENCES users(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE invoices ADD COLUMN pm_approved_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE invoices ADD COLUMN partner_approved_by INTEGER REFERENCES users(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE invoices ADD COLUMN partner_approved_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- change_orders
+DO $$ BEGIN ALTER TABLE change_orders ADD COLUMN pm_approved_by INTEGER REFERENCES users(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE change_orders ADD COLUMN pm_approved_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE change_orders ADD COLUMN partner_approved_by INTEGER REFERENCES users(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE change_orders ADD COLUMN partner_approved_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+-- Change orders: T&M authorization fields
+DO $$ BEGIN ALTER TABLE change_orders ADD COLUMN tm_authorized BOOLEAN NOT NULL DEFAULT false; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE change_orders ADD COLUMN tm_not_to_exceed NUMERIC(14,2); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- tm_charges
+DO $$ BEGIN ALTER TABLE tm_charges ADD COLUMN pm_approved_by INTEGER REFERENCES users(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE tm_charges ADD COLUMN pm_approved_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE tm_charges ADD COLUMN partner_approved_by INTEGER REFERENCES users(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE tm_charges ADD COLUMN partner_approved_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+-- Link T&M charges to a specific change order (when they bill against CO scope).
+DO $$ BEGIN ALTER TABLE tm_charges ADD COLUMN change_order_id INTEGER REFERENCES change_orders(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- contract_expenses
+DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN pm_approved_by INTEGER REFERENCES users(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN pm_approved_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN partner_approved_by INTEGER REFERENCES users(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN partner_approved_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
 -- File storage in Postgres (replaces ephemeral local disk).
 CREATE TABLE IF NOT EXISTS files (
     id VARCHAR(36) PRIMARY KEY,
@@ -300,3 +330,38 @@ CREATE TABLE IF NOT EXISTS files (
     size INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── Vendor knowledge base ─────────────────────────────────────────────────────
+
+-- Confirmed extractions stored as few-shot examples for future Claude calls.
+-- Every time a PM confirms and saves a contract or invoice, the verified fields
+-- land here. Next time a doc from the same vendor arrives, these feed into the
+-- extraction prompt so Claude already "knows" the vendor's document format.
+CREATE TABLE IF NOT EXISTS extraction_examples (
+    id           SERIAL PRIMARY KEY,
+    vendor_name  VARCHAR(255) NOT NULL,
+    document_type VARCHAR(16) NOT NULL CHECK (document_type IN ('contract','invoice','tm_charge','expense')),
+    fields_json  JSONB NOT NULL,
+    confirmed_by INTEGER NOT NULL REFERENCES users(id),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Extend document_type constraint to include tm_charge and expense.
+DO $$ BEGIN
+    ALTER TABLE extraction_examples DROP CONSTRAINT IF EXISTS extraction_examples_document_type_check;
+    ALTER TABLE extraction_examples ADD CONSTRAINT extraction_examples_document_type_check
+        CHECK (document_type IN ('contract','invoice','tm_charge','expense'));
+EXCEPTION WHEN others THEN NULL;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_extraction_examples_vendor ON extraction_examples(LOWER(vendor_name));
+CREATE INDEX IF NOT EXISTS idx_extraction_examples_type   ON extraction_examples(document_type);
+
+-- Human-readable vendor notes injected as context into every extraction call
+-- for that vendor. Admins can add rate cards, invoice format quirks, etc.
+CREATE TABLE IF NOT EXISTS vendor_profiles (
+    id          SERIAL PRIMARY KEY,
+    vendor_name VARCHAR(255) NOT NULL UNIQUE,
+    notes       TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_vendor_profiles_vendor ON vendor_profiles(LOWER(vendor_name));

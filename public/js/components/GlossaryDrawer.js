@@ -13,9 +13,9 @@ window.GlossaryDrawer = function GlossaryDrawer({ open, onClose }) {
           def: 'A signed agreement with a vendor covering defined scope, estimated cost, and date. Everything else is measured against this.',
         },
         {
-          term: 'Earmarked Amount',
-          short: 'Your internal budget',
-          def: 'The internal budget set aside to cover this contract including expected extras — T&M tail, change orders, expenses. Should always be ≥ contract value. Set it high enough that you won\'t need more money.',
+          term: 'Internal Budget',
+          short: 'Your per-contract budget estimate',
+          def: 'The internal budget set aside to cover this contract including expected extras — T&M tail, change orders, expenses. Should always be ≥ contract value. Set it high enough that you won\'t need more money. Referenced everywhere in the app as "Internal Budget".',
         },
         {
           term: 'Commitment',
@@ -25,17 +25,22 @@ window.GlossaryDrawer = function GlossaryDrawer({ open, onClose }) {
         {
           term: 'Total Exposure',
           short: 'Full spend risk',
-          def: 'Commitment + approved T&M + approved Expenses. The realistic total you expect to spend, including everything approved. This is what gets compared to your Earmarked budget.',
+          def: 'Commitment + approved T&M + approved Expenses. The realistic total you expect to spend, including everything approved. This is what gets compared to your Internal Budget.',
         },
         {
           term: 'Buffer',
           short: 'Room left before "get more money"',
-          def: 'Earmarked Amount minus Total Exposure. As long as this is positive you\'re inside budget. When it hits zero — or goes negative — you need to go get more money.',
+          def: 'Internal Budget minus Total Exposure. As long as this is positive you\'re inside budget. When it hits zero — or goes negative — you need to go get more money.',
         },
         {
           term: 'Cost Creep',
           short: 'Total Exposure > Earmarked Amount',
           def: 'When the full expected spend (commitment + T&M + expenses) exceeds the internal budget. The system flags this immediately — it\'s the signal to escalate.',
+        },
+        {
+          term: 'Change Order Creep',
+          short: 'COs have inflated the contract significantly',
+          def: 'When approved change orders have grown the commitment well beyond the initial signed contract value. The system flags this when COs represent a meaningful percentage above the original scope.',
         },
         {
           term: 'Overrun',

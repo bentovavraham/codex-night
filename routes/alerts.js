@@ -1,5 +1,5 @@
 // GET /api/alerts — three alert types:
-//   1. "Banging Us Out"  — COs have significantly grown the contract beyond initial scope
+//   1. "Change Order Creep" — COs have significantly grown the contract beyond initial scope
 //   2. "Overbilled"      — vendor has invoiced more than the initial contract amount
 //   3. "Budget Pressure" — total exposure approaching or exceeding internal budget
 
@@ -97,7 +97,7 @@ router.get('/alerts', requireAuth, async (req, res, next) => {
         + (parseFloat(row.tm_total)  || 0)
         + (parseFloat(row.exp_total) || 0);
 
-      // ── 1. Banging Us Out: COs have inflated the commitment beyond initial scope ──
+      // ── 1. Change Order Creep: COs have inflated the commitment beyond initial scope ──
       const scopeCreepAmt = initial > 0 ? coTotal : 0;
       const scopeCreepPct = initial > 0 ? (scopeCreepAmt / initial) * 100 : 0;
       const scopeSev      = overageSeverity(scopeCreepPct);
@@ -123,7 +123,7 @@ router.get('/alerts', requireAuth, async (req, res, next) => {
           invoiced_amount:  invoiced,
           commitment,
           total_exposure:   totalExposure,
-          // banging us out (scope creep via COs)
+          // change order creep (COs inflating commitment)
           scope_creep_amt:  scopeCreepAmt,
           scope_creep_pct:  Math.round(scopeCreepPct * 10) / 10,
           scope_creep_sev:  scopeSev,

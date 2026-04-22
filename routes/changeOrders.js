@@ -1,6 +1,6 @@
 const express = require('express');
 const pool = require('../db/pool');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, hasMinRole } = require('../middleware/auth');
 const projects = require('./projects');
 
 const router = express.Router();
@@ -94,8 +94,8 @@ router.put('/change-orders/:id', requireAuth, async (req, res, next) => {
   finally { client.release(); }
 });
 
-// POST /api/change-orders/:id/approve
-router.post('/change-orders/:id/approve', requireAuth, async (req, res, next) => {
+// POST /api/change-orders/:id/pm-approve  (any role)
+router.post('/change-orders/:id/pm-approve', requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const coId = Number(req.params.id);
@@ -103,17 +103,57 @@ router.post('/change-orders/:id/approve', requireAuth, async (req, res, next) =>
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
     await client.query('BEGIN');
     const result = await client.query(
-      `UPDATE change_orders SET status = 'approved', approved_by = $2, approved_at = NOW(), updated_at = NOW()
+      `UPDATE change_orders SET status = 'pm_approved', pm_approved_by = $2, pm_approved_at = NOW(), updated_at = NOW()
        WHERE id = $1 AND status = 'pending' RETURNING *`, [coId, req.session.userId]);
-    if (!result.rows[0]) return res.status(400).json({ error: 'Change order is not pending' });
-    await logCO(client, coId, 'approved', `Approved $${Number(result.rows[0].amount).toFixed(2)}`, req.session.userId);
+    if (!result.rows[0]) return res.status(400).json({ error: 'Change order must be pending for PM approval' });
+    await logCO(client, coId, 'pm_approved', `PM approved $${Number(result.rows[0].amount).toFixed(2)}`, req.session.userId);
     await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); next(err); }
   finally { client.release(); }
 });
 
-// POST /api/change-orders/:id/reject
+// POST /api/change-orders/:id/partner-approve  (partner or admin)
+router.post('/change-orders/:id/partner-approve', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    if (!hasMinRole(req.session.role, 'partner')) return res.status(403).json({ error: 'Requires partner role or above' });
+    const coId = Number(req.params.id);
+    const access = await userCanAccessCO(req.session.userId, coId);
+    if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE change_orders SET status = 'partner_approved', partner_approved_by = $2, partner_approved_at = NOW(), updated_at = NOW()
+       WHERE id = $1 AND status = 'pm_approved' RETURNING *`, [coId, req.session.userId]);
+    if (!result.rows[0]) return res.status(400).json({ error: 'Change order must be PM-approved first' });
+    await logCO(client, coId, 'partner_approved', `Partner approved $${Number(result.rows[0].amount).toFixed(2)}`, req.session.userId);
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
+});
+
+// POST /api/change-orders/:id/approve  (admin/Seth only — final approval)
+router.post('/change-orders/:id/approve', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    if (!hasMinRole(req.session.role, 'admin')) return res.status(403).json({ error: 'Requires admin role' });
+    const coId = Number(req.params.id);
+    const access = await userCanAccessCO(req.session.userId, coId);
+    if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE change_orders SET status = 'approved', approved_by = $2, approved_at = NOW(), updated_at = NOW()
+       WHERE id = $1 AND status = 'partner_approved' RETURNING *`, [coId, req.session.userId]);
+    if (!result.rows[0]) return res.status(400).json({ error: 'Change order must be partner-approved first' });
+    await logCO(client, coId, 'approved', `Final approval $${Number(result.rows[0].amount).toFixed(2)}`, req.session.userId);
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
+});
+
+// POST /api/change-orders/:id/reject  (any role, any approvable stage)
 router.post('/change-orders/:id/reject', requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
@@ -125,7 +165,8 @@ router.post('/change-orders/:id/reject', requireAuth, async (req, res, next) => 
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE change_orders SET status = 'rejected', rejection_note = $2, updated_at = NOW()
-       WHERE id = $1 RETURNING *`, [coId, note]);
+       WHERE id = $1 AND status NOT IN ('approved','rejected') RETURNING *`, [coId, note]);
+    if (!result.rows[0]) return res.status(400).json({ error: 'Change order cannot be rejected in its current state' });
     await logCO(client, coId, 'rejected', `Rejected: ${note}`, req.session.userId);
     await client.query('COMMIT');
     res.json(result.rows[0]);

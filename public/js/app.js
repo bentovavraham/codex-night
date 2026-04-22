@@ -13,6 +13,7 @@ function App() {
   // Alerts drawer
   const [alertsOpen, setAlertsOpen] = React.useState(false);
   const [alertCount, setAlertCount] = React.useState(0);
+  const [pendingContractId, setPendingContractId] = React.useState(null);
 
   React.useEffect(() => {
     if (!user) return;
@@ -41,8 +42,8 @@ function App() {
 
   React.useEffect(() => {
     api.me()
-      .then(u => setUser(u))
-      .catch(() => setUser(null))
+      .then(u => { setUser(u); window.__userRole = u?.role || 'pm'; })
+      .catch(() => { setUser(null); window.__userRole = null; })
       .finally(() => setBootstrapping(false));
   }, []);
 
@@ -52,16 +53,9 @@ function App() {
     setShowDrop(false); setPendingProject(null);
   }
 
-  // Opening a project: auto-fire drop screen (if animations on)
+  // Opening a project: always navigate directly — animation is manual-only via the sidebar button
   function openProject(p) {
-    if (!animsOn) {
-      setProject(p); setProjectTab('dashboard'); setView('project');
-      return;
-    }
-    setPendingProject(p);
-    setDropLabel(p.name.toUpperCase());
-    setDropAutoFire(true);
-    setShowDrop(true);
+    setProject(p); setProjectTab('dashboard'); setView('project');
   }
 
   // Called when drop animation completes
@@ -107,10 +101,9 @@ function App() {
 
   function handleGoToContract(projectId, contractId) {
     setAlertsOpen(false);
-    // Navigate to the project and open the contract
-    const p = { id: projectId };
     api.getProject(projectId).then(proj => {
       setProject(proj);
+      setPendingContractId(contractId);
       setProjectTab('contracts');
       setView('project');
     }).catch(() => {});
@@ -260,6 +253,8 @@ function App() {
               tab={projectTab}
               onTabChange={setProjectTab}
               onProjectUpdate={p => setProject(p)}
+              initialContractId={pendingContractId}
+              onContractOpened={() => setPendingContractId(null)}
             />
           )}
         </main>
@@ -268,13 +263,15 @@ function App() {
   );
 }
 
-function ProjectView({ project, tab, onTabChange, onProjectUpdate }) {
+function ProjectView({ project, tab, onTabChange, onProjectUpdate, initialContractId, onContractOpened }) {
   return (
     <Project
       project={project}
       tab={tab}
       onTabChange={onTabChange}
       onProjectUpdate={onProjectUpdate}
+      initialContractId={initialContractId}
+      onContractOpened={onContractOpened}
     />
   );
 }

@@ -18,7 +18,8 @@ function ConfidenceDot({ level }) {
   );
 }
 
-window.Invoices = function Invoices({ projectId }) {
+window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
+  const userRole = userRoleProp || window.__userRole || 'pm';
   const [invoices, setInvoices] = React.useState([]);
   const [contracts, setContracts] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -33,7 +34,8 @@ window.Invoices = function Invoices({ projectId }) {
   async function load() {
     setLoading(true);
     try {
-      const f = view === 'pending' ? { ...filter, status: 'pending' } : filter;
+      // In 'needs approval' view fetch all statuses so pm_approved/partner_approved are visible
+      const f = view === 'pending' ? { ...filter, status: '' } : filter;
       const [inv, con] = await Promise.all([api.listInvoices(projectId, f), api.listContracts(projectId)]);
       setInvoices(inv); setContracts(con); setSelected(new Set());
     } catch (e) { setErr(e.message); }
@@ -46,6 +48,14 @@ window.Invoices = function Invoices({ projectId }) {
     try { await fn(id, ...args); toast(label); await load(); }
     catch (e) { toast(e.message, 'error'); }
     finally { setBusy(b => { const n = { ...b }; delete n[id]; return n; }); }
+  }
+
+  async function handlePmApprove(inv) {
+    await doAction(`${inv.invoice_number} PM approved`, api.pmApproveInvoice, inv.id);
+  }
+
+  async function handlePartnerApprove(inv) {
+    await doAction(`${inv.invoice_number} partner approved`, api.partnerApproveInvoice, inv.id);
   }
 
   async function handleReject(inv) {
@@ -68,8 +78,8 @@ window.Invoices = function Invoices({ projectId }) {
   }
 
   async function handleApprove(inv) {
-    const ok = await confirmDialog('Approve invoice?',
-      `Approve ${inv.invoice_number} for ${fmt.moneyPrecise(inv.amount)} from ${inv.vendor_name}?`);
+    const ok = await confirmDialog('Final approve invoice?',
+      `Final-approve ${inv.invoice_number} for ${fmt.moneyPrecise(inv.amount)} from ${inv.vendor_name}?`);
     if (!ok) return;
     await doAction(`${inv.invoice_number} approved`, api.approveInvoice, inv.id);
   }
@@ -77,13 +87,13 @@ window.Invoices = function Invoices({ projectId }) {
   async function handleBulkApprove() {
     const ids = [...selected];
     if (ids.length === 0) return;
-    const ok = await confirmDialog(`Approve ${ids.length} invoices?`,
-      `This will approve ${ids.length} pending invoice(s). Continue?`);
+    const ok = await confirmDialog(`PM-approve ${ids.length} invoices?`,
+      `This will PM-approve ${ids.length} pending invoice(s). Continue?`);
     if (!ok) return;
     setBusy(b => ({ ...b, bulk: true }));
     try {
       const result = await api.bulkApprove(ids);
-      toast(`${result.approved} invoice(s) approved`);
+      toast(`${result.approved} invoice(s) PM-approved`);
       await load();
     } catch (e) { toast(e.message, 'error'); }
     finally { setBusy(b => { const n = { ...b }; delete n.bulk; return n; }); }
@@ -103,22 +113,28 @@ window.Invoices = function Invoices({ projectId }) {
   }
 
   // Summary stats
-  const pendingCount = invoices.filter(i => i.status === 'pending').length;
-  const totalPending = invoices.filter(i => i.status === 'pending').reduce((s, i) => s + Number(i.amount), 0);
+  const IN_PROGRESS = ['pending', 'pm_approved', 'partner_approved'];
+  const inProgressInvoices = invoices.filter(i => IN_PROGRESS.includes(i.status));
+  const inProgressCount = inProgressInvoices.length;
+  const totalInProgress = inProgressInvoices.reduce((s, i) => s + Number(i.amount), 0);
   const totalApproved = invoices.filter(i => ['approved', 'pushed', 'paid'].includes(i.status)).reduce((s, i) => s + Number(i.amount), 0);
   const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + Number(i.amount), 0);
 
+  // Pending tab: show all in-progress items; bulk select only targets strictly pending
+  const needsApprovalInvoices = view === 'pending' ? inProgressInvoices : [];
   const pendingInvoices = invoices.filter(i => i.status === 'pending');
   const allPendingSelected = pendingInvoices.length > 0 && pendingInvoices.every(i => selected.has(i.id));
 
   // Status accent colors
   function statusAccent(status) {
-    if (status === 'pending')  return { color: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.3)'  };
-    if (status === 'on_hold')  return { color: '#7c3aed', bg: 'rgba(124,58,237,0.08)', border: 'rgba(124,58,237,0.3)' };
-    if (status === 'approved') return { color: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' };
-    if (status === 'pushed')   return { color: '#0891b2', bg: 'rgba(8,145,178,0.08)',  border: 'rgba(8,145,178,0.25)' };
-    if (status === 'paid')     return { color: '#16a34a', bg: 'rgba(22,163,74,0.08)',  border: 'rgba(22,163,74,0.25)' };
-    if (status === 'rejected') return { color: '#dc2626', bg: 'rgba(220,38,38,0.08)',  border: 'rgba(220,38,38,0.25)' };
+    if (status === 'pending')          return { color: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.3)'  };
+    if (status === 'pm_approved')      return { color: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.3)'  };
+    if (status === 'partner_approved') return { color: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.3)'  };
+    if (status === 'on_hold')          return { color: '#7c3aed', bg: 'rgba(124,58,237,0.08)', border: 'rgba(124,58,237,0.3)' };
+    if (status === 'approved')         return { color: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' };
+    if (status === 'pushed')           return { color: '#0891b2', bg: 'rgba(8,145,178,0.08)',  border: 'rgba(8,145,178,0.25)' };
+    if (status === 'paid')             return { color: '#16a34a', bg: 'rgba(22,163,74,0.08)',  border: 'rgba(22,163,74,0.25)' };
+    if (status === 'rejected')         return { color: '#dc2626', bg: 'rgba(220,38,38,0.08)',  border: 'rgba(220,38,38,0.25)' };
     return { color: 'var(--text-3)', bg: 'var(--surface-2)', border: 'var(--border)' };
   }
 
@@ -130,9 +146,9 @@ window.Invoices = function Invoices({ projectId }) {
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Invoices</h2>
           <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3 }}>
             {invoices.length} invoice{invoices.length !== 1 ? 's' : ''}
-            {pendingCount > 0 && (
+            {inProgressCount > 0 && (
               <span style={{ marginLeft: 8, padding: '1px 7px', borderRadius: 10, background: '#d97706', color: '#fff', fontSize: 11, fontWeight: 700 }}>
-                {pendingCount} pending
+                {inProgressCount} in progress
               </span>
             )}
           </div>
@@ -147,7 +163,7 @@ window.Invoices = function Invoices({ projectId }) {
       {invoices.length > 0 && (
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
           {[
-            { label: 'Needs Approval', value: pendingCount > 0 ? fmt.money(totalPending) : '—', sub: pendingCount > 0 ? `${pendingCount} invoice${pendingCount !== 1 ? 's' : ''}` : 'all clear', accent: pendingCount > 0 ? '#d97706' : 'var(--ok)' },
+            { label: 'Needs Approval', value: inProgressCount > 0 ? fmt.money(totalInProgress) : '—', sub: inProgressCount > 0 ? `${inProgressCount} invoice${inProgressCount !== 1 ? 's' : ''}` : 'all clear', accent: inProgressCount > 0 ? '#d97706' : 'var(--ok)' },
             { label: 'Approved',       value: fmt.money(totalApproved), sub: 'invoiced total' },
             { label: 'Paid',           value: fmt.money(totalPaid),     sub: 'cash out', accent: '#16a34a' },
           ].map((s, i) => (
@@ -168,7 +184,7 @@ window.Invoices = function Invoices({ projectId }) {
       <div className="tabs" style={{ marginBottom: 12 }}>
         <button className={view === 'all' ? 'active' : ''} onClick={() => setView('all')}>All invoices</button>
         <button className={view === 'pending' ? 'active' : ''} onClick={() => setView('pending')}>
-          Needs approval {pendingCount > 0 ? `(${pendingCount})` : ''}
+          Needs approval {inProgressCount > 0 ? `(${inProgressCount})` : ''}
         </button>
       </div>
 
@@ -201,19 +217,19 @@ window.Invoices = function Invoices({ projectId }) {
         </div>
       )}
 
-      {/* Bulk select bar */}
+      {/* Bulk select bar — bulk PM-approve strictly pending invoices */}
       {view === 'pending' && pendingInvoices.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '8px 14px', borderRadius: 7, background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
           <input type="checkbox" style={{ width: 'auto', margin: 0 }}
             checked={allPendingSelected}
             onChange={e => e.target.checked ? selectAll() : setSelected(new Set())} />
           <span style={{ fontSize: 13, color: 'var(--text-2)' }}>
-            {selected.size > 0 ? `${selected.size} selected` : `Select all ${pendingInvoices.length}`}
+            {selected.size > 0 ? `${selected.size} selected` : `Select all ${pendingInvoices.length} pending`}
           </span>
           {selected.size > 0 && (
             <>
               <button className="primary" disabled={busy.bulk} onClick={handleBulkApprove} style={{ marginLeft: 'auto' }}>
-                {busy.bulk ? <><span className="spinner"></span>Approving…</> : `Approve ${selected.size}`}
+                {busy.bulk ? <><span className="spinner"></span>Approving…</> : `PM Approve ${selected.size}`}
               </button>
               <button onClick={() => setSelected(new Set())}>Clear</button>
             </>
@@ -227,9 +243,10 @@ window.Invoices = function Invoices({ projectId }) {
        : invoices.length === 0 ? <div className="empty">No invoices match these filters.</div>
        : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {invoices.map(i => {
+          {(view === 'pending' ? needsApprovalInvoices : invoices).map(i => {
             const sa = statusAccent(i.status);
             const isBusy = !!busy[i.id];
+            const isInProgress = IN_PROGRESS.includes(i.status);
             const isPending = i.status === 'pending';
             const isSelected = selected.has(i.id);
 
@@ -285,26 +302,35 @@ window.Invoices = function Invoices({ projectId }) {
                     <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)' }}>{fmt.moneyPrecise(i.amount)}</div>
                   </div>
 
-                  {/* Status pill */}
-                  <div style={{ flexShrink: 0, minWidth: 72, textAlign: 'center' }}>
-                    <span style={{
-                      display: 'inline-block', fontSize: 10, fontWeight: 700,
-                      letterSpacing: '0.07em', textTransform: 'uppercase',
-                      padding: '3px 9px', borderRadius: 5,
-                      background: sa.bg, color: sa.color, border: `1px solid ${sa.border}`,
-                    }}>{i.status.replace('_', ' ')}</span>
+                  {/* Status — pipeline for in-progress, pill otherwise */}
+                  <div style={{ flexShrink: 0, minWidth: 90, textAlign: 'center' }}>
+                    {IN_PROGRESS.includes(i.status)
+                      ? <ApprovalPipeline status={i.status} />
+                      : <span style={{
+                          display: 'inline-block', fontSize: 10, fontWeight: 700,
+                          letterSpacing: '0.07em', textTransform: 'uppercase',
+                          padding: '3px 9px', borderRadius: 5,
+                          background: sa.bg, color: sa.color, border: `1px solid ${sa.border}`,
+                        }}>{i.status.replace('_',' ')}</span>
+                    }
                   </div>
 
                   {/* Actions */}
                   <div style={{ flexShrink: 0, display: 'flex', gap: 5, alignItems: 'center' }}>
                     <button onClick={() => setEditingId(i.id)} style={{ fontSize: 12, padding: '4px 10px' }}>Edit</button>
-                    {isPending && <>
-                      <button className="primary" disabled={isBusy} onClick={() => handleApprove(i)} style={{ fontSize: 12, padding: '4px 10px' }}>
-                        {isBusy ? <span className="spinner" /> : 'Approve'}
-                      </button>
-                      <button disabled={isBusy} onClick={() => handleHold(i)} style={{ fontSize: 12, padding: '4px 10px' }}>Hold</button>
-                      <button className="danger" disabled={isBusy} onClick={() => handleReject(i)} style={{ fontSize: 12, padding: '4px 10px' }}>Reject</button>
-                    </>}
+                    {isInProgress && (
+                      <>
+                        <ApprovalActions
+                          item={i} userRole={userRole}
+                          onPmApprove={() => handlePmApprove(i)}
+                          onPartnerApprove={() => handlePartnerApprove(i)}
+                          onApprove={() => handleApprove(i)}
+                          onReject={() => handleReject(i)}
+                          size="small"
+                        />
+                        {isPending && <button disabled={isBusy} onClick={() => handleHold(i)} style={{ fontSize: 12, padding: '4px 10px' }}>Hold</button>}
+                      </>
+                    )}
                     {i.status === 'on_hold' && <>
                       <button className="primary" disabled={isBusy} onClick={() => handleApprove(i)} style={{ fontSize: 12, padding: '4px 10px' }}>Approve</button>
                       <button disabled={isBusy} onClick={() => handleRevert(i)} style={{ fontSize: 12, padding: '4px 10px' }}>Release</button>
@@ -444,8 +470,16 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
   const [uploading, setUploading] = React.useState(false);
   const [extractNote, setExtractNote] = React.useState(null);
   const [confidence, setConfidence] = React.useState({});
+  const [confirmed, setConfirmed] = React.useState(false);
   const [err, setErr] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
+
+  function aiFieldStyle(field) {
+    const c = confidence[field];
+    if (c === 'low')    return { border: '1.5px solid #dc2626', background: '#fef2f2' };
+    if (c === 'medium') return { border: '1.5px solid #d97706', background: '#fffbeb' };
+    return {};
+  }
 
   React.useEffect(() => {
     if (mode !== 'contract' || !contractId) { setContext(null); return; }
@@ -473,10 +507,25 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
         if (e.summary) setDescription(d => d ? `${d}\n\n${e.summary}` : e.summary);
         if (e.confidence) {
           const conf = {};
-          filled.forEach(f => { if (e.confidence[f]) conf[f] = e.confidence[f]; });
+          filled.forEach(fld => { if (e.confidence[fld]) conf[fld] = e.confidence[fld]; });
           setConfidence(conf);
         }
-        setExtractNote('Fields pre-filled from PDF — colored dots show extraction confidence.');
+
+        // Auto-select contract if vendor name matches one in this project
+        let contractNote = '';
+        if (e.vendor_name && !contractId && !lockedContract && contracts && contracts.length > 0) {
+          const needle = e.vendor_name.toLowerCase().trim();
+          // Exact match first, then prefix/contains
+          const match =
+            contracts.find(c => c.vendor_name.toLowerCase().trim() === needle) ||
+            contracts.find(c => c.vendor_name.toLowerCase().includes(needle) || needle.includes(c.vendor_name.toLowerCase().trim()));
+          if (match) {
+            setContractId(String(match.id));
+            contractNote = ` · Contract matched: ${match.vendor_name}`;
+          }
+        }
+
+        setExtractNote(`Fields pre-filled from PDF — colored dots show confidence${contractNote}.`);
       }
     } catch (e) { setErr(e.message); }
     finally { setUploading(false); }
@@ -626,25 +675,25 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
                 <label data-tip="The invoice number from the vendor's document — used for duplicate detection">
                   Invoice number <ConfidenceDot level={confidence.invoice_number} />
                 </label>
-                <input value={invoiceNumber} onChange={e => { setInvoiceNumber(e.target.value); setConfidence(c => ({ ...c, invoice_number: undefined })); }} placeholder="e.g. INV-001" autoFocus={!hasPdf} />
+                <input value={invoiceNumber} onChange={e => { setInvoiceNumber(e.target.value); setConfidence(c => ({ ...c, invoice_number: undefined })); setConfirmed(false); }} placeholder="e.g. INV-001" autoFocus={!hasPdf} style={aiFieldStyle('invoice_number')} />
               </div>
               <div>
                 <label data-tip="Total dollar amount billed on this invoice">
                   Amount <ConfidenceDot level={confidence.amount} />
                 </label>
-                <input type="number" step="0.01" value={amount} onChange={e => { setAmount(e.target.value); setConfidence(c => ({ ...c, amount: undefined })); }} placeholder="0.00" />
+                <input type="number" step="0.01" value={amount} onChange={e => { setAmount(e.target.value); setConfidence(c => ({ ...c, amount: undefined })); setConfirmed(false); }} placeholder="0.00" style={aiFieldStyle('amount')} />
               </div>
               <div>
                 <label data-tip="Date printed on the vendor's invoice — may differ from today's date">
                   Invoice date <ConfidenceDot level={confidence.invoice_date} />
                 </label>
-                <input type="date" value={date} onChange={e => { setDate(e.target.value); setConfidence(c => ({ ...c, invoice_date: undefined })); }} />
+                <input type="date" value={date} onChange={e => { setDate(e.target.value); setConfidence(c => ({ ...c, invoice_date: undefined })); setConfirmed(false); }} style={aiFieldStyle('invoice_date')} />
               </div>
               <div>
                 <label data-tip="Vendor or subcontractor submitting this invoice">
                   Vendor <ConfidenceDot level={confidence.vendor_name} />
                 </label>
-                <SmartSearch value={vendor} onChange={v => { setVendor(v); setConfidence(c => ({ ...c, vendor_name: undefined })); }} fetcher={q => api.searchVendors(q)} placeholder="Vendor name" />
+                <SmartSearch value={vendor} onChange={v => { setVendor(v); setConfidence(c => ({ ...c, vendor_name: undefined })); setConfirmed(false); }} fetcher={q => api.searchVendors(q)} placeholder="Vendor name" style={aiFieldStyle('vendor_name')} />
               </div>
               <div className="full">
                 <label data-tip="Internal notes about what this invoice covers — visible to the project team only">Description / notes</label>
@@ -696,9 +745,25 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
         </div>
 
         {/* Footer */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0, background: 'var(--surface)' }}>
+        <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0, background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" disabled={saving} onClick={save}>
+          {fileRef && (
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 14px', borderRadius: 6,
+              background: confirmed ? 'rgba(34,197,94,0.09)' : 'rgba(220,38,38,0.07)',
+              border: `1.5px solid ${confirmed ? 'rgba(34,197,94,0.35)' : 'rgba(220,38,38,0.35)'}`,
+              cursor: 'pointer', userSelect: 'none', flexShrink: 0,
+            }}>
+              <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)}
+                style={{ width: 15, height: 15, accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
+              <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                color: confirmed ? '#16a34a' : '#dc2626' }}>
+                {confirmed ? '✓ Details confirmed' : 'Confirm details are correct'}
+              </span>
+            </label>
+          )}
+          <button className="primary" disabled={saving || (!!fileRef && !confirmed)} onClick={save}>
             {saving ? 'Creating…' : 'Create Invoice'}
           </button>
         </div>

@@ -1,13 +1,44 @@
 const express = require('express');
 const multer = require('multer');
 const pool = require('../db/pool');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, hasMinRole } = require('../middleware/auth');
 const projects = require('./projects');
 const storage = require('../lib/storage');
 const { extractInvoice } = require('../lib/extract');
 
 const router = express.Router();
 const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+// Vendor knowledge helpers --------------------------------------------------
+
+async function getVendorContext(vendorName, limit = 5) {
+  if (!vendorName) return { examples: [], vendorNotes: null };
+  const [examplesResult, profileResult] = await Promise.all([
+    pool.query(
+      `SELECT fields_json FROM extraction_examples
+       WHERE LOWER(vendor_name) = LOWER($1) AND document_type = 'invoice'
+       ORDER BY created_at DESC LIMIT $2`,
+      [vendorName, limit]
+    ),
+    pool.query(
+      `SELECT notes FROM vendor_profiles WHERE LOWER(vendor_name) = LOWER($1)`,
+      [vendorName]
+    ),
+  ]);
+  return {
+    examples: examplesResult.rows,
+    vendorNotes: profileResult.rows[0]?.notes || null,
+  };
+}
+
+async function saveExtractionExample(client, vendorName, fields, userId) {
+  if (!vendorName) return;
+  await client.query(
+    `INSERT INTO extraction_examples (vendor_name, document_type, fields_json, confirmed_by)
+     VALUES ($1, 'invoice', $2, $3)`,
+    [vendorName, JSON.stringify(fields), userId]
+  );
+}
 
 // Helpers -------------------------------------------------------------------
 
@@ -34,7 +65,17 @@ router.post('/invoices/extract', requireAuth, pdfUpload.single('file'), async (r
       mimeType: req.file.mimetype || 'application/pdf',
     });
     let extracted = null, extract_error = null;
-    try { extracted = await extractInvoice(req.file.buffer); }
+    try {
+      // Pass 1: quick extraction to get vendor name.
+      const pass1 = await extractInvoice(req.file.buffer);
+      // Pass 2: re-extract with vendor context if we know this vendor.
+      const ctx = await getVendorContext(pass1.vendor_name);
+      if (ctx.examples.length > 0 || ctx.vendorNotes) {
+        extracted = await extractInvoice(req.file.buffer, ctx);
+      } else {
+        extracted = pass1;
+      }
+    }
     catch (err) { console.error('Invoice extraction failed:', err.message); extract_error = err.message; }
     res.status(201).json({
       file_reference: saved.reference,
@@ -174,6 +215,14 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
     await logInvoice(client, invoiceId, 'created',
       `Created: ${invoice_number} for $${amt.toFixed(2)} from ${resolvedVendor}${allocs.length > 1 ? ` (split: ${contractNames})` : ''}`,
       req.session.userId);
+    // Save confirmed fields as a future few-shot example for this vendor.
+    if (file_reference && resolvedVendor) {
+      await saveExtractionExample(client, resolvedVendor, {
+        invoice_number, vendor_name: resolvedVendor,
+        amount: amt, invoice_date: invoice_date || null,
+        description: description || null,
+      }, req.session.userId);
+    }
     await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); next(err); }
@@ -246,8 +295,8 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
   finally { client.release(); }
 });
 
-// POST /api/invoices/:id/approve --------------------------------------------
-router.post('/invoices/:id/approve', requireAuth, async (req, res, next) => {
+// POST /api/invoices/:id/pm-approve  (any role)
+router.post('/invoices/:id/pm-approve', requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const invId = Number(req.params.id);
@@ -255,14 +304,59 @@ router.post('/invoices/:id/approve', requireAuth, async (req, res, next) => {
     if (!inv) return res.status(404).json({ error: 'Not found' });
     if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
-    if (inv.status !== 'pending')
-      return res.status(400).json({ error: `Cannot approve invoice in status '${inv.status}'` });
+    if (inv.status !== 'pending') return res.status(400).json({ error: 'Invoice must be pending for PM approval' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE invoices SET status = 'pm_approved', pm_approved_by = $2, pm_approved_at = NOW(),
+         rejection_note = NULL, updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [invId, req.session.userId]);
+    await logInvoice(client, invId, 'pm_approved', `PM approved $${Number(inv.amount).toFixed(2)}`, req.session.userId);
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
+});
+
+// POST /api/invoices/:id/partner-approve  (partner or admin)
+router.post('/invoices/:id/partner-approve', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    if (!hasMinRole(req.session.role, 'partner')) return res.status(403).json({ error: 'Requires partner role or above' });
+    const invId = Number(req.params.id);
+    const inv = await getInvoiceWithProject(invId);
+    if (!inv) return res.status(404).json({ error: 'Not found' });
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
+      return res.status(403).json({ error: 'Forbidden' });
+    if (inv.status !== 'pm_approved') return res.status(400).json({ error: 'Invoice must be PM-approved first' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE invoices SET status = 'partner_approved', partner_approved_by = $2, partner_approved_at = NOW(),
+         updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [invId, req.session.userId]);
+    await logInvoice(client, invId, 'partner_approved', `Partner approved $${Number(inv.amount).toFixed(2)}`, req.session.userId);
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
+});
+
+// POST /api/invoices/:id/approve  (admin/Seth only — final approval)
+router.post('/invoices/:id/approve', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    if (!hasMinRole(req.session.role, 'admin')) return res.status(403).json({ error: 'Requires admin role' });
+    const invId = Number(req.params.id);
+    const inv = await getInvoiceWithProject(invId);
+    if (!inv) return res.status(404).json({ error: 'Not found' });
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
+      return res.status(403).json({ error: 'Forbidden' });
+    if (inv.status !== 'partner_approved') return res.status(400).json({ error: 'Invoice must be partner-approved first' });
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE invoices SET status = 'approved', approved_by = $2, approved_at = NOW(),
          rejection_note = NULL, updated_at = NOW() WHERE id = $1 RETURNING *`,
       [invId, req.session.userId]);
-    await logInvoice(client, invId, 'approved', `Approved $${Number(inv.amount).toFixed(2)}`, req.session.userId);
+    await logInvoice(client, invId, 'approved', `Final approval $${Number(inv.amount).toFixed(2)}`, req.session.userId);
     await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); next(err); }

@@ -1,6 +1,7 @@
 // Change Orders — list view per-contract, with entry form and approve/reject flow.
 
-window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedgerRefresh }) {
+window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedgerRefresh, userRole: userRoleProp }) {
+  const userRole = userRoleProp || window.__userRole || 'pm';
   const [cos, setCos] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [showNew, setShowNew] = React.useState(false);
@@ -14,6 +15,24 @@ window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedg
     finally { setLoading(false); }
   }
   React.useEffect(() => { load(); }, [contractId]);
+
+  async function pmApprove(id) {
+    try {
+      await api.pmApproveChangeOrder(id);
+      toast('PM approved');
+      await load();
+      if (onLedgerRefresh) onLedgerRefresh();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function partnerApprove(id) {
+    try {
+      await api.partnerApproveChangeOrder(id);
+      toast('Partner approved');
+      await load();
+      if (onLedgerRefresh) onLedgerRefresh();
+    } catch (e) { toast(e.message, 'error'); }
+  }
 
   async function approve(id) {
     try {
@@ -45,11 +64,11 @@ window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedg
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  const pending   = cos.filter(c => c.status === 'pending');
-  const approved  = cos.filter(c => c.status === 'approved');
-  const rejected  = cos.filter(c => c.status === 'rejected');
-  const approvedTotal = approved.reduce((s, c) => s + Number(c.amount), 0);
-  const pendingTotal  = pending.reduce((s, c) => s + Number(c.amount), 0);
+  const inProgress = cos.filter(c => ['pending','pm_approved','partner_approved'].includes(c.status));
+  const approved   = cos.filter(c => c.status === 'approved');
+  const rejected   = cos.filter(c => c.status === 'rejected');
+  const approvedTotal  = approved.reduce((s, c) => s + Number(c.amount), 0);
+  const inProgressTotal = inProgress.reduce((s, c) => s + Number(c.amount), 0);
 
   return (
     <div>
@@ -60,9 +79,9 @@ window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedg
               ✓ {fmt.money(approvedTotal)} approved
             </div>
           )}
-          {pendingTotal > 0 && (
+          {inProgressTotal > 0 && (
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--warn)' }}>
-              ⏳ {fmt.money(pendingTotal)} pending
+              ⏳ {fmt.money(inProgressTotal)} in progress
             </div>
           )}
           {cos.length === 0 && <div style={{ fontSize: 14, color: 'var(--text-3)' }}>No change orders yet</div>}
@@ -104,20 +123,23 @@ window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedg
                 <td className="num" style={{ fontWeight: 700, fontSize: 15, color: co.status === 'approved' ? 'var(--ok)' : co.status === 'rejected' ? 'var(--text-3)' : 'var(--warn)' }}>
                   {fmt.money(co.amount)}
                 </td>
-                <td><COStatusBadge status={co.status} /></td>
+                <td><ApprovalPipeline status={co.status} /></td>
                 <td style={{ fontSize: 13, color: 'var(--text-3)' }}>{co.created_by_name} · {fmt.date(co.created_at)}</td>
                 <td>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {co.status === 'pending' && (
-                      <>
-                        <button className="primary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => approve(co.id)}>Approve</button>
-                        <button style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => setEditingCo(co)}>Edit</button>
-                        <button style={{ fontSize: 12, padding: '4px 12px', color: 'var(--danger)', borderColor: 'var(--danger-border)' }} onClick={() => reject(co.id)}>Reject</button>
-                        <button style={{ fontSize: 12, padding: '4px 8px', color: 'var(--text-3)' }} onClick={() => del(co.id)} title="Delete">✕</button>
-                      </>
-                    )}
-                    {co.status === 'approved' && (
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <ApprovalActions
+                      item={co} userRole={userRole}
+                      onPmApprove={() => pmApprove(co.id)}
+                      onPartnerApprove={() => partnerApprove(co.id)}
+                      onApprove={() => approve(co.id)}
+                      onReject={() => reject(co.id)}
+                      size="small"
+                    />
+                    {['pending','pm_approved','partner_approved','approved'].includes(co.status) && (
                       <button style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => setEditingCo(co)}>Edit</button>
+                    )}
+                    {co.status === 'pending' && (
+                      <button style={{ fontSize: 12, padding: '4px 8px', color: 'var(--text-3)' }} onClick={() => del(co.id)} title="Delete">✕</button>
                     )}
                   </div>
                 </td>
@@ -141,14 +163,17 @@ window.ChangeOrders = function ChangeOrders({ contractId, contractVendor, onLedg
 
 function COStatusBadge({ status }) {
   const colors = {
-    pending:  { bg: 'rgba(230,160,30,0.15)', border: 'rgba(230,160,30,0.4)', color: '#e6a01e' },
-    approved: { bg: 'rgba(50,190,100,0.15)', border: 'rgba(50,190,100,0.4)', color: 'var(--ok)' },
-    rejected: { bg: 'rgba(220,55,55,0.12)',  border: 'rgba(220,55,55,0.3)',  color: 'var(--danger)' },
+    pending:          { bg: 'rgba(230,160,30,0.15)', border: 'rgba(230,160,30,0.4)', color: '#e6a01e' },
+    pm_approved:      { bg: 'rgba(230,160,30,0.15)', border: 'rgba(230,160,30,0.4)', color: '#e6a01e' },
+    partner_approved: { bg: 'rgba(230,160,30,0.15)', border: 'rgba(230,160,30,0.4)', color: '#e6a01e' },
+    approved:         { bg: 'rgba(50,190,100,0.15)', border: 'rgba(50,190,100,0.4)', color: 'var(--ok)' },
+    rejected:         { bg: 'rgba(220,55,55,0.12)',  border: 'rgba(220,55,55,0.3)',  color: 'var(--danger)' },
   };
+  const labels = { pm_approved: 'PM approved', partner_approved: 'partner approved' };
   const c = colors[status] || colors.pending;
   return (
     <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, background: c.bg, border: `1px solid ${c.border}`, color: c.color }}>
-      {status}
+      {labels[status] || status}
     </span>
   );
 }

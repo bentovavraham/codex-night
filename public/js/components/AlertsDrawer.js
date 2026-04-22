@@ -1,6 +1,6 @@
 // AlertsDrawer — right-side slide-in panel showing flags across ALL projects.
 // Three sections:
-//   1. "BANGING US OUT"  — COs have significantly grown commitment beyond initial scope
+//   1. "CHANGE ORDER CREEP" — COs have significantly grown commitment beyond initial scope
 //   2. "OVERBILLED"      — vendor invoiced more than the initial contract amount
 //   3. "BUDGET PRESSURE" — total exposure approaching/exceeding internal budget
 
@@ -131,7 +131,7 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
           <>
             <PctBar pct={flag.budget_used_pct} sev={flag.budget_sev} label="Budget utilisation" />
             <div style={{ marginTop: 6, fontSize: 11, color: '#6b7280', display: 'flex', gap: 12 }}>
-              <span>Budget: <strong style={{ color: '#1c1814' }}>{fmt.money(flag.earmarked_amount)}</strong></span>
+              <span>Internal Budget: <strong style={{ color: '#1c1814' }}>{fmt.money(flag.earmarked_amount)}</strong></span>
               <span>Exposure: <strong style={{ color: cfg.color }}>{fmt.money(flag.total_exposure)}</strong></span>
             </div>
           </>
@@ -236,7 +236,7 @@ window.AlertsDrawer = function AlertsDrawer({ open, onClose, onGoToContract }) {
           {!loading && !err && data && (
             <>
               <Section
-                title="Banging Us Out"
+                title="Change Order Creep"
                 subtitle="Change orders have grown the contract significantly above the initial signed amount"
                 icon="⚠"
                 flags={scopeCreepFlags}
