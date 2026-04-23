@@ -18,6 +18,21 @@ function ConfidenceDot({ level }) {
   );
 }
 
+function InvoiceTypeBadge({ type }) {
+  if (!type || type === 'fixed') return null;
+  const styles = {
+    tm:      { bg: 'rgba(37,99,235,0.09)',  color: '#1d4ed8', label: 'T&M'     },
+    expense: { bg: 'rgba(124,58,237,0.09)', color: '#6d28d9', label: 'Expense' },
+  };
+  const s = styles[type];
+  if (!s) return null;
+  return (
+    <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: s.bg, color: s.color, flexShrink: 0 }}>
+      {s.label}
+    </span>
+  );
+}
+
 window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
   const userRole = userRoleProp || window.__userRole || 'pm';
   const [invoices, setInvoices] = React.useState([]);
@@ -27,7 +42,7 @@ window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
   const [showNew, setShowNew] = React.useState(false);
   const [editingId, setEditingId] = React.useState(null);
   const [view, setView] = React.useState('all');
-  const [filter, setFilter] = React.useState({ status: '', contract_id: '', vendor: '', sort: '' });
+  const [filter, setFilter] = React.useState({ status: '', contract_id: '', vendor: '', sort: '', invoice_type: '' });
   const [selected, setSelected] = React.useState(new Set());
   const [busy, setBusy] = React.useState({}); // id -> true
 
@@ -117,8 +132,12 @@ window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
   const inProgressInvoices = invoices.filter(i => IN_PROGRESS.includes(i.status));
   const inProgressCount = inProgressInvoices.length;
   const totalInProgress = inProgressInvoices.reduce((s, i) => s + Number(i.amount), 0);
-  const totalApproved = invoices.filter(i => ['approved', 'pushed', 'paid'].includes(i.status)).reduce((s, i) => s + Number(i.amount), 0);
+  const approvedInvoices = invoices.filter(i => ['approved', 'pushed', 'paid'].includes(i.status));
+  const totalApproved = approvedInvoices.reduce((s, i) => s + Number(i.amount), 0);
   const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + Number(i.amount), 0);
+  const totalFixed   = approvedInvoices.filter(i => !i.invoice_type || i.invoice_type === 'fixed').reduce((s, i) => s + Number(i.amount), 0);
+  const totalTM      = approvedInvoices.filter(i => i.invoice_type === 'tm').reduce((s, i) => s + Number(i.amount), 0);
+  const totalExpense = approvedInvoices.filter(i => i.invoice_type === 'expense').reduce((s, i) => s + Number(i.amount), 0);
 
   // Pending tab: show all in-progress items; bulk select only targets strictly pending
   const needsApprovalInvoices = view === 'pending' ? inProgressInvoices : [];
@@ -162,21 +181,29 @@ window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
       {/* Summary strip */}
       {invoices.length > 0 && (
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
-          {[
-            { label: 'Needs Approval', value: inProgressCount > 0 ? fmt.money(totalInProgress) : '—', sub: inProgressCount > 0 ? `${inProgressCount} invoice${inProgressCount !== 1 ? 's' : ''}` : 'all clear', accent: inProgressCount > 0 ? '#d97706' : 'var(--ok)' },
-            { label: 'Approved',       value: fmt.money(totalApproved), sub: 'invoiced total' },
-            { label: 'Paid',           value: fmt.money(totalPaid),     sub: 'cash out', accent: '#16a34a' },
-          ].map((s, i) => (
-            <div key={i} style={{
-              flex: 1, padding: '12px 18px',
-              borderRight: i < 2 ? '1px solid var(--border)' : 'none',
-              background: 'var(--surface-2)',
-            }}>
-              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>{s.label}</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: s.accent || 'var(--text-1)' }}>{s.value}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{s.sub}</div>
+          <div style={{ flex: 1, padding: '12px 18px', borderRight: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+            <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Needs Approval</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: inProgressCount > 0 ? '#d97706' : 'var(--ok)' }}>
+              {inProgressCount > 0 ? fmt.money(totalInProgress) : '—'}
             </div>
-          ))}
+            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
+              {inProgressCount > 0 ? `${inProgressCount} invoice${inProgressCount !== 1 ? 's' : ''}` : 'all clear'}
+            </div>
+          </div>
+          <div style={{ flex: 2, padding: '12px 18px', borderRight: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+            <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Approved / Billed</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>{fmt.money(totalApproved)}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, display: 'flex', gap: 10 }}>
+              <span>Fixed <strong style={{ color: 'var(--text-2)' }}>{fmt.money(totalFixed)}</strong></span>
+              {totalTM > 0 && <span>T&M <strong style={{ color: '#1d4ed8' }}>{fmt.money(totalTM)}</strong></span>}
+              {totalExpense > 0 && <span>Expenses <strong style={{ color: '#6d28d9' }}>{fmt.money(totalExpense)}</strong></span>}
+            </div>
+          </div>
+          <div style={{ flex: 1, padding: '12px 18px', background: 'var(--surface-2)' }}>
+            <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Paid</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#16a34a' }}>{fmt.money(totalPaid)}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>cash out</div>
+          </div>
         </div>
       )}
 
@@ -190,30 +217,49 @@ window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
 
       {/* Filters — only on all-view */}
       {view === 'all' && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-          <input placeholder="Search vendor" value={filter.vendor}
-            onChange={e => setFilter({ ...filter, vendor: e.target.value })}
-            style={{ flex: '1 1 140px', minWidth: 0 }} />
-          <select value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })} style={{ width: 130 }}>
-            <option value="">All statuses</option>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="on_hold">On Hold</option>
-            <option value="rejected">Rejected</option>
-            <option value="pushed">Pushed</option>
-            <option value="paid">Paid</option>
-          </select>
-          <select value={filter.contract_id} onChange={e => setFilter({ ...filter, contract_id: e.target.value })} style={{ width: 200 }}>
-            <option value="">All contracts</option>
-            <option value="none">Standalone only</option>
-            {contracts.map(c => <option key={c.id} value={c.id}>{c.vendor_name} — {fmt.money(c.total_value)}</option>)}
-          </select>
-          <select value={filter.sort} onChange={e => setFilter({ ...filter, sort: e.target.value })} style={{ width: 130 }}>
-            <option value="">Sort: Date</option>
-            <option value="amount">Sort: Amount</option>
-            <option value="vendor">Sort: Vendor</option>
-            <option value="status">Sort: Status</option>
-          </select>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+          {/* Type toggle */}
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[
+              { k: '',        label: 'All types' },
+              { k: 'fixed',   label: 'Fixed scope' },
+              { k: 'tm',      label: 'T&M' },
+              { k: 'expense', label: 'Expense' },
+            ].map(t => (
+              <button key={t.k} onClick={() => setFilter({ ...filter, invoice_type: t.k })} style={{
+                padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                border: filter.invoice_type === t.k ? '1.5px solid var(--accent)' : '1.5px solid var(--border)',
+                background: filter.invoice_type === t.k ? 'rgba(196,82,42,0.09)' : 'var(--surface)',
+                color: filter.invoice_type === t.k ? 'var(--accent)' : 'var(--text-2)',
+              }}>{t.label}</button>
+            ))}
+          </div>
+          {/* Other filters */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input placeholder="Search vendor" value={filter.vendor}
+              onChange={e => setFilter({ ...filter, vendor: e.target.value })}
+              style={{ flex: '1 1 140px', minWidth: 0 }} />
+            <select value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })} style={{ width: 130 }}>
+              <option value="">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="on_hold">On Hold</option>
+              <option value="rejected">Rejected</option>
+              <option value="pushed">Pushed</option>
+              <option value="paid">Paid</option>
+            </select>
+            <select value={filter.contract_id} onChange={e => setFilter({ ...filter, contract_id: e.target.value })} style={{ width: 200 }}>
+              <option value="">All contracts</option>
+              <option value="none">Standalone only</option>
+              {contracts.map(c => <option key={c.id} value={c.id}>{c.vendor_name} — {fmt.money(c.total_value)}</option>)}
+            </select>
+            <select value={filter.sort} onChange={e => setFilter({ ...filter, sort: e.target.value })} style={{ width: 130 }}>
+              <option value="">Sort: Date</option>
+              <option value="amount">Sort: Amount</option>
+              <option value="vendor">Sort: Vendor</option>
+              <option value="status">Sort: Status</option>
+            </select>
+          </div>
         </div>
       )}
 
@@ -278,6 +324,7 @@ window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
                       <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)' }}>{i.vendor_name}</span>
                       <span style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'monospace' }}>{i.invoice_number}</span>
+                      <InvoiceTypeBadge type={i.invoice_type} />
                       {i.file_reference && (
                         <a href={`/api/files/${encodeURIComponent(i.file_reference)}`} target="_blank"
                           title="View PDF" style={{ fontSize: 13, textDecoration: 'none', flexShrink: 0 }}>📄</a>

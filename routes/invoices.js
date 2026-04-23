@@ -99,6 +99,7 @@ router.get('/projects/:id/invoices', requireAuth, async (req, res, next) => {
     else if (req.query.contract_id) { params.push(Number(req.query.contract_id)); filters.push(`i.contract_id = $${params.length}`); }
     if (req.query.vendor) { params.push(`%${req.query.vendor}%`); filters.push(`i.vendor_name ILIKE $${params.length}`); }
     if (req.query.qb_code_id) { params.push(Number(req.query.qb_code_id)); filters.push(`i.qb_code_id = $${params.length}`); }
+    if (req.query.invoice_type) { params.push(req.query.invoice_type); filters.push(`COALESCE(i.invoice_type,'fixed') = $${params.length}`); }
     const sortMap = { vendor: 'i.vendor_name ASC', amount: 'i.amount DESC', status: 'i.status ASC, i.created_at DESC' };
     const order = sortMap[req.query.sort] || 'i.invoice_date DESC NULLS LAST, i.created_at DESC';
     const result = await pool.query(
@@ -233,9 +234,7 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
              AND contract_id = $2
              AND amount = $3
              AND status != 'rejected'
-             AND ABS(EXTRACT(EPOCH FROM (
-               COALESCE(invoice_date, created_at::date) - COALESCE($4::date, CURRENT_DATE)
-             )) / 86400) < 90`,
+             AND ABS(COALESCE(invoice_date, created_at::date) - COALESCE($4::date, CURRENT_DATE)) < 90`,
           [resolvedVendor, alloc.contract_id, amt, refDate]);
         softDupRows.push(...sd.rows);
       }
