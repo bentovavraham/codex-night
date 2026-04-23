@@ -1387,12 +1387,60 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
         />
 
         {/* TOTAL EXPOSURE */}
-        <div style={{ borderTop: '2px solid var(--border)', paddingTop: 14, marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <div style={{ borderTop: '2px solid var(--border)', paddingTop: 14, marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 28 }}>
           <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>= Total Exposure</span>
           <span style={{ fontSize: 32, fontWeight: 800, fontFamily: 'var(--mono)', color: overBudget ? 'var(--danger)' : 'var(--accent)', letterSpacing: '-0.02em' }}>
             {fmt.money(totalExposure)}
           </span>
         </div>
+
+        {/* TIER 3: Billing & Payment */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-1)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
+          Billing & Payment
+        </div>
+        <ContractLedgerRow
+          label="Fixed Scope Invoiced"
+          value={invoiced}
+          total={totalBilled || commitment}
+          color="var(--accent)"
+          onClick={() => onGoToTab('invoices')}
+        />
+        <ContractLedgerRow
+          label="+ T&M Invoiced"
+          value={tmInvoiced}
+          total={totalBilled || commitment}
+          color="var(--warn)"
+          onClick={() => onGoToTab('invoices')}
+        />
+        <ContractLedgerRow
+          label="+ Expenses Invoiced"
+          value={expInvoiced}
+          total={totalBilled || commitment}
+          color="#2563eb"
+          onClick={() => onGoToTab('invoices')}
+        />
+
+        {/* TOTAL BILLED */}
+        <div style={{ borderTop: '2px solid var(--border)', paddingTop: 14, marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: totalBilled > 0 ? 12 : 0 }}>
+          <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>= Total Billed</span>
+          <span style={{ fontSize: 32, fontWeight: 800, fontFamily: 'var(--mono)', color: totalBilled > commitment ? 'var(--danger)' : totalBilled > 0 ? '#1d4ed8' : 'var(--text-2)', letterSpacing: '-0.02em' }}>
+            {fmt.money(totalBilled)}
+          </span>
+        </div>
+
+        {/* Paid / Outstanding */}
+        {totalBilled > 0 && (
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ flex: 1, padding: '10px 14px', borderRadius: 7, background: paid > 0 ? 'rgba(34,197,94,0.07)' : 'var(--surface-2)', border: `1px solid ${paid > 0 ? 'rgba(34,197,94,0.25)' : 'var(--border)'}` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-2)', marginBottom: 4 }}>Paid</div>
+              <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'var(--mono)', color: paid > 0 ? 'var(--ok)' : 'var(--text-2)', letterSpacing: '-0.02em' }}>{fmt.money(paid)}</div>
+            </div>
+            <div style={{ flex: 1, padding: '10px 14px', borderRadius: 7, background: outstanding > 0 ? 'rgba(232,146,26,0.07)' : 'var(--surface-2)', border: `1px solid ${outstanding > 0 ? 'rgba(232,146,26,0.3)' : 'var(--border)'}` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-2)', marginBottom: 4 }}>Outstanding</div>
+              <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'var(--mono)', color: outstanding > 0 ? 'var(--warn)' : 'var(--ok)', letterSpacing: '-0.02em' }}>{fmt.money(outstanding)}</div>
+            </div>
+          </div>
+        )}
 
         {/* Budget vs. Exposure — the key question */}
         {earmarked > 0 && (
