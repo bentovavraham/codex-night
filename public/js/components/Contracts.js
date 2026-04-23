@@ -980,30 +980,68 @@ function ContractDetail({ contractId, projectId, onClose }) {
             }
 
             const invoices = data.invoices || [];
-            const totalApproved   = invoices.filter(i => ['approved','pushed','paid'].includes(i.status)).reduce((s,i) => s + Number(i.amount), 0);
+            const [invTypeFilter, setInvTypeFilter] = React.useState('');
+            const approvedInv     = invoices.filter(i => ['approved','pushed','paid'].includes(i.status));
+            const totalApproved   = approvedInv.reduce((s,i) => s + Number(i.amount), 0);
             const totalInProgress = invoices.filter(i => IN_PROGRESS_INV.includes(i.status)).reduce((s,i) => s + Number(i.amount), 0);
             const totalPaid       = invoices.filter(i => i.status === 'paid').reduce((s,i) => s + Number(i.amount), 0);
+            const totalFixed      = approvedInv.filter(i => !i.invoice_type || i.invoice_type === 'fixed').reduce((s,i) => s + Number(i.amount), 0);
+            const totalTM         = approvedInv.filter(i => i.invoice_type === 'tm').reduce((s,i) => s + Number(i.amount), 0);
+            const totalExpense    = approvedInv.filter(i => i.invoice_type === 'expense').reduce((s,i) => s + Number(i.amount), 0);
+            const visibleInvoices = invTypeFilter
+              ? invoices.filter(i => (invTypeFilter === 'fixed' ? (!i.invoice_type || i.invoice_type === 'fixed') : i.invoice_type === invTypeFilter))
+              : invoices;
 
             return (
               <>
                 {/* Summary strip */}
                 {invoices.length > 0 && (
-                  <div style={{ display: 'flex', gap: 1, background: 'var(--border)', marginBottom: 14, borderRadius: 6, overflow: 'hidden' }}>
-                    {[
-                      { label: 'In Progress', val: totalInProgress, color: totalInProgress > 0 ? 'var(--warn)' : 'var(--text-3)' },
-                      { label: 'Approved+', val: totalApproved, color: totalApproved > 0 ? 'var(--ok)' : 'var(--text-3)' },
-                      { label: 'Paid', val: totalPaid, color: totalPaid > 0 ? 'var(--ok)' : 'var(--text-3)' },
-                    ].map(item => (
-                      <div key={item.label} style={{ flex: 1, background: 'var(--surface)', padding: '8px 14px', textAlign: 'center' }}>
-                        <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>{item.label}</div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: item.color, fontFamily: 'var(--mono)' }}>
-                          {item.val > 0 ? fmt.money(item.val) : <span style={{ color: 'var(--text-3)' }}>—</span>}
-                        </div>
+                  <div style={{ display: 'flex', gap: 1, background: 'var(--border)', marginBottom: 10, borderRadius: 6, overflow: 'hidden' }}>
+                    <div style={{ flex: 1, background: 'var(--surface)', padding: '8px 14px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>In Progress</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--mono)', color: totalInProgress > 0 ? 'var(--warn)' : 'var(--text-3)' }}>
+                        {totalInProgress > 0 ? fmt.money(totalInProgress) : '—'}
                       </div>
-                    ))}
+                    </div>
+                    <div style={{ flex: 2, background: 'var(--surface)', padding: '8px 14px' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Approved+</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--mono)', color: totalApproved > 0 ? 'var(--ok)' : 'var(--text-3)' }}>{totalApproved > 0 ? fmt.money(totalApproved) : '—'}</div>
+                      {totalApproved > 0 && (
+                        <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 2, display: 'flex', gap: 8 }}>
+                          <span>Fixed <strong style={{ color: 'var(--text-2)' }}>{fmt.money(totalFixed)}</strong></span>
+                          {totalTM > 0 && <span>T&M <strong style={{ color: '#1d4ed8' }}>{fmt.money(totalTM)}</strong></span>}
+                          {totalExpense > 0 && <span>Exp <strong style={{ color: '#6d28d9' }}>{fmt.money(totalExpense)}</strong></span>}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ flex: 1, background: 'var(--surface)', padding: '8px 14px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Paid</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--mono)', color: totalPaid > 0 ? 'var(--ok)' : 'var(--text-3)' }}>
+                        {totalPaid > 0 ? fmt.money(totalPaid) : '—'}
+                      </div>
+                    </div>
                     <div style={{ flex: 'none', background: 'var(--surface)', padding: '8px 14px', display: 'flex', alignItems: 'center' }}>
                       <button className="primary" style={{ fontSize: 12 }} onClick={() => setShowNewInvoice(true)}>+ New Invoice</button>
                     </div>
+                  </div>
+                )}
+
+                {/* Type filter pills */}
+                {invoices.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                    {[
+                      { k: '',        label: 'All' },
+                      { k: 'fixed',   label: 'Fixed scope' },
+                      { k: 'tm',      label: 'T&M' },
+                      { k: 'expense', label: 'Expense' },
+                    ].map(t => (
+                      <button key={t.k} onClick={() => setInvTypeFilter(t.k)} style={{
+                        padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                        border: invTypeFilter === t.k ? '1.5px solid var(--accent)' : '1.5px solid var(--border)',
+                        background: invTypeFilter === t.k ? 'rgba(196,82,42,0.09)' : 'var(--surface)',
+                        color: invTypeFilter === t.k ? 'var(--accent)' : 'var(--text-2)',
+                      }}>{t.label}</button>
+                    ))}
                   </div>
                 )}
 
@@ -1021,12 +1059,21 @@ function ContractDetail({ contractId, projectId, onClose }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {invoices.map(i => (
+                      {visibleInvoices.map(i => (
                         <React.Fragment key={i.id}>
                           <tr className={i.status === 'rejected' ? 'row-over' : ''}>
                             <td>
-                              <strong style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{i.invoice_number}</strong>
-                              {i.file_reference && <> · <a href={`/api/files/${encodeURIComponent(i.file_reference)}`} target="_blank" onClick={e => e.stopPropagation()} title="View PDF">📄</a></>}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <strong style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{i.invoice_number}</strong>
+                                {i.invoice_type && i.invoice_type !== 'fixed' && (
+                                  <span style={{
+                                    fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4, flexShrink: 0,
+                                    background: i.invoice_type === 'tm' ? 'rgba(37,99,235,0.09)' : 'rgba(124,58,237,0.09)',
+                                    color: i.invoice_type === 'tm' ? '#1d4ed8' : '#6d28d9',
+                                  }}>{i.invoice_type === 'tm' ? 'T&M' : 'Expense'}</span>
+                                )}
+                                {i.file_reference && <a href={`/api/files/${encodeURIComponent(i.file_reference)}`} target="_blank" onClick={e => e.stopPropagation()} title="View PDF" style={{ fontSize: 13 }}>📄</a>}
+                              </div>
                             </td>
                             <td>{i.vendor_name}</td>
                             <td style={{ whiteSpace: 'nowrap' }}>{fmt.date(i.invoice_date)}</td>
