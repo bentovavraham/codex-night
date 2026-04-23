@@ -717,14 +717,9 @@ function ContractDetail({ contractId, projectId, onClose }) {
   if (!data) return <div className="empty">Loading contract…</div>;
   if (err) return <div className="error">{err}</div>;
 
-  const pendingTM  = ledger ? ledger.tm_pending  || 0 : 0;
-  const pendingExp = ledger ? ledger.expense_pending || 0 : 0;
-
   const tabs = [
     { k: 'overview',      label: 'Overview' },
     { k: 'change-orders', label: `Change Orders${ledger && ledger.pending_co_count > 0 ? ` (${ledger.pending_co_count})` : ''}` },
-    { k: 't-and-m',       label: `T&M${pendingTM > 0 ? ` (${fmt.money(pendingTM)} pending)` : ''}` },
-    { k: 'expenses',      label: `Expenses${pendingExp > 0 ? ` (${fmt.money(pendingExp)} pending)` : ''}` },
     { k: 'invoices',      label: 'Invoices' },
     { k: 'history',       label: 'History' },
     { k: 'alerts',        label: 'Alert Status' },
@@ -934,13 +929,6 @@ function ContractDetail({ contractId, projectId, onClose }) {
               onLedgerRefresh={load} />
           )}
 
-          {activeTab === 't-and-m' && (
-            <TMCharges contractId={contractId} onLedgerRefresh={load} />
-          )}
-
-          {activeTab === 'expenses' && (
-            <Expenses contractId={contractId} onLedgerRefresh={load} />
-          )}
 
 {activeTab === 'invoices' && (() => {
             const userRole = window.__userRole || 'pm';

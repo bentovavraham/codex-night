@@ -69,14 +69,14 @@ router.get('/alerts', requireAuth, async (req, res, next) => {
       ) co ON co.contract_id = c.id
       LEFT JOIN (
         SELECT contract_id, SUM(amount) AS tm_total
-        FROM tm_charges
-        WHERE status = 'approved'
+        FROM invoices
+        WHERE status IN ('approved','pushed','paid') AND invoice_type = 'tm'
         GROUP BY contract_id
       ) tm ON tm.contract_id = c.id
       LEFT JOIN (
         SELECT contract_id, SUM(amount) AS exp_total
-        FROM contract_expenses
-        WHERE status = 'approved'
+        FROM invoices
+        WHERE status IN ('approved','pushed','paid') AND invoice_type = 'expense'
         GROUP BY contract_id
       ) ex ON ex.contract_id = c.id
       WHERE ${accessClause}

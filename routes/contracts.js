@@ -410,13 +410,15 @@ router.get('/projects/:id/cost-summary', requireAuth, async (req, res, next) => 
           COUNT(*) FILTER (WHERE co.status='pending') AS pending_count
         FROM change_orders co JOIN contracts c ON c.id = co.contract_id WHERE c.project_id = $1`, [projectId]),
       pool.query(`SELECT
-          COALESCE(SUM(CASE WHEN t.status='approved' THEN t.amount ELSE 0 END),0) AS approved_total,
-          COALESCE(SUM(CASE WHEN t.status='pending'  THEN t.amount ELSE 0 END),0) AS pending_total
-        FROM tm_charges t JOIN contracts c ON c.id = t.contract_id WHERE c.project_id = $1`, [projectId]),
+          COALESCE(SUM(CASE WHEN i.status IN ('approved','pushed','paid') THEN i.amount ELSE 0 END),0) AS approved_total,
+          COALESCE(SUM(CASE WHEN i.status = 'pending' THEN i.amount ELSE 0 END),0) AS pending_total
+        FROM invoices i WHERE invoice_type = 'tm'
+          AND (i.project_id = $1 OR EXISTS (SELECT 1 FROM contracts c WHERE c.id = i.contract_id AND c.project_id = $1))`, [projectId]),
       pool.query(`SELECT
-          COALESCE(SUM(CASE WHEN e.status='approved' THEN e.amount ELSE 0 END),0) AS approved_total,
-          COALESCE(SUM(CASE WHEN e.status='pending'  THEN e.amount ELSE 0 END),0) AS pending_total
-        FROM contract_expenses e JOIN contracts c ON c.id = e.contract_id WHERE c.project_id = $1`, [projectId]),
+          COALESCE(SUM(CASE WHEN i.status IN ('approved','pushed','paid') THEN i.amount ELSE 0 END),0) AS approved_total,
+          COALESCE(SUM(CASE WHEN i.status = 'pending' THEN i.amount ELSE 0 END),0) AS pending_total
+        FROM invoices i WHERE invoice_type = 'expense'
+          AND (i.project_id = $1 OR EXISTS (SELECT 1 FROM contracts c WHERE c.id = i.contract_id AND c.project_id = $1))`, [projectId]),
       pool.query(`SELECT COALESCE(SUM(i.amount),0) AS total FROM invoices i
         WHERE (i.project_id = $1 OR EXISTS (SELECT 1 FROM contracts c WHERE c.id = i.contract_id AND c.project_id = $1))
           AND i.status IN ('approved','pushed','paid')`, [projectId]),
@@ -486,13 +488,13 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
           COUNT(*) FILTER (WHERE status='pending') AS pending_count
         FROM change_orders WHERE contract_id = $1`, [contractId]),
       pool.query(`SELECT
-          COALESCE(SUM(CASE WHEN status='approved' THEN amount ELSE 0 END),0) AS approved_total,
-          COALESCE(SUM(CASE WHEN status='pending'  THEN amount ELSE 0 END),0) AS pending_total
-        FROM tm_charges WHERE contract_id = $1`, [contractId]),
+          COALESCE(SUM(CASE WHEN status IN ('approved','pushed','paid') THEN amount ELSE 0 END),0) AS approved_total,
+          COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END),0) AS pending_total
+        FROM invoices WHERE contract_id = $1 AND invoice_type = 'tm'`, [contractId]),
       pool.query(`SELECT
-          COALESCE(SUM(CASE WHEN status='approved' THEN amount ELSE 0 END),0) AS approved_total,
-          COALESCE(SUM(CASE WHEN status='pending'  THEN amount ELSE 0 END),0) AS pending_total
-        FROM contract_expenses WHERE contract_id = $1`, [contractId]),
+          COALESCE(SUM(CASE WHEN status IN ('approved','pushed','paid') THEN amount ELSE 0 END),0) AS approved_total,
+          COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END),0) AS pending_total
+        FROM invoices WHERE contract_id = $1 AND invoice_type = 'expense'`, [contractId]),
       pool.query(`SELECT COALESCE(SUM(amount),0) AS total
         FROM invoices WHERE contract_id = $1 AND status IN ('approved','pushed','paid')
         AND invoice_type = 'fixed'`, [contractId]),

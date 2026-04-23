@@ -22,8 +22,6 @@ const uploadRoutes = require('./routes/uploads');
 const vendorRoutes = require('./routes/vendors');
 const customerRoutes = require('./routes/customers');
 const changeOrderRoutes = require('./routes/changeOrders');
-const tmChargeRoutes = require('./routes/tmCharges');
-const contractExpenseRoutes = require('./routes/contractExpenses');
 const alertRoutes = require('./routes/alerts');
 
 const app = express();
@@ -71,8 +69,6 @@ app.use('/api/files', uploadRoutes);            // POST uploads, GET :reference 
 app.use('/api/vendors', vendorRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api', changeOrderRoutes);
-app.use('/api', tmChargeRoutes);
-app.use('/api', contractExpenseRoutes);
 app.use('/api', alertRoutes);
 
 // --- Static SPA ---
