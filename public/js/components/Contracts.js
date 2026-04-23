@@ -1349,7 +1349,7 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
         </div>
 
         {/* TIER 1: Commitment (legal) */}
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-1)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
           Legal Commitment
         </div>
         <ContractLedgerRow label="Initial Contract" value={original} total={totalExposure} color="var(--text-2)" />
@@ -1368,7 +1368,7 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
         </div>
 
         {/* TIER 2: Additional exposure (T&M + Expenses) */}
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-1)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
           Additional Exposure
         </div>
         <ContractLedgerRow
