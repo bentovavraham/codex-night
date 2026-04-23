@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ActiveAcq — Data Model</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f7f4f0;
+    color: #2a2320;
+    line-height: 1.55;
+    padding: 40px 24px 80px;
+  }
+  .page { max-width: 980px; margin: 0 auto; }
+
+  h1 { font-size: 28px; font-weight: 800; color: #1a1410; letter-spacing: -0.02em; }
+  h2 { font-size: 17px; font-weight: 700; color: #1a1410; margin-bottom: 12px; letter-spacing: -0.01em; }
+  h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #8a7a72; margin-bottom: 8px; }
+  p  { font-size: 14px; color: #5a4e48; }
+
+  .subtitle { font-size: 15px; color: #7a6e68; margin-top: 6px; margin-bottom: 40px; }
+
+  /* ── Section ── */
+  .section { margin-bottom: 48px; }
+
+  /* ── Hierarchy tree ── */
+  .tree {
+    background: #fff;
+    border: 1px solid #e0d8d0;
+    border-radius: 12px;
+    padding: 32px 28px;
+  }
+  .tree-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    margin-bottom: 0;
+  }
+  .tree-node {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .node-project  { background: #1a1410; color: #fff; font-size: 15px; font-weight: 800; }
+  .node-contract { background: #c4522a; color: #fff; }
+  .node-co       { background: #e8921a; color: #fff; }
+  .node-charge   { background: #fff7f0; color: #c4522a; border: 1.5px solid #f0cdb8; }
+  .node-invoice  { background: #fffbf5; color: #1a1410; border: 1.5px solid #e0d8d0; }
+  .node-budget   { background: #f0f7ff; color: #1e4a8a; border: 1.5px solid #c0d8f8; }
+
+  .tree-indent { padding-left: 28px; border-left: 2px solid #e0d8d0; margin-left: 20px; margin-top: 0; }
+  .tree-branch { padding: 6px 0; }
+  .connector { color: #c0b4ac; font-size: 13px; font-weight: 400; margin-left: 6px; }
+
+  /* ── Entity cards ── */
+  .entity-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+    gap: 16px;
+  }
+  .entity-card {
+    background: #fff;
+    border: 1px solid #e0d8d0;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .entity-header {
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid #f0e8e0;
+  }
+  .entity-icon {
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+  }
+  .entity-name { font-size: 14px; font-weight: 700; }
+  .entity-desc { font-size: 12px; color: #7a6e68; margin-top: 1px; }
+  .entity-body { padding: 12px 16px; }
+  .field-row {
+    display: flex;
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid #f5f0ec;
+    font-size: 13px;
+    align-items: baseline;
+  }
+  .field-row:last-child { border-bottom: none; }
+  .field-name { font-weight: 600; color: #2a2320; flex: 0 0 130px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11.5px; }
+  .field-desc { color: #5a4e48; flex: 1; }
+  .tag {
+    display: inline-block;
+    font-size: 10px; font-weight: 700;
+    padding: 1px 6px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    flex-shrink: 0;
+  }
+  .tag-key    { background: #fff0ea; color: #c4522a; }
+  .tag-link   { background: #f0f0ff; color: #5050c0; }
+  .tag-auto   { background: #f0faf0; color: #2a7a3a; }
+
+  /* ── Approval flow ── */
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    background: #fff;
+    border: 1px solid #e0d8d0;
+    border-radius: 12px;
+    padding: 28px 32px;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .flow-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 14px 20px;
+    border-radius: 8px;
+    min-width: 130px;
+    text-align: center;
+  }
+  .flow-step-pending   { background: #f5f0ec; border: 1.5px solid #e0d8d0; }
+  .flow-step-pm        { background: #fffbf0; border: 1.5px solid #f0d888; }
+  .flow-step-partner   { background: #fff7ee; border: 1.5px solid #f0c888; }
+  .flow-step-approved  { background: #f0faf2; border: 1.5px solid #a0e0b0; }
+  .flow-step-paid      { background: #f0f7ff; border: 1.5px solid #a0c8f8; }
+  .flow-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #7a6e68; }
+  .flow-name  { font-size: 14px; font-weight: 700; }
+  .flow-role  { font-size: 12px; color: #7a6e68; }
+  .flow-arrow { font-size: 20px; color: #c0b4ac; padding: 0 4px; flex-shrink: 0; }
+
+  /* ── Invoice types ── */
+  .type-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .type-card {
+    background: #fff;
+    border: 1px solid #e0d8d0;
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .type-badge {
+    display: inline-block;
+    font-size: 11px; font-weight: 800;
+    padding: 3px 10px; border-radius: 20px;
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin-bottom: 10px;
+  }
+  .type-badge-fixed   { background: #fff0ea; color: #c4522a; border: 1px solid #f0cdb8; }
+  .type-badge-tm      { background: #fff8e0; color: #9a6a00; border: 1px solid #f0d888; }
+  .type-badge-expense { background: #f0f7ff; color: #1e5aaa; border: 1px solid #c0d8f8; }
+  .type-title { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+  .type-desc  { font-size: 13px; color: #5a4e48; line-height: 1.5; }
+  .type-rule  { margin-top: 10px; padding: 8px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+  .type-rule-fixed   { background: #fff0ea; color: #c4522a; }
+  .type-rule-tm      { background: #fff8e0; color: #9a6a00; }
+  .type-rule-expense { background: #f0f7ff; color: #1e5aaa; }
+
+  /* ── Math table ── */
+  .math-table {
+    background: #fff;
+    border: 1px solid #e0d8d0;
+    border-radius: 12px;
+    overflow: hidden;
+    width: 100%;
+  }
+  .math-table table { width: 100%; border-collapse: collapse; }
+  .math-table th {
+    background: #2a2320; color: #fff;
+    padding: 10px 18px; text-align: left;
+    font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  }
+  .math-table td {
+    padding: 11px 18px;
+    font-size: 13.5px;
+    border-bottom: 1px solid #f0e8e0;
+    vertical-align: top;
+  }
+  .math-table tr:last-child td { border-bottom: none; }
+  .math-table tr:nth-child(even) td { background: #faf7f4; }
+  .math-label { font-weight: 700; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: #c4522a; }
+  .math-formula { color: #2a2320; }
+  .math-note  { color: #7a6e68; font-size: 12px; margin-top: 3px; }
+
+  /* ── Roles table ── */
+  .roles-table {
+    background: #fff;
+    border: 1px solid #e0d8d0;
+    border-radius: 12px;
+    overflow: hidden;
+    width: 100%;
+  }
+  .roles-table table { width: 100%; border-collapse: collapse; }
+  .roles-table th {
+    background: #f5f0ec; color: #5a4e48;
+    padding: 9px 18px; text-align: left;
+    font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  }
+  .roles-table td {
+    padding: 11px 18px;
+    font-size: 13.5px;
+    border-bottom: 1px solid #f0e8e0;
+  }
+  .roles-table tr:last-child td { border-bottom: none; }
+  .role-tag {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .role-pm      { background: #f0f7ff; color: #1e5aaa; border: 1px solid #c0d8f8; }
+  .role-partner { background: #fff8e0; color: #9a6a00; border: 1px solid #f0d888; }
+  .role-admin   { background: #fff0ea; color: #c4522a; border: 1px solid #f0cdb8; }
+
+  .divider { height: 1px; background: #e0d8d0; margin: 36px 0; }
+
+  @media (max-width: 640px) {
+    .type-grid { grid-template-columns: 1fr; }
+    .entity-grid { grid-template-columns: 1fr; }
+    .flow { flex-direction: column; align-items: flex-start; }
+    .flow-arrow { transform: rotate(90deg); }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>ActiveAcq — Data Model</h1>
+  <p class="subtitle">How projects, contracts, and charges are structured in the system</p>
+
+  <!-- ── HIERARCHY ────────────────────────────────────────────────────────── -->
+  <div class="section">
+    <h2>How everything fits together</h2>
+    <p style="margin-bottom:16px">Everything flows down from a <strong>Project</strong>. Each project has one or more <strong>Contracts</strong> with vendors. Each contract can have change orders, T&amp;M charges, expenses, and invoices.</p>
+    <div class="tree">
+
+      <div style="margin-bottom:16px">
+        <span class="tree-node node-project">🏗 Project</span>
+        <span class="connector">— e.g. "Oaktrail and Main Estates"</span>
+      </div>
+
+      <div class="tree-indent">
+
+        <div class="tree-branch">
+          <span class="tree-node node-budget">📊 Budget Lines</span>
+          <span class="connector">— internal budget by QuickBooks category (set once per project)</span>
+        </div>
+
+        <div class="tree-branch" style="margin-top:10px">
+          <span class="tree-node node-contract">📋 Contract</span>
+          <span class="connector">— one per vendor, e.g. "Bright View Engineering — $6,300 fixed"</span>
+        </div>
+
+        <div class="tree-indent" style="margin-top:0">
+
+          <div class="tree-branch">
+            <span class="tree-node node-co">🔄 Change Orders</span>
+            <span class="connector">— formal scope/cost changes; each adds to the commitment</span>
+          </div>
+
+          <div class="tree-branch">
+            <span class="tree-node node-charge">⏱ T&amp;M Charges</span>
+            <span class="connector">— individual time entries (hours × rate); tracks open-ended exposure</span>
+          </div>
+
+          <div class="tree-branch">
+            <span class="tree-node node-charge">🧾 Expenses</span>
+            <span class="connector">— reimbursables: travel, tolls, hotels, copies, etc.</span>
+          </div>
+
+          <div class="tree-branch">
+            <span class="tree-node node-invoice">💵 Invoices</span>
+            <span class="connector">— actual billing documents from the vendor (3 types — see below)</span>
+          </div>
+
+          <div class="tree-indent" style="margin-top:0">
+            <div class="tree-branch" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span style="font-size:12px;font-weight:700;background:#fff0ea;color:#c4522a;padding:4px 10px;border-radius:6px;border:1px solid #f0cdb8">Fixed Scope</span>
+              <span style="font-size:12px;font-weight:700;background:#fff8e0;color:#9a6a00;padding:4px 10px;border-radius:6px;border:1px solid #f0d888">T&amp;M</span>
+              <span style="font-size:12px;font-weight:700;background:#f0f7ff;color:#1e5aaa;padding:4px 10px;border-radius:6px;border:1px solid #c0d8f8">Expense</span>
+              <span class="connector" style="margin-left:0">— only Fixed invoices count against the contract value</span>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── INVOICE TYPES ──────────────────────────────────────────────────── -->
+  <div class="section">
+    <h2>Invoice types — what counts against what</h2>
+    <div class="type-grid">
+
+      <div class="type-card">
+        <div class="type-badge type-badge-fixed">Fixed Scope</div>
+        <div class="type-title">Lump-sum billing</div>
+        <div class="type-desc">The vendor is invoicing for work that was defined and priced in the original contract (or a change order). This is work you agreed to pay a set amount for.</div>
+        <div class="type-rule type-rule-fixed">✓ Counts against the contract's committed value.<br>Triggers an overspend warning if it would exceed the remaining balance.</div>
+      </div>
+
+      <div class="type-card">
+        <div class="type-badge type-badge-tm">T&amp;M</div>
+        <div class="type-title">Time &amp; Materials billing</div>
+        <div class="type-desc">The vendor is invoicing for hours worked at an agreed rate — typically for open-ended tasks like engineering meetings, coordination, or inspection time.</div>
+        <div class="type-rule type-rule-tm">✓ Does NOT erode the fixed contract value.<br>Shows as additional project cost beyond the committed scope.</div>
+      </div>
+
+      <div class="type-card">
+        <div class="type-badge type-badge-expense">Expense</div>
+        <div class="type-title">Reimbursable expenses</div>
+        <div class="type-desc">The vendor is billing back costs they incurred on your behalf — mileage, tolls, hotel, printing, etc. These are pass-through costs, not contracted work.</div>
+        <div class="type-rule type-rule-expense">✓ Does NOT erode the fixed contract value.<br>Shows as additional project cost alongside T&amp;M.</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── APPROVAL FLOW ─────────────────────────────────────────────────── -->
+  <div class="section">
+    <h2>Approval chain — applies to Invoices, Change Orders, T&amp;M Charges, and Expenses</h2>
+    <div class="flow">
+
+      <div class="flow-step flow-step-pending">
+        <div class="flow-label">Step 1</div>
+        <div class="flow-name">Pending</div>
+        <div class="flow-role">Just submitted</div>
+      </div>
+
+      <div class="flow-arrow">→</div>
+
+      <div class="flow-step flow-step-pm">
+        <div class="flow-label">Step 2</div>
+        <div class="flow-name">PM Approved</div>
+        <div class="flow-role">Project Manager</div>
+      </div>
+
+      <div class="flow-arrow">→</div>
+
+      <div class="flow-step flow-step-partner">
+        <div class="flow-label">Step 3</div>
+        <div class="flow-name">Partner Approved</div>
+        <div class="flow-role">Partner-level</div>
+      </div>
+
+      <div class="flow-arrow">→</div>
+
+      <div class="flow-step flow-step-approved">
+        <div class="flow-label">Step 4</div>
+        <div class="flow-name">Approved</div>
+        <div class="flow-role">Admin (Seth) — final</div>
+      </div>
+
+      <div class="flow-arrow">→</div>
+
+      <div class="flow-step flow-step-paid">
+        <div class="flow-label">Step 5</div>
+        <div class="flow-name">Paid</div>
+        <div class="flow-role">Check / ACH sent</div>
+      </div>
+
+    </div>
+    <p style="margin-top:12px; font-size:13px; color:#7a6e68">Any step can be rejected (with a required note). An item can also be placed "on hold" at the pending stage. Reverting resets the entire chain back to Pending and clears all approval stamps.</p>
+  </div>
+
+  <!-- ── FINANCIAL MATH ────────────────────────────────────────────────── -->
+  <div class="section">
+    <h2>How the financial numbers are calculated</h2>
+    <div class="math-table">
+      <table>
+        <thead>
+          <tr><th>Number</th><th>Where it appears</th><th>Formula</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="math-label">Commitment</div></td>
+            <td>Contract detail KPI</td>
+            <td>
+              <div class="math-formula">Original contract value + all <em>approved</em> change orders</div>
+              <div class="math-note">This is the legal/contractual obligation — what you've signed for.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="math-label">Total Exposure</div></td>
+            <td>Contract detail KPI, project health</td>
+            <td>
+              <div class="math-formula">Commitment + approved T&amp;M charges + approved expenses</div>
+              <div class="math-note">Your best estimate of total spend including open-ended work.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="math-label">Invoiced to Date</div></td>
+            <td>Contract detail KPI</td>
+            <td>
+              <div class="math-formula">Sum of all <strong>Fixed-scope</strong> invoices in Approved / Pushed / Paid status</div>
+              <div class="math-note">Shows % of commitment consumed. T&amp;M and Expense invoices are shown separately alongside this number.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="math-label">Remaining (contract)</div></td>
+            <td>Contract remaining balance</td>
+            <td>
+              <div class="math-formula">Contract total_value − Fixed-scope invoices billed</div>
+              <div class="math-note">T&amp;M invoices do not reduce this number — they are additional.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="math-label">T&amp;M Billed</div></td>
+            <td>Contract detail KPI (sub-label)</td>
+            <td>
+              <div class="math-formula">Sum of T&amp;M + Expense invoices in Approved / Pushed / Paid status</div>
+              <div class="math-note">Additional project cost beyond the fixed commitment. Does not trigger an overspend warning.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="math-label">Paid</div></td>
+            <td>Contract detail KPI</td>
+            <td>
+              <div class="math-formula">Sum of all invoices (any type) in <strong>Paid</strong> status</div>
+              <div class="math-note">Cash actually out the door.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="math-label">Internal Budget</div></td>
+            <td>Contract detail KPI</td>
+            <td>
+              <div class="math-formula">earmarked_amount — set manually per contract</div>
+              <div class="math-note">Your internal estimate including T&amp;M exposure. Should always be ≥ contract value. If Total Exposure exceeds this, a "cost creep" flag appears.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="math-label">Overspend alert</div></td>
+            <td>Invoice creation form</td>
+            <td>
+              <div class="math-formula">Triggered when: new Fixed invoice amount > remaining contract balance</div>
+              <div class="math-note">T&amp;M and Expense invoices never trigger this check.</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── ENTITY TABLES ────────────────────────────────────────────────── -->
+  <div class="section">
+    <h2>Data entities — what each record stores</h2>
+    <div class="entity-grid">
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#f0e8e0">🏗</div>
+          <div>
+            <div class="entity-name">Project</div>
+            <div class="entity-desc">Top-level job or development</div>
+          </div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">name</span><span class="field-desc">Project name (e.g. "Oaktrail and Main Estates")</span></div>
+          <div class="field-row"><span class="field-name">description</span><span class="field-desc">Free-text description</span></div>
+          <div class="field-row"><span class="field-name">status</span><span class="field-desc">active / closed</span></div>
+          <div class="field-row"><span class="field-name">created_by</span><span class="field-desc">Which user created it</span><span class="tag tag-link">→ User</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#fce8e0">📋</div>
+          <div>
+            <div class="entity-name">Contract</div>
+            <div class="entity-desc">Vendor agreement under a project</div>
+          </div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">vendor_name</span><span class="field-desc">Who you're contracting with</span></div>
+          <div class="field-row"><span class="field-name">total_value</span><span class="field-desc">Fixed lump-sum contract amount</span></div>
+          <div class="field-row"><span class="field-name">earmarked_amount</span><span class="field-desc">Your internal budget estimate (optional) — should cover T&amp;M too</span></div>
+          <div class="field-row"><span class="field-name">contract_date</span><span class="field-desc">Date the contract was signed</span></div>
+          <div class="field-row"><span class="field-name">reference_number</span><span class="field-desc">Your internal ref # or PO number</span></div>
+          <div class="field-row"><span class="field-name">status</span><span class="field-desc">draft / active / closed</span></div>
+          <div class="field-row"><span class="field-name">file_reference</span><span class="field-desc">Attached PDF (stored in database)</span></div>
+          <div class="field-row"><span class="field-name">project_id</span><span class="field-desc">Which project this belongs to</span><span class="tag tag-link">→ Project</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#fff4e0">🔄</div>
+          <div>
+            <div class="entity-name">Change Order</div>
+            <div class="entity-desc">Formal modification to a contract</div>
+          </div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">co_number</span><span class="field-desc">Reference like "CO-001"</span></div>
+          <div class="field-row"><span class="field-name">description</span><span class="field-desc">What changed and why</span></div>
+          <div class="field-row"><span class="field-name">amount</span><span class="field-desc">Dollar value of the change (+ or −)</span></div>
+          <div class="field-row"><span class="field-name">tm_authorized</span><span class="field-desc">Whether this CO authorizes T&amp;M work</span></div>
+          <div class="field-row"><span class="field-name">tm_not_to_exceed</span><span class="field-desc">Cap on T&amp;M spend if authorized</span></div>
+          <div class="field-row"><span class="field-name">status</span><span class="field-desc">pending → pm_approved → partner_approved → approved</span></div>
+          <div class="field-row"><span class="field-name">contract_id</span><span class="field-desc">Which contract this modifies</span><span class="tag tag-link">→ Contract</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#fff4e0">⏱</div>
+          <div>
+            <div class="entity-name">T&amp;M Charge</div>
+            <div class="entity-desc">Individual time entry for hourly work</div>
+          </div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">description</span><span class="field-desc">What work was done</span></div>
+          <div class="field-row"><span class="field-name">hours</span><span class="field-desc">Hours worked (optional — or use amount directly)</span></div>
+          <div class="field-row"><span class="field-name">rate</span><span class="field-desc">Hourly rate in dollars</span></div>
+          <div class="field-row"><span class="field-name">amount</span><span class="field-desc">Total (hours × rate, or entered directly)</span></div>
+          <div class="field-row"><span class="field-name">charge_date</span><span class="field-desc">Date the work occurred</span></div>
+          <div class="field-row"><span class="field-name">status</span><span class="field-desc">pending → pm_approved → partner_approved → approved</span></div>
+          <div class="field-row"><span class="field-name">contract_id</span><span class="field-desc">Which contract this is under</span><span class="tag tag-link">→ Contract</span></div>
+          <div class="field-row"><span class="field-name">change_order_id</span><span class="field-desc">Optional — if this T&amp;M is tied to a specific CO</span><span class="tag tag-link">→ CO</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#f0f0ff">🧾</div>
+          <div>
+            <div class="entity-name">Expense</div>
+            <div class="entity-desc">Reimbursable cost (travel, tolls, etc.)</div>
+          </div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">category</span><span class="field-desc">travel / tolls / food / hotel / copies / other</span></div>
+          <div class="field-row"><span class="field-name">description</span><span class="field-desc">What the expense was for</span></div>
+          <div class="field-row"><span class="field-name">amount</span><span class="field-desc">Dollar amount</span></div>
+          <div class="field-row"><span class="field-name">expense_date</span><span class="field-desc">Date incurred</span></div>
+          <div class="field-row"><span class="field-name">status</span><span class="field-desc">pending → pm_approved → partner_approved → approved</span></div>
+          <div class="field-row"><span class="field-name">contract_id</span><span class="field-desc">Which contract this is under</span><span class="tag tag-link">→ Contract</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#f0faf0">💵</div>
+          <div>
+            <div class="entity-name">Invoice</div>
+            <div class="entity-desc">Billing document from a vendor</div>
+          </div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">invoice_number</span><span class="field-desc">Vendor's invoice number (e.g. "203010a-4")</span></div>
+          <div class="field-row"><span class="field-name">vendor_name</span><span class="field-desc">Who submitted the invoice</span></div>
+          <div class="field-row"><span class="field-name">amount</span><span class="field-desc">Total dollar amount billed</span></div>
+          <div class="field-row"><span class="field-name">invoice_date</span><span class="field-desc">Date printed on the invoice</span></div>
+          <div class="field-row"><span class="field-name">invoice_type</span><span class="field-desc"><strong>fixed</strong> (lump sum) / <strong>tm</strong> (hourly) / <strong>expense</strong> (reimbursable)</span></div>
+          <div class="field-row"><span class="field-name">status</span><span class="field-desc">pending → pm_approved → partner_approved → approved → pushed → paid</span></div>
+          <div class="field-row"><span class="field-name">paid_date</span><span class="field-desc">When payment was sent</span></div>
+          <div class="field-row"><span class="field-name">qb_reference_id</span><span class="field-desc">QuickBooks ID after export</span></div>
+          <div class="field-row"><span class="field-name">file_reference</span><span class="field-desc">Attached PDF</span></div>
+          <div class="field-row"><span class="field-name">contract_id</span><span class="field-desc">Primary contract (or null for standalone)</span><span class="tag tag-link">→ Contract</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#f0f7ff">👤</div>
+          <div>
+            <div class="entity-name">User</div>
+            <div class="entity-desc">Staff member with a login</div>
+          </div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">name</span><span class="field-desc">Full name</span></div>
+          <div class="field-row"><span class="field-name">email</span><span class="field-desc">Login email (unique)</span></div>
+          <div class="field-row"><span class="field-name">role</span><span class="field-desc"><strong>pm</strong> (project manager) / <strong>partner</strong> / <strong>admin</strong> (Seth)</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#f0fff4">📊</div>
+          <div>
+            <div class="entity-name">Budget Line</div>
+            <div class="entity-desc">Project-level budget by QB category</div>
+          </div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">qb_code_id</span><span class="field-desc">QuickBooks expense category</span><span class="tag tag-link">→ QB Code</span></div>
+          <div class="field-row"><span class="field-name">original_amount</span><span class="field-desc">Budget as originally set</span></div>
+          <div class="field-row"><span class="field-name">current_amount</span><span class="field-desc">Current budget (may be revised)</span></div>
+          <div class="field-row"><span class="field-name">project_id</span><span class="field-desc">Which project this budget line belongs to</span><span class="tag tag-link">→ Project</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#fff8e0">🏷</div>
+          <div>
+            <div class="entity-name">Vendor</div>
+            <div class="entity-desc">Known vendor / subcontractor</div>
+          </div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">name</span><span class="field-desc">Vendor's name — seeded from QuickBooks</span></div>
+          <div class="field-row"><span class="field-name">qb_id</span><span class="field-desc">QuickBooks vendor ID for future sync</span></div>
+          <div class="field-row" style="margin-top:8px"><span class="field-desc" style="color:#7a6e68;font-style:italic">Used for smart-search autocomplete in contract and invoice forms. Claude also learns each vendor's invoice format over time (via extraction examples) to improve auto-fill accuracy.</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── ROLES ────────────────────────────────────────────────────────── -->
+  <div class="section">
+    <h2>User roles and permissions</h2>
+    <div class="roles-table">
+      <table>
+        <thead>
+          <tr><th>Role</th><th>Who</th><th>What they can do</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="role-tag role-pm">PM</span></td>
+            <td>Project Managers</td>
+            <td>Create projects, contracts, invoices, T&amp;M charges, expenses, change orders. Give first approval to anything.</td>
+          </tr>
+          <tr>
+            <td><span class="role-tag role-partner">Partner</span></td>
+            <td>Partners / senior staff</td>
+            <td>Everything a PM can do, plus give second (partner) approval.</td>
+          </tr>
+          <tr>
+            <td><span class="role-tag role-admin">Admin</span></td>
+            <td>Seth</td>
+            <td>Everything. Final (third) approval authority on all documents. Only admin can give final approval on invoices and change orders.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── AUDIT ─────────────────────────────────────────────────────────── -->
+  <div class="section">
+    <h2>Audit trail</h2>
+    <p>Every action on an invoice or contract is logged with <strong>who did it</strong>, <strong>when</strong>, and <strong>what changed</strong>. This includes approvals, rejections, edits, holds, and reverts. The history tab on any contract or invoice shows the full timeline.</p>
+    <p style="margin-top:10px">Claude's document extraction is also tracked — every time a PM confirms an AI-filled field, the system saves that as a training example so the same vendor's future documents auto-fill more accurately.</p>
+  </div>
+
+  <div style="margin-top:60px; padding-top:24px; border-top:1px solid #e0d8d0; font-size:12px; color:#a09088;">
+    Generated from the ActiveAcq production schema · 2026-04-22
+  </div>
+
+</div>
+</body>
+</html>

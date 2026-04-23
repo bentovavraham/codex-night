@@ -21,7 +21,7 @@ Initial Contract          The signed amount. What you agreed to pay at day one.
   Internal Budget         (Earmarked Amount) — what you set aside internally.
   Buffer                  Internal Budget − Total Exposure  (positive = room left)
   Cost Creep              Total Exposure > Internal Budget
-  Contract Overrun        Invoiced > Initial Contract Amount ("Banging Us Out")
+  Change Order Creep      COs have inflated commitment significantly above initial contract value
 ```
 
 ---

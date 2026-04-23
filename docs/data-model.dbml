@@ -1,0 +1,235 @@
+// ActiveAcq — Data Model
+// Paste this at dbdiagram.io for a live, shareable ERD.
+
+// ─── Authentication & Users ───────────────────────────────────────────────────
+
+Table users {
+  id         int          [pk, increment]
+  name       varchar
+  email      varchar      [unique]
+  role       varchar      [note: 'admin | pm']
+  created_at timestamptz
+}
+
+// ─── Projects ─────────────────────────────────────────────────────────────────
+
+Table projects {
+  id          int          [pk, increment]
+  name        varchar
+  description text
+  status      varchar      [note: 'active | on_hold | completed | archived']
+  created_by  int          [ref: > users.id]
+  created_at  timestamptz
+  updated_at  timestamptz
+}
+
+Table project_members {
+  id         int  [pk, increment]
+  project_id int  [ref: > projects.id]
+  user_id    int  [ref: > users.id]
+  role       varchar      [note: 'admin | pm']
+  added_at   timestamptz
+}
+
+// ─── QuickBooks Chart of Accounts ─────────────────────────────────────────────
+
+Table qb_codes {
+  id        int     [pk, increment]
+  code      varchar [unique]
+  name      varchar
+  parent_id int     [ref: > qb_codes.id, note: 'self-referential — parent category']
+  level     int
+}
+
+// ─── Budget ───────────────────────────────────────────────────────────────────
+
+Table budget_lines {
+  id              int          [pk, increment]
+  project_id      int          [ref: > projects.id]
+  qb_code_id      int          [ref: > qb_codes.id]
+  original_amount numeric
+  current_amount  numeric
+  created_at      timestamptz
+  updated_at      timestamptz
+
+  indexes {
+    (project_id, qb_code_id) [unique]
+  }
+}
+
+Table budget_line_logs {
+  id             int          [pk, increment]
+  budget_line_id int          [ref: > budget_lines.id]
+  old_amount     numeric
+  new_amount     numeric
+  changed_by     int          [ref: > users.id]
+  note           text
+  changed_at     timestamptz
+}
+
+// ─── Contracts ────────────────────────────────────────────────────────────────
+
+Table contracts {
+  id               int          [pk, increment]
+  project_id       int          [ref: > projects.id]
+  vendor_name      varchar
+  description      text
+  total_value      numeric      [note: 'initial signed contract value']
+  earmarked_amount numeric      [note: 'internal budget — may exceed total_value']
+  contract_date    date
+  reference_number varchar
+  status           varchar      [note: 'draft | active | completed | cancelled']
+  file_reference   varchar
+  created_by       int          [ref: > users.id]
+  created_at       timestamptz
+  updated_at       timestamptz
+}
+
+Table contract_lines {
+  id          int     [pk, increment]
+  contract_id int     [ref: > contracts.id]
+  qb_code_id  int     [ref: > qb_codes.id]
+  amount      numeric
+}
+
+Table contract_logs {
+  id          int          [pk, increment]
+  contract_id int          [ref: > contracts.id]
+  action      varchar
+  detail      text
+  changed_by  int          [ref: > users.id]
+  changed_at  timestamptz
+}
+
+// ─── Change Orders ────────────────────────────────────────────────────────────
+
+Table change_orders {
+  id             int          [pk, increment]
+  contract_id    int          [ref: > contracts.id]
+  co_number      varchar      [note: 'e.g. CO-001']
+  description    text
+  amount         numeric
+  status         varchar      [note: 'pending | approved | rejected']
+  approved_by    int          [ref: > users.id]
+  approved_at    timestamptz
+  rejection_note text
+  file_reference varchar
+  created_by     int          [ref: > users.id]
+  created_at     timestamptz
+  updated_at     timestamptz
+}
+
+Table change_order_logs {
+  id              int          [pk, increment]
+  change_order_id int          [ref: > change_orders.id]
+  action          varchar
+  detail          text
+  changed_by      int          [ref: > users.id]
+  changed_at      timestamptz
+}
+
+// ─── T&M Charges ──────────────────────────────────────────────────────────────
+
+Table tm_charges {
+  id             int          [pk, increment]
+  contract_id    int          [ref: > contracts.id]
+  description    text
+  hours          numeric
+  rate           numeric
+  amount         numeric
+  charge_date    date
+  qb_code_id     int          [ref: > qb_codes.id]
+  file_reference varchar
+  status         varchar      [note: 'pending | approved | rejected']
+  notes          text
+  rejection_note text
+  created_by     int          [ref: > users.id]
+  created_at     timestamptz
+}
+
+// ─── Contract Expenses ────────────────────────────────────────────────────────
+
+Table contract_expenses {
+  id             int          [pk, increment]
+  contract_id    int          [ref: > contracts.id]
+  category       varchar      [note: 'travel | tolls | food | hotel | copies | other']
+  description    text
+  amount         numeric
+  expense_date   date
+  qb_code_id     int          [ref: > qb_codes.id]
+  file_reference varchar
+  status         varchar      [note: 'pending | approved | rejected']
+  notes          text
+  rejection_note text
+  created_by     int          [ref: > users.id]
+  created_at     timestamptz
+}
+
+// ─── Invoices ─────────────────────────────────────────────────────────────────
+
+Table invoices {
+  id               int          [pk, increment]
+  contract_id      int          [ref: > contracts.id, note: 'nullable — primary/legacy FK']
+  project_id       int          [ref: > projects.id]
+  invoice_number   varchar
+  vendor_name      varchar
+  amount           numeric
+  invoice_date     date
+  description      text
+  status           varchar      [note: 'pending | approved | rejected | on_hold | pushed | paid']
+  approved_by      int          [ref: > users.id]
+  approved_at      timestamptz
+  paid_date        date
+  qb_reference_id  varchar
+  qb_code_id       int          [ref: > qb_codes.id]
+  rejection_note   text
+  file_reference   varchar
+  created_by       int          [ref: > users.id]
+  created_at       timestamptz
+  updated_at       timestamptz
+}
+
+Table invoice_contracts {
+  id          int     [pk, increment, note: 'junction — one invoice can span multiple contracts']
+  invoice_id  int     [ref: > invoices.id]
+  contract_id int     [ref: > contracts.id]
+  amount      numeric
+
+  indexes {
+    (invoice_id, contract_id) [unique]
+  }
+}
+
+Table invoice_logs {
+  id         int          [pk, increment]
+  invoice_id int          [ref: > invoices.id]
+  action     varchar
+  detail     text
+  changed_by int          [ref: > users.id]
+  changed_at timestamptz
+}
+
+// ─── QuickBooks Reference Data (seeded from QB export) ────────────────────────
+
+Table vendors {
+  id    int     [pk, increment]
+  qb_id varchar
+  name  varchar [unique]
+}
+
+Table customers {
+  id    int     [pk, increment]
+  qb_id varchar
+  name  varchar [unique, note: 'maps to projects in this app']
+}
+
+// ─── File Storage ─────────────────────────────────────────────────────────────
+
+Table files {
+  id         varchar      [pk, note: 'UUID']
+  filename   varchar
+  mime_type  varchar
+  data       bytea
+  size       int
+  created_at timestamptz
+}
