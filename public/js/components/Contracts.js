@@ -1343,43 +1343,43 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
           <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em', marginBottom: 4 }}>
             How we got here
           </div>
-          <div style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5 }}>
+          <div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.5 }}>
             A full breakdown of every dollar committed, billed, and paid against this contract.
           </div>
         </div>
 
         {/* TIER 1: Commitment (legal) */}
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
           Legal Commitment
         </div>
-        <ContractLedgerRow label="Initial Contract Amount" value={original} total={totalExposure} color="var(--text-2)" />
+        <ContractLedgerRow label="Initial Contract" value={original} total={totalExposure} color="var(--text-2)" />
         <ContractLedgerRow
-          label={approvedCOs > 0 ? `+ Approved Change Orders (${l.pending_co_count > 0 ? l.pending_co_count + ' pending' : 'all approved'})` : '+ Change Orders — none yet'}
+          label={approvedCOs > 0 ? `+ Change Orders (${l.pending_co_count > 0 ? l.pending_co_count + ' pending' : 'all approved'})` : '+ Change Orders'}
           value={approvedCOs}
           total={totalExposure}
           color={approvedCOs > 0 ? 'var(--warn)' : 'var(--text-3)'}
           onClick={() => onGoToTab('change-orders')}
         />
-        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>= Commitment</span>
-          <span style={{ fontSize: 20, fontWeight: 800, fontFamily: 'var(--mono)', color: commitment > original ? 'var(--warn)' : 'var(--accent)', letterSpacing: '-0.02em' }}>
+        <div style={{ borderTop: '2px solid var(--border)', paddingTop: 12, marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 20 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>= Commitment</span>
+          <span style={{ fontSize: 22, fontWeight: 800, fontFamily: 'var(--mono)', color: commitment > original ? 'var(--warn)' : 'var(--accent)', letterSpacing: '-0.02em' }}>
             {fmt.money(commitment)}
           </span>
         </div>
 
         {/* TIER 2: Additional exposure (T&M + Expenses) */}
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
           Additional Exposure
         </div>
         <ContractLedgerRow
-          label={tmApproved > 0 ? '+ Approved T&M charges' : '+ T&M — none yet'}
+          label={tmApproved > 0 ? '+ Approved T&M' : '+ T&M'}
           value={tmApproved}
           total={totalExposure}
           color={tmApproved > 0 ? '#c4522a' : 'var(--text-3)'}
           onClick={() => onGoToTab('t-and-m')}
         />
         <ContractLedgerRow
-          label={expApproved > 0 ? '+ Approved Expenses' : '+ Expenses — none yet'}
+          label={expApproved > 0 ? '+ Approved Expenses' : '+ Expenses'}
           value={expApproved}
           total={totalExposure}
           color={expApproved > 0 ? '#c4522a' : 'var(--text-3)'}
@@ -1387,9 +1387,9 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
         />
 
         {/* TOTAL EXPOSURE */}
-        <div style={{ borderTop: '2px solid var(--border)', paddingTop: 10, marginTop: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>= Total Exposure</span>
-          <span style={{ fontSize: 24, fontWeight: 800, fontFamily: 'var(--mono)', color: overBudget ? 'var(--danger)' : 'var(--accent)', letterSpacing: '-0.02em' }}>
+        <div style={{ borderTop: '2px solid var(--border)', paddingTop: 12, marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>= Total Exposure</span>
+          <span style={{ fontSize: 26, fontWeight: 800, fontFamily: 'var(--mono)', color: overBudget ? 'var(--danger)' : 'var(--accent)', letterSpacing: '-0.02em' }}>
             {fmt.money(totalExposure)}
           </span>
         </div>
@@ -1511,13 +1511,17 @@ function ContractStat({ label, value, sublabel, color, topBar, tip }) {
 
 function ContractLedgerRow({ label, value, total, color, onClick }) {
   const barPct = total > 0 ? (value / total) * 100 : 0;
+  const isZero = !value || Number(value) === 0;
   return (
-    <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.03)', cursor: onClick ? 'pointer' : 'default' }}>
-      <span style={{ fontSize: 12, color: 'var(--text-2)', flex: 1 }}>{label}</span>
-      <div style={{ width: 80, height: 4, borderRadius: 2, background: 'var(--surface-3)', flexShrink: 0 }}>
-        <div style={{ width: `${Math.min(barPct, 100)}%`, height: '100%', background: color || 'var(--text-3)', borderRadius: 2 }} />
-      </div>
-      <span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--mono)', color: color || 'var(--text-1)', minWidth: 80, textAlign: 'right' }}>{fmt.money(value)}</span>
+    <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: '1px solid var(--border)', cursor: onClick ? 'pointer' : 'default' }}>
+      <span style={{ fontSize: 13, color: isZero ? 'var(--text-3)' : 'var(--text-1)', flex: 1, fontWeight: isZero ? 400 : 500 }}>{label}</span>
+      {!isZero && (
+        <div style={{ width: 72, height: 5, borderRadius: 3, background: 'var(--surface-3)', flexShrink: 0 }}>
+          <div style={{ width: `${Math.min(barPct, 100)}%`, height: '100%', background: color || 'var(--text-3)', borderRadius: 3 }} />
+        </div>
+      )}
+      {isZero && <div style={{ width: 72, flexShrink: 0 }} />}
+      <span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--mono)', color: isZero ? 'var(--text-3)' : (color || 'var(--text-1)'), minWidth: 80, textAlign: 'right' }}>{fmt.money(value)}</span>
     </div>
   );
 }
