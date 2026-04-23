@@ -1,170 +1,253 @@
-// Budget tab: editable current_amount with required note, history per line,
-// initialize-from-codes modal, and Compare-to-Original toggle.
+// Budget tree view: QB code → contracts → invoices
+// Columns: Budget / Contracted / Expected Overage / Uncommitted / Total Exposure
 
 window.Budget = function Budget({ projectId }) {
-  const [rows, setRows] = React.useState([]);
-  const [codes, setCodes] = React.useState([]);
+  const [tree, setTree] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
-  const [showInit, setShowInit] = React.useState(false);
-  const [compareOriginal, setCompareOriginal] = React.useState(false);
-  const [editing, setEditing] = React.useState(null); // { line, value, note }
-  const [historyOpen, setHistoryOpen] = React.useState({}); // lineId -> history[]
   const [err, setErr] = React.useState(null);
+  const [expanded, setExpanded] = React.useState({});          // qb_code_id → bool
+  const [editingUncommitted, setEditingUncommitted] = React.useState(null); // { budget_line_id, value }
+  const [showInit, setShowInit] = React.useState(false);
+  const [qbCodes, setQbCodes] = React.useState([]);
 
   async function load() {
     setLoading(true);
     try {
-      const [budget, qb] = await Promise.all([api.getBudget(projectId), api.getQbCodes()]);
-      setRows(budget);
-      setCodes(qb.flat || []);
+      const [t, qb] = await Promise.all([api.getBudgetTree(projectId), api.getQbCodes()]);
+      setTree(t);
+      setQbCodes(qb.flat || []);
     } catch (e) { setErr(e.message); }
     finally { setLoading(false); }
   }
 
   React.useEffect(() => { load(); }, [projectId]);
 
-  async function toggleHistory(lineId) {
-    if (historyOpen[lineId]) {
-      const clone = { ...historyOpen }; delete clone[lineId]; setHistoryOpen(clone);
-      return;
-    }
-    try {
-      const history = await api.getBudgetHistory(projectId, lineId);
-      setHistoryOpen({ ...historyOpen, [lineId]: history });
-    } catch (e) { setErr(e.message); }
+  function toggleExpand(id) {
+    setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
   }
 
-  async function saveEdit() {
-    if (!editing) return;
-    const amt = Number(editing.value);
-    if (!Number.isFinite(amt)) { setErr('Invalid amount'); return; }
-    if (!editing.note || !editing.note.trim()) { setErr('Note required'); return; }
+  async function saveUncommitted(row) {
+    const val = Number(editingUncommitted.value);
+    if (!Number.isFinite(val)) return;
     try {
-      await api.updateBudgetLine(projectId, editing.line.id, {
-        current_amount: amt, note: editing.note,
-      });
-      setEditing(null);
+      await api.updateUncommitted(projectId, row.budget_line_id, val);
+      setEditingUncommitted(null);
       await load();
     } catch (e) { setErr(e.message); }
   }
 
   if (loading) return <div className="empty">Loading budget…</div>;
+  if (err) return <div className="error">{err}</div>;
 
-  return (
-    <div className="panel">
-      <div className="panel-header">
-        <h2>Budget</h2>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <label style={{ width:'auto', display:'flex', alignItems:'center', gap:6 }}>
-            <input type="checkbox" style={{ width:'auto' }} checked={compareOriginal}
-                   onChange={(e)=>setCompareOriginal(e.target.checked)} />
-            <span className="hint">Compare to Original</span>
-          </label>
+  if (!tree || tree.codes.length === 0) {
+    return (
+      <div className="panel">
+        <div className="panel-header">
+          <h2>Budget</h2>
           <button onClick={() => setShowInit(true)}>+ Add/Update Codes</button>
         </div>
-      </div>
-
-      {err && <div className="error" style={{ marginBottom: 8 }}>{err}</div>}
-
-      {rows.length === 0 ? (
         <div className="empty">
           No budget lines yet. <a onClick={() => setShowInit(true)}>Select QB codes</a> to initialize.
         </div>
-      ) : (
-        <table className="data">
-          <thead>
-            <tr>
-              <th>QB Code</th>
-              {compareOriginal && <th className="num">Original</th>}
-              <th className="num">Current Amount</th>
-              {compareOriginal && <th className="num">Delta</th>}
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const isEditing = editing?.line.id === r.id;
-              const delta = Number(r.current_amount) - Number(r.original_amount);
-              return (
-                <React.Fragment key={r.id}>
-                  <tr>
-                    <td><span className="code">{r.code}</span> — {r.name}</td>
-                    {compareOriginal && <td className="num">{fmt.moneyPrecise(r.original_amount)}</td>}
-                    <td className="num">
-                      {isEditing ? (
-                        <input type="number" step="0.01"
-                               value={editing.value}
-                               onChange={(e)=>setEditing({...editing, value: e.target.value})}
-                               style={{ textAlign:'right', maxWidth: 140, display:'inline-block' }} />
-                      ) : fmt.moneyPrecise(r.current_amount)}
-                    </td>
-                    {compareOriginal && (
-                      <td className="num" style={{ color: delta > 0 ? 'var(--ok)' : delta < 0 ? 'var(--danger)' : 'inherit' }}>
-                        {delta === 0 ? '—' : (delta > 0 ? '+' : '') + fmt.moneyPrecise(delta)}
-                      </td>
-                    )}
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      {isEditing ? (
-                        <>
-                          <input placeholder="Reason for change (required)"
-                                 value={editing.note}
-                                 onChange={(e)=>setEditing({...editing, note: e.target.value})}
-                                 style={{ maxWidth: 260, display: 'inline-block', marginRight: 8 }} />
-                          <button className="primary" onClick={saveEdit}>Save</button>
-                          <button onClick={()=>setEditing(null)}>Cancel</button>
-                        </>
-                      ) : (
-                        <>
-                          <button onClick={() => setEditing({ line: r, value: String(r.current_amount), note: '' })}>Edit</button>
-                          <button onClick={() => toggleHistory(r.id)} style={{ marginLeft: 6 }}>
-                            {historyOpen[r.id] ? 'Hide history' : 'History'}
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                  {historyOpen[r.id] && (
-                    <tr>
-                      <td colSpan={compareOriginal ? 5 : 3}>
-                        <div className="history">
-                          {historyOpen[r.id].length === 0 ? (
-                            <div className="hint">No changes recorded.</div>
-                          ) : historyOpen[r.id].map((h) => (
-                            <div key={h.id} className="history-row">
-                              <span className="ts">{fmt.datetime(h.changed_at)}</span>
-                              <span>
-                                <strong>{h.changed_by_name}</strong>
-                                &nbsp;changed <em>{fmt.moneyPrecise(h.old_amount)}</em>
-                                &nbsp;→ <strong>{fmt.moneyPrecise(h.new_amount)}</strong>
-                                {h.note ? <> — {h.note}</> : null}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
+        {showInit && <InitBudgetModal projectId={projectId} codes={qbCodes} existing={[]}
+          onClose={() => setShowInit(false)} onSaved={async () => { setShowInit(false); await load(); }} />}
+      </div>
+    );
+  }
 
-      {showInit && <InitBudgetModal
-        projectId={projectId}
-        codes={codes}
-        existing={rows}
-        onClose={() => setShowInit(false)}
-        onSaved={async () => { setShowInit(false); await load(); }}
-      />}
+  const { codes, totals } = tree;
+
+  return (
+    <div className="panel" style={{ overflowX: 'auto' }}>
+      <div className="panel-header" style={{ marginBottom: 0 }}>
+        <h2>Budget</h2>
+        <button onClick={() => setShowInit(true)}>+ Add/Update Codes</button>
+      </div>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginTop: 0 }}>
+        <thead>
+          <tr style={{ borderBottom: '2px solid var(--border)' }}>
+            <th style={{ textAlign: 'left', padding: '10px 12px', fontWeight: 600, color: 'var(--text-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em' }}>QB Code</th>
+            <BudgetTH>Budget</BudgetTH>
+            <BudgetTH tip="Sum of contract amounts attributed to this QB code">Contracted</BudgetTH>
+            <BudgetTH tip="Contracted minus Budget — positive means over budget">Expected Overage</BudgetTH>
+            <BudgetTH tip="PM estimate: additional spend not yet under contract (click to edit)">Uncommitted</BudgetTH>
+            <BudgetTH tip="Contracted + Uncommitted">Total Exposure</BudgetTH>
+          </tr>
+        </thead>
+        <tbody>
+          <TotalsRow totals={totals} />
+          {codes.map(row => (
+            <React.Fragment key={row.qb_code_id}>
+              <QBCodeRow
+                row={row}
+                isExpanded={!!expanded[row.qb_code_id]}
+                onToggle={() => toggleExpand(row.qb_code_id)}
+                editingUncommitted={editingUncommitted}
+                onEditUncommitted={v => setEditingUncommitted({ budget_line_id: row.budget_line_id, value: String(v) })}
+                onUncommittedChange={v => setEditingUncommitted(prev => ({ ...prev, value: v }))}
+                onSaveUncommitted={() => saveUncommitted(row)}
+                onCancelUncommitted={() => setEditingUncommitted(null)}
+              />
+              {expanded[row.qb_code_id] && row.contracts.map(c => (
+                <ContractSubRow key={c.contract_id} contract={c} />
+              ))}
+              {expanded[row.qb_code_id] && row.contracts.length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ padding: '6px 12px 6px 40px', color: 'var(--text-3)', fontSize: 12 }}>
+                    No contracts linked to this QB code
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
+          ))}
+        </tbody>
+      </table>
+
+      {showInit && <InitBudgetModal projectId={projectId} codes={qbCodes} existing={codes}
+        onClose={() => setShowInit(false)} onSaved={async () => { setShowInit(false); await load(); }} />}
     </div>
   );
 };
 
+function BudgetTH({ children, tip }) {
+  return (
+    <th data-tip={tip} style={{ textAlign: 'right', padding: '10px 12px', fontWeight: 600, color: 'var(--text-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
+      {children}
+    </th>
+  );
+}
+
+function TotalsRow({ totals }) {
+  const overageColor = totals.expected_overage > 0 ? 'var(--danger)' : totals.expected_overage < 0 ? 'var(--ok)' : 'var(--text-2)';
+  const exposureColor = totals.total_exposure > totals.budget ? 'var(--danger)' : 'var(--text-1)';
+  return (
+    <tr style={{ background: 'var(--surface-2)', borderBottom: '2px solid var(--border)' }}>
+      <td style={{ padding: '10px 12px', fontWeight: 700, fontSize: 13, color: 'var(--text-1)' }}>
+        Project Total
+      </td>
+      <MoneyCell val={totals.budget} bold />
+      <MoneyCell val={totals.contracted} bold />
+      <MoneyCell val={totals.expected_overage} bold color={overageColor} signed />
+      <MoneyCell val={totals.uncommitted} bold />
+      <MoneyCell val={totals.total_exposure} bold color={exposureColor} />
+    </tr>
+  );
+}
+
+function QBCodeRow({ row, isExpanded, onToggle, editingUncommitted, onEditUncommitted, onUncommittedChange, onSaveUncommitted, onCancelUncommitted }) {
+  const isEditingThis = editingUncommitted?.budget_line_id === row.budget_line_id;
+  const overageColor = row.expected_overage > 0 ? 'var(--danger)' : row.expected_overage < 0 ? 'var(--ok)' : 'var(--text-3)';
+  const exposureColor = row.total_exposure > row.budget ? 'var(--danger)' : 'var(--text-1)';
+  const indent = (Number(row.level) || 0) * 16;
+
+  return (
+    <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+      <td style={{ padding: '9px 12px', paddingLeft: 12 + indent }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {row.contracts.length > 0 ? (
+            <button onClick={onToggle} style={{ fontSize: 11, padding: '2px 6px', lineHeight: 1, minWidth: 24, flexShrink: 0, fontFamily: 'var(--mono)' }}>
+              {isExpanded ? '▼' : '▶'}
+            </button>
+          ) : (
+            <span style={{ width: 30, flexShrink: 0 }} />
+          )}
+          <div>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-3)', marginRight: 6 }}>{row.code}</span>
+            <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{row.name}</span>
+            {row.contracts.length > 0 && (
+              <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-3)' }}>
+                {row.contracts.length} contract{row.contracts.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+        </div>
+      </td>
+      <MoneyCell val={row.budget} />
+      <MoneyCell val={row.contracted} />
+      <MoneyCell val={row.expected_overage} color={overageColor} signed />
+      <td style={{ textAlign: 'right', padding: '9px 12px', whiteSpace: 'nowrap' }}>
+        {isEditingThis ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="number" step="0.01"
+              value={editingUncommitted.value}
+              onChange={e => onUncommittedChange(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') onSaveUncommitted(); if (e.key === 'Escape') onCancelUncommitted(); }}
+              autoFocus
+              style={{ width: 100, textAlign: 'right', fontSize: 12, padding: '3px 6px' }}
+            />
+            <button className="primary" onClick={onSaveUncommitted} style={{ fontSize: 11, padding: '3px 8px' }}>✓</button>
+            <button onClick={onCancelUncommitted} style={{ fontSize: 11, padding: '3px 8px' }}>✕</button>
+          </span>
+        ) : (
+          <span
+            onClick={() => onEditUncommitted(row.uncommitted_estimate)}
+            style={{ cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 13, color: row.uncommitted_estimate > 0 ? 'var(--text-1)' : 'var(--text-3)', borderBottom: '1px dashed var(--border)' }}
+            data-tip="Click to edit PM uncommitted estimate"
+          >
+            {fmt.money(row.uncommitted_estimate)}
+          </span>
+        )}
+      </td>
+      <MoneyCell val={row.total_exposure} color={exposureColor} />
+    </tr>
+  );
+}
+
+function ContractSubRow({ contract }) {
+  const earmarked = Number(contract.earmarked_amount) || 0;
+  const overageColor = contract.expected_overage > 0 ? 'var(--danger)' : contract.expected_overage < 0 ? 'var(--ok)' : 'var(--text-3)';
+  const exposureColor = contract.total_exposure > earmarked && earmarked > 0 ? 'var(--danger)' : 'var(--text-2)';
+
+  return (
+    <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+      <td style={{ padding: '7px 12px 7px 56px' }}>
+        <div style={{ fontSize: 13, color: 'var(--text-1)', fontWeight: 500 }}>{contract.vendor_name}</div>
+        {contract.description && (
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>{contract.description}</div>
+        )}
+        {contract.co_total > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--accent-2)', marginTop: 1 }}>
+            +{fmt.money(contract.co_total)} in approved COs → commitment {fmt.money(contract.commitment)}
+          </div>
+        )}
+        {(contract.tm_total > 0 || contract.exp_total > 0) && (
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>
+            T&M {fmt.money(contract.tm_total)} · Expenses {fmt.money(contract.exp_total)}
+          </div>
+        )}
+      </td>
+      <MoneyCell val={earmarked} dim />
+      <MoneyCell val={contract.total_value} dim />
+      <MoneyCell val={contract.expected_overage} color={overageColor} signed dim />
+      <td style={{ padding: '7px 12px', textAlign: 'right', color: 'var(--text-3)', fontSize: 12 }}>—</td>
+      <MoneyCell val={contract.total_exposure} color={exposureColor} dim />
+    </tr>
+  );
+}
+
+function MoneyCell({ val, bold, color, signed, dim }) {
+  const n = Number(val) || 0;
+  const displayColor = color || (dim ? 'var(--text-2)' : 'var(--text-1)');
+  const prefix = signed && n > 0 ? '+' : '';
+  return (
+    <td style={{
+      textAlign: 'right',
+      padding: '9px 12px',
+      fontFamily: 'var(--mono)',
+      fontSize: 13,
+      fontWeight: bold ? 700 : 500,
+      color: displayColor,
+      whiteSpace: 'nowrap',
+    }}>
+      {prefix}{fmt.money(n)}
+    </td>
+  );
+}
+
 function InitBudgetModal({ projectId, codes, existing, onClose, onSaved }) {
-  // Pre-populate amounts with existing current_amounts; user can add new codes too.
-  const existingByCode = new Map(existing.map((r) => [r.qb_code_id, r.current_amount]));
+  const existingByCode = new Map((existing || []).map(r => [r.qb_code_id, r.budget]));
   const [amounts, setAmounts] = React.useState(() => {
     const o = {};
     for (const c of codes) {
@@ -191,30 +274,30 @@ function InitBudgetModal({ projectId, codes, existing, onClose, onSaved }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e)=>e.stopPropagation()} style={{ width: 640 }}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 640 }}>
         <div className="modal-header">
           <strong>Initialize / update budget lines</strong>
           <button onClick={onClose}>×</button>
         </div>
         <div className="modal-body">
           <p className="hint">
-            Enter a budget amount next to each QB code you want to track. Leave blank to skip.
-            First-time entries set the <em>original</em> amount; updates change the <em>current</em> amount.
+            Enter a budget amount for each QB code. Leave blank to skip.
+            First-time entries set the original amount; updates change the current amount.
           </p>
           <table className="data">
             <thead>
               <tr><th>Code</th><th>Name</th><th className="num">Amount</th></tr>
             </thead>
             <tbody>
-              {codes.map((c) => (
+              {codes.map(c => (
                 <tr key={c.id}>
                   <td style={{ paddingLeft: 8 + (c.level || 0) * 16 }} className="code">{c.code}</td>
                   <td>{c.name}</td>
                   <td className="num">
                     <input type="number" step="0.01"
-                           value={amounts[c.id] ?? ''}
-                           onChange={(e)=>setAmounts({ ...amounts, [c.id]: e.target.value })}
-                           style={{ textAlign: 'right', maxWidth: 140, display:'inline-block' }} />
+                      value={amounts[c.id] ?? ''}
+                      onChange={e => setAmounts({ ...amounts, [c.id]: e.target.value })}
+                      style={{ textAlign: 'right', maxWidth: 140, display: 'inline-block' }} />
                   </td>
                 </tr>
               ))}

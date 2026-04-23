@@ -117,6 +117,161 @@ router.put('/:id/budget-lines/:lineId', requireAuth, async (req, res, next) => {
   }
 });
 
+// PUT /api/projects/:id/budget-lines/:lineId/uncommitted
+// Body: { uncommitted_estimate } — PM estimate field, not audited
+router.put('/:id/budget-lines/:lineId/uncommitted', requireAuth, async (req, res, next) => {
+  try {
+    const projectId = Number(req.params.id);
+    const lineId    = Number(req.params.lineId);
+    if (!(await projects.userCanAccess(req.session.userId, projectId))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const val = Number(req.body?.uncommitted_estimate);
+    if (!Number.isFinite(val)) return res.status(400).json({ error: 'uncommitted_estimate required' });
+    const r = await pool.query(
+      `UPDATE budget_lines SET uncommitted_estimate = $1, updated_at = NOW()
+       WHERE id = $2 AND project_id = $3 RETURNING *`,
+      [val, lineId, projectId]
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+
+// GET /api/projects/:id/budget/tree — hierarchical budget view
+router.get('/:id/budget/tree', requireAuth, async (req, res, next) => {
+  try {
+    const projectId = Number(req.params.id);
+    if (!(await projects.userCanAccess(req.session.userId, projectId))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const result = await pool.query(`
+      WITH contract_data AS (
+        SELECT
+          cl.qb_code_id,
+          cl.amount           AS cl_amount,
+          c.id                AS contract_id,
+          c.vendor_name,
+          c.description,
+          c.earmarked_amount,
+          c.total_value,
+          COALESCE(co.co_total,        0) AS co_total,
+          COALESCE(inv_fixed.invoiced,  0) AS invoiced_fixed,
+          COALESCE(inv_tm.tm_total,    0) AS tm_total,
+          COALESCE(inv_exp.exp_total,  0) AS exp_total
+        FROM contract_lines cl
+        JOIN contracts c ON c.id = cl.contract_id
+          AND c.project_id = $1
+          AND c.status != 'closed'
+        LEFT JOIN (
+          SELECT contract_id, SUM(amount) AS co_total
+          FROM change_orders WHERE status = 'approved'
+          GROUP BY contract_id
+        ) co ON co.contract_id = c.id
+        LEFT JOIN (
+          SELECT contract_id, SUM(amount) AS invoiced
+          FROM invoices
+          WHERE status IN ('approved','pushed','paid')
+            AND COALESCE(invoice_type,'fixed') = 'fixed'
+          GROUP BY contract_id
+        ) inv_fixed ON inv_fixed.contract_id = c.id
+        LEFT JOIN (
+          SELECT contract_id, SUM(amount) AS tm_total
+          FROM invoices
+          WHERE status IN ('approved','pushed','paid') AND invoice_type = 'tm'
+          GROUP BY contract_id
+        ) inv_tm ON inv_tm.contract_id = c.id
+        LEFT JOIN (
+          SELECT contract_id, SUM(amount) AS exp_total
+          FROM invoices
+          WHERE status IN ('approved','pushed','paid') AND invoice_type = 'expense'
+          GROUP BY contract_id
+        ) inv_exp ON inv_exp.contract_id = c.id
+      )
+      SELECT
+        bl.id                 AS budget_line_id,
+        bl.qb_code_id,
+        bl.current_amount     AS budget,
+        bl.uncommitted_estimate,
+        q.code, q.name, q.parent_id, q.level,
+        COALESCE(SUM(cd.cl_amount), 0) AS contracted,
+        JSON_AGG(
+          JSON_BUILD_OBJECT(
+            'contract_id',      cd.contract_id,
+            'vendor_name',      cd.vendor_name,
+            'description',      cd.description,
+            'earmarked_amount', cd.earmarked_amount,
+            'total_value',      cd.total_value,
+            'cl_amount',        cd.cl_amount,
+            'co_total',         cd.co_total,
+            'invoiced_fixed',   cd.invoiced_fixed,
+            'tm_total',         cd.tm_total,
+            'exp_total',        cd.exp_total
+          ) ORDER BY cd.vendor_name
+        ) FILTER (WHERE cd.contract_id IS NOT NULL) AS contracts
+      FROM budget_lines bl
+      JOIN qb_codes q ON q.id = bl.qb_code_id
+      LEFT JOIN contract_data cd ON cd.qb_code_id = bl.qb_code_id
+      WHERE bl.project_id = $1
+      GROUP BY bl.id, bl.qb_code_id, bl.current_amount, bl.uncommitted_estimate,
+               q.code, q.name, q.parent_id, q.level
+      ORDER BY q.code
+    `, [projectId]);
+
+    const rows = result.rows.map(r => {
+      const budget      = Number(r.budget) || 0;
+      const contracted  = Number(r.contracted) || 0;
+      const uncommitted = Number(r.uncommitted_estimate) || 0;
+      const contracts   = (r.contracts || []).map(c => {
+        const tv         = Number(c.total_value) || 0;
+        const co         = Number(c.co_total) || 0;
+        const tm         = Number(c.tm_total) || 0;
+        const exp        = Number(c.exp_total) || 0;
+        const earmarked  = Number(c.earmarked_amount) || 0;
+        const commitment = tv + co;
+        const exposure   = commitment + tm + exp;
+        return {
+          ...c,
+          total_value:      tv,
+          co_total:         co,
+          tm_total:         tm,
+          exp_total:        exp,
+          earmarked_amount: earmarked,
+          commitment,
+          total_exposure:   exposure,
+          expected_overage: tv - earmarked,
+        };
+      });
+      const totalExposure = contracted + uncommitted;
+      return {
+        budget_line_id:       r.budget_line_id,
+        qb_code_id:           r.qb_code_id,
+        code:                 r.code,
+        name:                 r.name,
+        parent_id:            r.parent_id,
+        level:                Number(r.level) || 0,
+        budget,
+        contracted,
+        uncommitted_estimate: uncommitted,
+        expected_overage:     contracted - budget,
+        total_exposure:       totalExposure,
+        contracts,
+      };
+    });
+
+    const totals = rows.reduce((acc, r) => ({
+      budget:           acc.budget           + r.budget,
+      contracted:       acc.contracted       + r.contracted,
+      uncommitted:      acc.uncommitted      + r.uncommitted_estimate,
+      expected_overage: acc.expected_overage + r.expected_overage,
+      total_exposure:   acc.total_exposure   + r.total_exposure,
+    }), { budget: 0, contracted: 0, uncommitted: 0, expected_overage: 0, total_exposure: 0 });
+
+    res.json({ codes: rows, totals });
+  } catch (err) { next(err); }
+});
+
 // GET /api/projects/:id/budget-lines/:lineId/history
 router.get('/:id/budget-lines/:lineId/history', requireAuth, async (req, res, next) => {
   try {

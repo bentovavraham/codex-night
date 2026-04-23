@@ -319,6 +319,10 @@ DO $$ BEGIN ALTER TABLE tm_charges ADD COLUMN change_order_id INTEGER REFERENCES
 -- represent additional costs (T&M hours billed, reimbursables) and do NOT erode the fixed commitment.
 DO $$ BEGIN ALTER TABLE invoices ADD COLUMN invoice_type VARCHAR(16) NOT NULL DEFAULT 'fixed'; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
+-- Budget tree view additions
+DO $$ BEGIN ALTER TABLE budget_lines ADD COLUMN uncommitted_estimate NUMERIC(14,2) NOT NULL DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE change_orders ADD COLUMN qb_code_id INTEGER REFERENCES qb_codes(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
 -- contract_expenses
 DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN pm_approved_by INTEGER REFERENCES users(id); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE contract_expenses ADD COLUMN pm_approved_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;

@@ -52,15 +52,16 @@ router.post('/contracts/:id/change-orders', requireAuth, async (req, res, next) 
     const contractId = Number(req.params.id);
     const access = await userCanAccessContract(req.session.userId, contractId);
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
-    const { co_number, description, amount, file_reference } = req.body || {};
+    const { co_number, description, amount, file_reference, qb_code_id } = req.body || {};
     if (!description || amount == null) return res.status(400).json({ error: 'description and amount required' });
     const amt = Number(amount);
     if (!Number.isFinite(amt)) return res.status(400).json({ error: 'invalid amount' });
+    const qbId = qb_code_id ? Number(qb_code_id) : null;
     await client.query('BEGIN');
     const result = await client.query(
-      `INSERT INTO change_orders (contract_id, co_number, description, amount, file_reference, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [contractId, co_number || null, description, amt, file_reference || null, req.session.userId]);
+      `INSERT INTO change_orders (contract_id, co_number, description, amount, file_reference, created_by, qb_code_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [contractId, co_number || null, description, amt, file_reference || null, req.session.userId, qbId]);
     await logCO(client, result.rows[0].id, 'created',
       `Created CO${co_number ? ' ' + co_number : ''}: ${description} for $${amt.toFixed(2)}`, req.session.userId);
     await client.query('COMMIT');
@@ -76,7 +77,7 @@ router.put('/change-orders/:id', requireAuth, async (req, res, next) => {
     const coId = Number(req.params.id);
     const access = await userCanAccessCO(req.session.userId, coId);
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
-    const { co_number, description, amount, file_reference } = req.body || {};
+    const { co_number, description, amount, file_reference, qb_code_id } = req.body || {};
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE change_orders SET
@@ -84,9 +85,10 @@ router.put('/change-orders/:id', requireAuth, async (req, res, next) => {
          description = COALESCE($3, description),
          amount = COALESCE($4, amount),
          file_reference = COALESCE($5, file_reference),
+         qb_code_id = CASE WHEN $6::integer IS NOT NULL THEN $6::integer ELSE qb_code_id END,
          updated_at = NOW()
        WHERE id = $1 RETURNING *`,
-      [coId, co_number ?? null, description ?? null, amount ?? null, file_reference ?? null]);
+      [coId, co_number ?? null, description ?? null, amount ?? null, file_reference ?? null, qb_code_id ?? null]);
     await logCO(client, coId, 'edited', 'Updated change order', req.session.userId);
     await client.query('COMMIT');
     res.json(result.rows[0]);

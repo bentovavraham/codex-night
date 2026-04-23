@@ -182,10 +182,16 @@ function NewCOModal({ contractId, onClose, onSaved }) {
   const [coNumber, setCoNumber] = React.useState('');
   const [description, setDescription] = React.useState('');
   const [amount, setAmount] = React.useState('');
+  const [qbCodeId, setQbCodeId] = React.useState('');
+  const [qbCodes, setQbCodes] = React.useState([]);
   const [fileRef, setFileRef] = React.useState(null);
   const [uploading, setUploading] = React.useState(false);
   const [err, setErr] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    api.getQbCodes().then(r => setQbCodes(r.flat || [])).catch(() => {});
+  }, []);
 
   async function onFile(f) {
     setUploading(true);
@@ -206,6 +212,7 @@ function NewCOModal({ contractId, onClose, onSaved }) {
         description,
         amount: Number(amount),
         file_reference: fileRef?.file_reference || null,
+        qb_code_id: qbCodeId ? Number(qbCodeId) : null,
       });
       onSaved();
     } catch (e) { setErr(e.message); }
@@ -267,6 +274,15 @@ function NewCOModal({ contractId, onClose, onSaved }) {
                 <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
               </div>
               <div className="full">
+                <label data-tip="QB code this change order should be attributed to in the budget view">QB Code (optional)</label>
+                <select value={qbCodeId} onChange={e => setQbCodeId(e.target.value)}>
+                  <option value="">— unassigned —</option>
+                  {qbCodes.map(c => (
+                    <option key={c.id} value={c.id}>{'  '.repeat(c.level || 0)}{c.code} — {c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="full">
                 <label data-tip="Describe what changed in scope and why — used for audit trail and reporting">Description</label>
                 <textarea rows={4} value={description} onChange={e => setDescription(e.target.value)} placeholder="Describe the scope change…" />
               </div>
@@ -290,8 +306,14 @@ function EditCOModal({ co, onClose, onSaved }) {
   const [coNumber, setCoNumber] = React.useState(co.co_number || '');
   const [description, setDescription] = React.useState(co.description || '');
   const [amount, setAmount] = React.useState(String(co.amount || ''));
+  const [qbCodeId, setQbCodeId] = React.useState(String(co.qb_code_id || ''));
+  const [qbCodes, setQbCodes] = React.useState([]);
   const [err, setErr] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    api.getQbCodes().then(r => setQbCodes(r.flat || [])).catch(() => {});
+  }, []);
 
   async function save() {
     setErr(null);
@@ -302,6 +324,7 @@ function EditCOModal({ co, onClose, onSaved }) {
         co_number: coNumber || null,
         description,
         amount: Number(amount),
+        qb_code_id: qbCodeId ? Number(qbCodeId) : null,
       });
       toast('Change order updated');
       onSaved();
@@ -332,6 +355,15 @@ function EditCOModal({ co, onClose, onSaved }) {
             <div>
               <label data-tip="Dollar amount of this change order">Amount ($)</label>
               <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+            </div>
+            <div className="full">
+              <label data-tip="QB code attribution for budget tree view">QB Code (optional)</label>
+              <select value={qbCodeId} onChange={e => setQbCodeId(e.target.value)}>
+                <option value="">— unassigned —</option>
+                {qbCodes.map(c => (
+                  <option key={c.id} value={c.id}>{'  '.repeat(c.level || 0)}{c.code} — {c.name}</option>
+                ))}
+              </select>
             </div>
             <div className="full">
               <label data-tip="Scope change description — used in audit trail">Description</label>

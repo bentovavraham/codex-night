@@ -43,10 +43,12 @@ window.api = {
 
   getQbCodes:        ()                 => request('GET',  '/api/qb-codes'),
 
-  getBudget:         (id)               => request('GET',  `/api/projects/${id}/budget`),
-  initBudget:        (id, lines)        => request('POST', `/api/projects/${id}/budget/initialize`, { lines }),
-  updateBudgetLine:  (pid, lid, data)   => request('PUT',  `/api/projects/${pid}/budget-lines/${lid}`, data),
-  getBudgetHistory:  (pid, lid)         => request('GET',  `/api/projects/${pid}/budget-lines/${lid}/history`),
+  getBudget:            (id)               => request('GET',  `/api/projects/${id}/budget`),
+  getBudgetTree:        (id)               => request('GET',  `/api/projects/${id}/budget/tree`),
+  initBudget:           (id, lines)        => request('POST', `/api/projects/${id}/budget/initialize`, { lines }),
+  updateBudgetLine:     (pid, lid, data)   => request('PUT',  `/api/projects/${pid}/budget-lines/${lid}`, data),
+  updateUncommitted:    (pid, lid, val)    => request('PUT',  `/api/projects/${pid}/budget-lines/${lid}/uncommitted`, { uncommitted_estimate: val }),
+  getBudgetHistory:     (pid, lid)         => request('GET',  `/api/projects/${pid}/budget-lines/${lid}/history`),
 
   listContracts:     (pid, filters={})  => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([,v])=>v)).toString();
