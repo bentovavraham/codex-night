@@ -1,11 +1,11 @@
 // ProjectList — portfolio table. Dense, sortable, drill-down to QB code breakdown.
 
 const HEALTH = {
-  ok:      { border: '#16a34a', bg: 'rgba(22,163,74,0.03)',  label: 'OK',        text: '#166534' },
-  caution: { border: '#d97706', bg: 'rgba(217,119,6,0.04)',  label: 'CAUTION',   text: '#92400e' },
-  warning: { border: '#c4522a', bg: 'rgba(196,82,42,0.04)',  label: 'WARNING',   text: '#9a3412' },
-  danger:  { border: '#dc2626', bg: 'rgba(220,38,38,0.05)',  label: 'DANGER',    text: '#991b1b' },
-  none:    { border: '#cbd5e1', bg: 'transparent',           label: 'NO BUDGET', text: '#64748b' },
+  ok:      { border: '#16a34a', bg: 'rgba(22,163,74,0.035)', label: 'OK',        text: '#15803d', dot: '#16a34a' },
+  caution: { border: '#d97706', bg: 'rgba(217,119,6,0.04)',  label: 'CAUTION',   text: '#b45309', dot: '#d97706' },
+  warning: { border: '#c4522a', bg: 'rgba(196,82,42,0.04)',  label: 'WARNING',   text: '#c4522a', dot: '#c4522a' },
+  danger:  { border: '#dc2626', bg: 'rgba(220,38,38,0.045)', label: 'DANGER',    text: '#dc2626', dot: '#dc2626' },
+  none:    { border: '#d1cbc2', bg: 'transparent',           label: 'NO BUDGET', text: '#9c9189', dot: '#d1cbc2' },
 };
 
 window.ProjectList = function ProjectList({ onOpen }) {
@@ -80,14 +80,14 @@ window.ProjectList = function ProjectList({ onOpen }) {
   if (loading) return <div className="empty" style={{ paddingTop: 80 }}>Loading projects…</div>;
 
   return (
-    <div style={{ padding: '24px 28px' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 18 }}>
+    <div style={{ padding: '28px 32px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 800, marginBottom: 3, letterSpacing: '-0.02em' }}>Projects</h1>
-          <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4, letterSpacing: '-0.025em', color: 'var(--text-1)' }}>Projects</h1>
+          <div style={{ fontSize: 13, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 8 }}>
             {projects.length} project{projects.length !== 1 ? 's' : ''}
             {totalPending > 0 && (
-              <span style={{ marginLeft: 8, padding: '1px 7px', borderRadius: 10, background: '#dc2626', color: '#fff', fontSize: 11, fontWeight: 700 }}>
+              <span style={{ padding: '2px 8px', borderRadius: 10, background: '#dc2626', color: '#fff', fontSize: 11, fontWeight: 700, letterSpacing: '0.02em' }}>
                 {totalPending} pending
               </span>
             )}
@@ -101,10 +101,10 @@ window.ProjectList = function ProjectList({ onOpen }) {
       {projects.length === 0 ? (
         <div className="empty">No projects yet. Create one to get started.</div>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 980, borderCollapse: 'collapse', fontSize: 12 }}>
+        <div style={{ overflowX: 'auto', borderRadius: 10, border: '1px solid var(--border-2)', boxShadow: '0 2px 8px rgba(28,24,20,0.08), 0 1px 3px rgba(28,24,20,0.05)' }}>
+          <table style={{ width: '100%', minWidth: 1060, borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ borderBottom: '2px solid var(--border)' }}>
+              <tr style={{ background: '#e8e3db', borderBottom: '2px solid var(--border-2)' }}>
                 <PLH left onClick={() => handleSort('name')} active={sortCol==='name'} dir={sortDir}>Project</PLH>
                 <PLH onClick={() => handleSort('total_earmarked')} active={sortCol==='total_earmarked'} dir={sortDir} tip="Sum of earmarked amounts on active contracts">Budget</PLH>
                 <PLH onClick={() => handleSort('total_contract_value')} active={sortCol==='total_contract_value'} dir={sortDir} tip="Original signed contract value (excluding COs)">Contracted</PLH>
@@ -119,8 +119,8 @@ window.ProjectList = function ProjectList({ onOpen }) {
             </thead>
             <tbody>
               {/* Firm-wide totals */}
-              <tr style={{ background: 'var(--surface-2)', borderBottom: '2px solid var(--border)' }}>
-                <td style={{ padding: '9px 10px 9px 34px', fontWeight: 700, fontSize: 12, color: 'var(--text-2)', whiteSpace: 'nowrap' }}>
+              <tr style={{ background: '#ede8e0', borderBottom: '2px solid var(--border-2)' }}>
+                <td style={{ padding: '13px 14px 13px 40px', fontWeight: 700, fontSize: 14, color: 'var(--text-1)', whiteSpace: 'nowrap', letterSpacing: '-0.015em', borderRight: '1px solid var(--border)' }}>
                   All Projects · {projects.length}
                 </td>
                 <PLM val={firmTotals.budget}     bold muted={firmTotals.budget === 0} />
@@ -128,10 +128,10 @@ window.ProjectList = function ProjectList({ onOpen }) {
                 <PLM val={firmTotals.co}         bold muted={firmTotals.co === 0} />
                 <PLM val={firmTotals.tm_exp}     bold color={firmTotals.tm_exp > 0 ? '#6d28d9' : null} muted={firmTotals.tm_exp === 0} />
                 <PLM val={firmTotals.exposure}   bold />
-                <td style={{ padding: '9px 12px', textAlign: 'right', color: 'var(--text-3)' }}>—</td>
+                <td style={{ padding: '13px 16px', textAlign: 'right', fontSize: 14, color: 'rgba(26,22,18,0.22)', borderRight: '1px solid var(--border)' }}>—</td>
                 <PLM val={firmTotals.invoiced}   bold />
                 <PLM val={firmTotals.paid}       bold color={firmTotals.paid > 0 ? '#16a34a' : null} muted={firmTotals.paid === 0} />
-                <td style={{ padding: '9px 12px', textAlign: 'right', color: 'var(--text-3)' }}>—</td>
+                <td style={{ padding: '13px 16px', textAlign: 'right', fontSize: 14, color: 'rgba(26,22,18,0.22)' }}>—</td>
               </tr>
 
               {sorted.map(p => (
@@ -144,7 +144,7 @@ window.ProjectList = function ProjectList({ onOpen }) {
                   />
                   {expanded[p.id] && (
                     <tr>
-                      <td colSpan={10} style={{ padding: 0, borderBottom: '2px solid var(--border)' }}>
+                      <td colSpan={10} style={{ padding: 0, borderBottom: '2px solid var(--border-2)', borderLeft: '4px solid var(--border-2)' }}>
                         <ExpandedTree tree={treeCache[p.id]} />
                       </td>
                     </tr>
@@ -194,6 +194,7 @@ window.ProjectList = function ProjectList({ onOpen }) {
 // ─── Project row ──────────────────────────────────────────────────────────────
 
 function PortfolioRow({ p, isExpanded, onToggle, onOpen }) {
+  const [hovered, setHovered] = React.useState(false);
   const h          = HEALTH[p.health] || HEALTH.none;
   const hasBudget  = (Number(p.total_earmarked) || 0) > 0;
   const earmarked  = Number(p.total_earmarked)      || 0;
@@ -207,105 +208,107 @@ function PortfolioRow({ p, isExpanded, onToggle, onOpen }) {
   const pct        = Number(p.budget_used_pct);
   const pending    = (Number(p.pending_invoices)||0) + (Number(p.pending_cos)||0);
 
-  const rowBg = isExpanded ? '#f5f4f1' : h.bg;
+  const baseBg = isExpanded ? '#ede9e2' : h.bg;
+  const rowBg  = hovered && !isExpanded ? 'rgba(26,22,18,0.025)' : baseBg;
 
   return (
-    <tr style={{
-      borderBottom: isExpanded ? 'none' : '1px solid var(--border)',
-      borderLeft: `3px solid ${h.border}`,
-      background: rowBg,
-    }}>
+    <tr
+      style={{
+        borderBottom: isExpanded ? 'none' : '1px solid var(--border)',
+        borderLeft: `4px solid ${h.border}`,
+        background: rowBg,
+        transition: 'background 0.1s',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       {/* Name */}
-      <td style={{ padding: '8px 10px 8px 10px', minWidth: 200 }}>
+      <td style={{ padding: '12px 12px 12px 8px', minWidth: 220, borderRight: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <button
             onClick={e => { e.stopPropagation(); onToggle(); }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 3px', color: 'var(--text-3)', fontSize: 9, lineHeight: 1, flexShrink: 0, borderRadius: 3 }}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '2px 4px', color: isExpanded ? 'var(--accent)' : 'rgba(26,22,18,0.3)',
+              fontSize: 10, lineHeight: 1, flexShrink: 0, borderRadius: 3,
+              transition: 'color 0.1s',
+            }}
             title={isExpanded ? 'Collapse' : 'Expand QB breakdown'}
           >
             {isExpanded ? '▾' : '▸'}
           </button>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'nowrap' }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: h.dot, flexShrink: 0, display: 'inline-block' }} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'nowrap' }}>
               <span
                 onClick={() => onOpen(p)}
-                style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                onMouseEnter={e => { e.target.style.color = 'var(--accent)'; e.target.style.textDecoration = 'underline'; }}
-                onMouseLeave={e => { e.target.style.color = 'var(--text-1)'; e.target.style.textDecoration = 'none'; }}
+                title={p.description || undefined}
+                style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-1)', cursor: 'pointer', whiteSpace: 'nowrap', letterSpacing: '-0.015em' }}
+                onMouseEnter={e => { e.target.style.color = 'var(--accent)'; }}
+                onMouseLeave={e => { e.target.style.color = 'var(--text-1)'; }}
               >
                 {p.name}
               </span>
-              <span style={{
-                fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3, flexShrink: 0,
-                textTransform: 'uppercase', letterSpacing: '0.06em',
-                background: p.status === 'active' ? 'rgba(22,163,74,0.08)' : 'rgba(148,163,184,0.15)',
-                color: p.status === 'active' ? '#166534' : '#64748b',
-              }}>{p.status}</span>
+              {p.status !== 'active' && (
+                <span style={{
+                  fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 4, flexShrink: 0,
+                  background: 'rgba(0,0,0,0.07)', color: '#7c7269', letterSpacing: '0.03em', textTransform: 'uppercase',
+                }}>{p.status}</span>
+              )}
               {pending > 0 && (
-                <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8, background: '#dc2626', color: '#fff', flexShrink: 0 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 8, background: '#dc2626', color: '#fff', flexShrink: 0 }}>
                   {pending}
                 </span>
               )}
             </div>
-            {p.description && (
-              <div style={{ fontSize: 11, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 230, marginTop: 1 }}>
-                {p.description}
-              </div>
-            )}
           </div>
         </div>
       </td>
 
       {/* Budget */}
-      {hasBudget
-        ? <PLM val={earmarked} />
-        : <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text-3)', fontSize: 11 }}>—</td>}
+      {hasBudget ? <PLM val={earmarked} /> : <PLDash />}
 
       {/* Contracted */}
       <PLM val={contracted} muted={contracted === 0} />
 
       {/* COs */}
       {co > 0
-        ? <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: '#92400e', fontWeight: 500, whiteSpace: 'nowrap' }}>+{fmt.money(co)}</td>
-        : <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text-3)', fontSize: 11 }}>—</td>}
+        ? <td style={{ padding: '12px 16px', textAlign: 'right', borderRight: '1px solid var(--border)', whiteSpace: 'nowrap', ...PL_NUM, color: '#b45309' }}>+{fmt.money(co)}</td>
+        : <PLDash />}
 
       {/* T&M + Exp */}
-      {tmExp > 0
-        ? <PLM val={tmExp} color="#6d28d9" />
-        : <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text-3)', fontSize: 11 }}>—</td>}
+      {tmExp > 0 ? <PLM val={tmExp} color="#7c3aed" /> : <PLDash />}
 
       {/* Exposure */}
-      <PLM val={exposure} color={hasBudget && exposure > earmarked ? 'var(--danger)' : 'var(--text-1)'} />
+      <PLM val={exposure} color={hasBudget && exposure > earmarked ? '#dc2626' : 'var(--text-1)'} />
 
       {/* % Used */}
-      <td style={{ padding: '8px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+      <td style={{ padding: '12px 16px', textAlign: 'right', whiteSpace: 'nowrap', borderRight: '1px solid var(--border)' }}>
         {hasBudget && pct != null && !isNaN(pct) ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: h.text }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700, color: h.text, fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em' }}>
               {pct.toFixed(0)}%
             </span>
-            <div style={{ width: 48, height: 3, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min(pct, 100)}%`, height: '100%', background: h.border, borderRadius: 2 }} />
+            <div style={{ width: 56, height: 5, borderRadius: 3, background: 'rgba(26,22,18,0.1)', overflow: 'hidden' }}>
+              <div style={{ width: `${Math.min(pct, 100)}%`, height: '100%', background: h.border, borderRadius: 3, transition: 'width 0.4s' }} />
             </div>
           </div>
-        ) : <span style={{ color: 'var(--text-3)', fontSize: 11 }}>—</span>}
+        ) : <span style={{ fontSize: 14, color: 'rgba(26,22,18,0.18)' }}>—</span>}
       </td>
 
       {/* Invoiced */}
       <PLM val={invoiced} muted={invoiced === 0} />
 
       {/* Paid */}
-      {paid > 0
-        ? <PLM val={paid} color="#16a34a" />
-        : <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text-3)', fontSize: 11 }}>—</td>}
+      {paid > 0 ? <PLM val={paid} color="#16a34a" /> : <PLDash />}
 
       {/* Buffer */}
-      <td style={{ padding: '8px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+      <td style={{ padding: '12px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
         {hasBudget ? (
           buffer >= 0
-            ? <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: '#16a34a', fontWeight: 500 }}>{fmt.money(buffer)}</span>
-            : <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>({fmt.money(Math.abs(buffer))})</span>
-        ) : <span style={{ color: 'var(--text-3)', fontSize: 11 }}>—</span>}
+            ? <span style={{ ...PL_NUM, color: '#16a34a', fontWeight: 600 }}>{fmt.money(buffer)}</span>
+            : <span style={{ ...PL_NUM, color: '#dc2626', fontWeight: 700 }}>({fmt.money(Math.abs(buffer))})</span>
+        ) : <span style={{ fontSize: 14, color: 'rgba(26,22,18,0.18)' }}>—</span>}
       </td>
     </tr>
   );
@@ -317,17 +320,17 @@ const PL_COLS = '1fr 82px 88px 82px 88px';
 
 function ExpandedTree({ tree }) {
   if (tree === 'loading') return (
-    <div style={{ padding: '14px 24px 14px 36px', fontSize: 12, color: 'var(--text-3)', background: '#f5f4f1' }}>
+    <div style={{ padding: '16px 24px 16px 56px', fontSize: 13, color: 'rgba(26,22,18,0.4)', background: '#f2ede6', fontStyle: 'italic' }}>
       Loading QB breakdown…
     </div>
   );
   if (tree === 'error') return (
-    <div style={{ padding: '14px 24px 14px 36px', fontSize: 12, color: 'var(--danger)', background: '#f5f4f1' }}>
+    <div style={{ padding: '16px 24px 16px 56px', fontSize: 13, color: 'var(--danger)', background: '#f2ede6' }}>
       Could not load breakdown.
     </div>
   );
   if (!tree || tree.codes.length === 0) return (
-    <div style={{ padding: '14px 24px 14px 36px', fontSize: 12, color: 'var(--text-3)', background: '#f5f4f1' }}>
+    <div style={{ padding: '16px 24px 16px 56px', fontSize: 13, color: 'rgba(26,22,18,0.4)', background: '#f2ede6' }}>
       No QB code data for this project.
     </div>
   );
@@ -335,11 +338,11 @@ function ExpandedTree({ tree }) {
   const sections = plBuildSections(tree.codes);
 
   return (
-    <div style={{ background: '#f5f4f1', borderTop: '1px solid var(--border)' }}>
+    <div style={{ background: '#f2ede6', borderTop: '1px solid var(--border-2)' }}>
       {/* Sub-header */}
-      <div style={{ display: 'grid', gridTemplateColumns: PL_COLS, padding: '5px 12px 5px 52px', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: PL_COLS, padding: '8px 16px 8px 56px', borderBottom: '1px solid var(--border-2)', background: '#e8e3db' }}>
         {['QB Code', 'Budget', 'Contracted', 'T&M+Exp', 'Spent'].map((h, i) => (
-          <span key={h} style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: i > 0 ? 'right' : 'left' }}>{h}</span>
+          <span key={h} style={{ fontSize: 10, fontWeight: 700, color: 'rgba(26,22,18,0.5)', textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: i > 0 ? 'right' : 'left' }}>{h}</span>
         ))}
       </div>
 
@@ -354,21 +357,18 @@ function ExpandedTree({ tree }) {
 
 function PLSectionBlock({ section }) {
   const [open, setOpen] = React.useState(true);
-  const invoicedFixed = section.total_spent - section.tm_exp_total;
   return (
     <>
       <div
         onClick={() => setOpen(o => !o)}
-        style={{ display: 'grid', gridTemplateColumns: PL_COLS, padding: '6px 12px 6px 36px', cursor: 'pointer', borderTop: '1px solid var(--border)', background: 'rgba(0,0,0,0.025)' }}
+        style={{ display: 'grid', gridTemplateColumns: PL_COLS, padding: '7px 14px 7px 36px', cursor: 'pointer', borderTop: '1px solid var(--border)', background: 'rgba(0,0,0,0.022)' }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 9, color: 'var(--text-3)', flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-3)', marginRight: 4, flexShrink: 0 }}>{section.code}</span>
-          <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--text-1)' }}>{section.name}</span>
-          <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 4 }}>
-            · {section.children.length} code{section.children.length !== 1 ? 's' : ''}
-            {section.children.reduce((s,r) => s + r.contracts.length, 0) > 0 &&
-              ` · ${section.children.reduce((s,r) => s + r.contracts.length, 0)} contract${section.children.reduce((s,r) => s + r.contracts.length, 0) !== 1 ? 's' : ''}`}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ fontSize: 10, color: 'rgba(26,22,18,0.35)', flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'rgba(26,22,18,0.38)', flexShrink: 0 }}>{section.code}</span>
+          <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>{section.name}</span>
+          <span style={{ fontSize: 11, color: 'rgba(26,22,18,0.35)', marginLeft: 2 }}>
+            {section.children.length} line{section.children.length !== 1 ? 's' : ''}
           </span>
         </div>
         <PLG val={section.budget}      notSet={section.budget_not_set} bold />
@@ -386,13 +386,13 @@ function PLSectionBlock({ section }) {
 function PLQBBlock({ row, indent }) {
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: PL_COLS, padding: `5px 12px 5px ${indent}px`, borderTop: '0.5px solid var(--border)', background: 'rgba(255,255,255,0.35)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-3)', flexShrink: 0 }}>{row.code}</span>
-          <span style={{ fontSize: 12, color: 'var(--text-1)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</span>
+      <div style={{ display: 'grid', gridTemplateColumns: PL_COLS, padding: `6px 14px 6px ${indent}px`, borderTop: '1px solid rgba(0,0,0,0.045)', background: 'rgba(255,255,255,0.4)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'rgba(26,22,18,0.38)', flexShrink: 0 }}>{row.code}</span>
+          <span style={{ fontSize: 13, color: 'var(--text-1)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</span>
           {row.contracts.length > 0 && (
-            <span style={{ fontSize: 10, color: 'var(--text-3)', flexShrink: 0 }}>
-              · {row.contracts.length} contract{row.contracts.length !== 1 ? 's' : ''}
+            <span style={{ fontSize: 11, color: 'rgba(26,22,18,0.35)', flexShrink: 0 }}>
+              · {row.contracts.length}
             </span>
           )}
         </div>
@@ -402,7 +402,7 @@ function PLQBBlock({ row, indent }) {
         <PLG val={row.total_spent} />
       </div>
       {row.contracts.map(c => (
-        <PLContractBlock key={c.contract_id} c={c} indent={indent + 18} />
+        <PLContractBlock key={c.contract_id} c={c} indent={indent + 20} />
       ))}
     </>
   );
@@ -414,13 +414,13 @@ function PLContractBlock({ c, indent }) {
     ? new Date(c.contract_date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
     : null;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: PL_COLS, padding: `4px 12px 4px ${indent}px`, background: 'rgba(255,255,255,0.55)', borderTop: '0.5px solid rgba(0,0,0,0.05)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-        <span style={{ fontSize: 9, padding: '1px 4px', borderRadius: 3, background: 'rgba(37,99,235,0.08)', color: '#1e40af', fontWeight: 700, flexShrink: 0 }}>contract</span>
-        <span style={{ fontSize: 11, color: 'var(--text-1)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.vendor_name}</span>
-        {dateStr && <span style={{ fontSize: 10, color: 'var(--text-3)', flexShrink: 0 }}>{dateStr}</span>}
+    <div style={{ display: 'grid', gridTemplateColumns: PL_COLS, padding: `5px 14px 5px ${indent}px`, background: 'rgba(255,255,255,0.65)', borderTop: '1px solid rgba(0,0,0,0.03)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+        <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, background: 'rgba(37,99,235,0.07)', color: '#2563eb', fontWeight: 600, flexShrink: 0, letterSpacing: '0.01em' }}>contract</span>
+        <span style={{ fontSize: 12, color: 'var(--text-1)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.vendor_name}</span>
+        {dateStr && <span style={{ fontSize: 11, color: 'rgba(26,22,18,0.38)', flexShrink: 0 }}>{dateStr}</span>}
         {c.co_total > 0 && (
-          <span style={{ fontSize: 10, color: '#92400e', fontWeight: 600, flexShrink: 0 }}>+{fmt.money(c.co_total)} CO</span>
+          <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600, flexShrink: 0 }}>+{fmt.money(c.co_total)}</span>
         )}
       </div>
       <PLG val={null} notSet />
@@ -474,6 +474,14 @@ function plBuildSections(codes) {
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
+const PL_NUM = {
+  fontFamily: 'var(--mono)',
+  fontSize: 14,
+  fontWeight: 500,
+  fontFeatureSettings: '"tnum" 1',
+  letterSpacing: '-0.01em',
+};
+
 // Table header
 function PLH({ children, onClick, tip, left, active, dir }) {
   return (
@@ -482,11 +490,17 @@ function PLH({ children, onClick, tip, left, active, dir }) {
       onClick={onClick}
       style={{
         textAlign: left ? 'left' : 'right',
-        padding: '8px 12px',
-        fontWeight: 600, fontSize: 10, color: active ? 'var(--text-1)' : 'var(--text-2)',
-        textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap',
+        padding: '11px 16px',
+        fontWeight: active ? 700 : 600,
+        fontSize: 11,
+        color: active ? 'var(--text-1)' : 'rgba(26,22,18,0.5)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.08em',
+        whiteSpace: 'nowrap',
         cursor: onClick ? 'pointer' : 'default',
         userSelect: 'none',
+        borderRight: '1px solid var(--border)',
+        transition: 'color 0.1s',
       }}
     >
       {children}{active ? (dir === 'asc' ? ' ↑' : ' ↓') : ''}
@@ -494,32 +508,46 @@ function PLH({ children, onClick, tip, left, active, dir }) {
   );
 }
 
-// Table money cell
+// Table money cell — shows — for zero+muted
 function PLM({ val, bold, color, muted }) {
+  const n = Number(val) || 0;
+  if (muted && n === 0) return <PLDash />;
   return (
     <td style={{
-      padding: '8px 12px', textAlign: 'right', whiteSpace: 'nowrap',
-      fontFamily: 'var(--mono)', fontSize: 12,
+      padding: '12px 16px', textAlign: 'right', whiteSpace: 'nowrap',
+      borderRight: '1px solid var(--border)',
+      ...PL_NUM,
       fontWeight: bold ? 700 : 500,
-      color: muted ? 'var(--text-3)' : color || 'var(--text-1)',
+      color: color || 'var(--text-1)',
     }}>
-      {fmt.money(Number(val) || 0)}
+      {fmt.money(n)}
     </td>
+  );
+}
+
+// Dash cell — for missing/zero values
+function PLDash() {
+  return (
+    <td style={{
+      padding: '12px 16px', textAlign: 'right', userSelect: 'none',
+      fontSize: 14, color: 'rgba(26,22,18,0.18)', borderRight: '1px solid var(--border)',
+    }}>—</td>
   );
 }
 
 // Grid money cell (inside expanded tree)
 function PLG({ val, bold, color, notSet, small }) {
   if (notSet || val === null) {
-    return <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--text-3)', padding: '0 0 0 4px' }}>—</div>;
+    return <div style={{ textAlign: 'right', fontSize: 13, color: 'rgba(26,22,18,0.22)' }}>—</div>;
   }
   const n = Number(val) || 0;
+  if (n === 0 && !bold) return <div style={{ textAlign: 'right', fontSize: 13, color: 'rgba(26,22,18,0.22)' }}>—</div>;
   return (
     <div style={{
       textAlign: 'right', fontFamily: 'var(--mono)',
-      fontSize: small ? 11 : 12, fontWeight: bold ? 700 : 500,
-      color: color || (n === 0 ? 'var(--text-3)' : 'var(--text-1)'),
-      padding: '0 0 0 4px',
+      fontSize: small ? 13 : 14, fontWeight: bold ? 700 : 500,
+      fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em',
+      color: color || 'var(--text-1)',
     }}>
       {fmt.money(n)}
     </div>
