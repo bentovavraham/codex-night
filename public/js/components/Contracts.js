@@ -70,98 +70,77 @@ window.Contracts = function Contracts({ projectId, initialContractId, onContract
   const totalInvoiced = contracts.reduce((s, c) => s + (Number(c.invoiced_amount) || 0), 0);
   const activeCount   = contracts.filter(c => c.status === 'active').length;
 
+  const CT_NUM = {
+    fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 500,
+    fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em',
+  };
+
   return (
     <div className="panel">
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Contracts</h2>
-          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3 }}>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.025em' }}>Contracts</h2>
+          <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
             {contracts.length} contract{contracts.length !== 1 ? 's' : ''}
-            {activeCount > 0 && <span style={{ marginLeft: 8, color: 'var(--ok)', fontWeight: 600 }}>{activeCount} active</span>}
+            {activeCount > 0 && <span style={{ color: '#16a34a', fontWeight: 600 }}>{activeCount} active</span>}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <a href={`/api/projects/${projectId}/contracts/export`} target="_blank" className="btn" style={{ fontSize: 12 }}>Export CSV</a>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <a href={`/api/projects/${projectId}/contracts/export`} target="_blank" className="btn" style={{ fontSize: 13 }}>Export CSV</a>
           <button className="primary" onClick={() => setShowNew(true)}>+ New Contract</button>
         </div>
       </div>
 
-      {/* Project alert strip */}
+      {/* Alert strip */}
       {projectAlerts && projectAlerts.length > 0 && (() => {
-        const scopeCount     = projectAlerts.filter(f => f.scope_creep_sev).length;
+        const scopeCount      = projectAlerts.filter(f => f.scope_creep_sev).length;
         const overbilledCount = projectAlerts.filter(f => f.overbilled_sev).length;
-        const budgetCount    = projectAlerts.filter(f => f.budget_sev).length;
-        const hasCritical    = projectAlerts.some(f =>
+        const budgetCount     = projectAlerts.filter(f => f.budget_sev).length;
+        const hasCritical     = projectAlerts.some(f =>
           f.scope_creep_sev === 'critical' || f.overbilled_sev === 'critical' || f.budget_sev === 'critical'
         );
-        const hasHigh        = !hasCritical && projectAlerts.some(f =>
+        const hasHigh = !hasCritical && projectAlerts.some(f =>
           f.scope_creep_sev === 'high' || f.overbilled_sev === 'high' || f.budget_sev === 'high'
         );
-        const stripColor     = hasCritical ? '#dc2626' : hasHigh ? '#c4522a' : '#d97706';
-        const stripBg        = hasCritical ? '#fef2f2' : hasHigh ? '#fef3ee' : '#fffbeb';
-        const stripBorder    = hasCritical ? '#fecaca' : hasHigh ? '#f9b49a' : '#fde68a';
+        const sc = hasCritical ? '#dc2626' : hasHigh ? '#c4522a' : '#d97706';
         const pills = [
-          scopeCount     > 0 && { label: `${scopeCount} change order creep`,  key: 'scope' },
-          overbilledCount > 0 && { label: `${overbilledCount} overbilled`, key: 'over' },
-          budgetCount    > 0 && { label: `${budgetCount} budget pressure`, key: 'budget' },
+          scopeCount      > 0 && `${scopeCount} change order creep`,
+          overbilledCount > 0 && `${overbilledCount} overbilled`,
+          budgetCount     > 0 && `${budgetCount} budget pressure`,
         ].filter(Boolean);
         return (
           <div style={{
-            marginBottom: 16, padding: '10px 16px',
-            borderRadius: 8, border: `1px solid ${stripBorder}`,
-            background: stripBg, borderLeft: `4px solid ${stripColor}`,
-            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+            marginBottom: 18, padding: '11px 16px',
+            border: `1px solid ${sc}44`, borderLeft: `4px solid ${sc}`,
+            borderRadius: 8, background: `${sc}08`,
+            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
           }}>
-            <span style={{ fontSize: 14 }}>⚠</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: stripColor }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: sc }}>
               {projectAlerts.length} contract{projectAlerts.length !== 1 ? 's' : ''} need attention
             </span>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {pills.map(p => (
-                <span key={p.key} style={{
-                  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
-                  background: 'rgba(255,255,255,0.7)', color: stripColor,
-                  border: `1px solid ${stripBorder}`,
-                }}>{p.label}</span>
-              ))}
-            </div>
+            {pills.map((label, i) => (
+              <span key={i} style={{
+                fontSize: 11, fontWeight: 600, padding: '2px 9px', borderRadius: 10,
+                background: 'rgba(255,255,255,0.8)', color: sc, border: `1px solid ${sc}44`,
+              }}>{label}</span>
+            ))}
           </div>
         );
       })()}
 
-      {/* Summary strip */}
-      {contracts.length > 0 && (
-        <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
-          {[
-            { label: 'Total Contracted', value: fmt.money(totalValue) },
-            { label: 'Total Invoiced',   value: fmt.money(totalInvoiced) },
-            { label: 'Contracts',        value: contracts.length },
-          ].map((s, i) => (
-            <div key={i} style={{
-              flex: 1, padding: '12px 18px',
-              borderRight: i < 2 ? '1px solid var(--border)' : 'none',
-              background: 'var(--surface-2)',
-            }}>
-              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>{s.label}</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>{s.value}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Filters */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <input placeholder="Filter by vendor" value={filter.vendor}
-               onChange={(e)=>setFilter({...filter, vendor: e.target.value})}
-               style={{ flex: '1 1 160px', minWidth: 0 }} />
-        <select value={filter.status} onChange={(e)=>setFilter({...filter, status: e.target.value})} style={{ width: 130 }}>
+               onChange={e => setFilter({ ...filter, vendor: e.target.value })}
+               style={{ flex: '1 1 180px', minWidth: 0, fontSize: 13 }} />
+        <select value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })} style={{ width: 140, fontSize: 13 }}>
           <option value="">All statuses</option>
           <option value="draft">Draft</option>
           <option value="active">Active</option>
           <option value="closed">Closed</option>
         </select>
-        <select value={filter.sort} onChange={(e)=>setFilter({...filter, sort: e.target.value})} style={{ width: 130 }}>
+        <select value={filter.sort} onChange={e => setFilter({ ...filter, sort: e.target.value })} style={{ width: 140, fontSize: 13 }}>
           <option value="">Sort: Date</option>
           <option value="vendor">Sort: Vendor</option>
           <option value="amount">Sort: Amount</option>
@@ -174,90 +153,148 @@ window.Contracts = function Contracts({ projectId, initialContractId, onContract
       {loading ? <div className="empty">Loading…</div>
        : contracts.length === 0 ? <div className="empty">No contracts match these filters.</div>
        : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {contracts.map((c) => {
-            const flag = contractOverSev(c);
-            const invoiced = Number(c.invoiced_amount) || 0;
-            const total    = Number(c.total_value) || 0;
+        <div style={{ borderRadius: 10, border: '1px solid var(--border-2)', boxShadow: '0 2px 8px rgba(28,24,20,0.08), 0 1px 3px rgba(28,24,20,0.05)', overflow: 'hidden' }}>
+          {/* Table header */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 90px 100px 120px 100px 80px 80px',
+            background: '#e8e3db', borderBottom: '2px solid var(--border-2)',
+            padding: '0',
+          }}>
+            {[
+              { label: 'Vendor / Description', left: true },
+              { label: 'Ref #' },
+              { label: 'Date' },
+              { label: 'Contract Value' },
+              { label: 'Invoiced' },
+              { label: '% Billed' },
+              { label: 'Status' },
+            ].map((h, i) => (
+              <div key={i} style={{
+                padding: '11px 16px',
+                fontSize: 11, fontWeight: 700,
+                color: 'rgba(26,22,18,0.5)',
+                textTransform: 'uppercase', letterSpacing: '0.08em',
+                textAlign: h.left ? 'left' : 'right',
+                borderRight: i < 6 ? '1px solid var(--border)' : 'none',
+              }}>{h.label}</div>
+            ))}
+          </div>
+
+          {/* Totals row */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 90px 100px 120px 100px 80px 80px',
+            background: '#ede8e0', borderBottom: '2px solid var(--border-2)',
+          }}>
+            <div style={{ padding: '12px 16px', fontWeight: 700, fontSize: 14, color: 'var(--text-1)', letterSpacing: '-0.01em', borderRight: '1px solid var(--border)' }}>
+              {contracts.length} contract{contracts.length !== 1 ? 's' : ''} · {activeCount} active
+            </div>
+            <div style={{ padding: '12px 16px', borderRight: '1px solid var(--border)' }} />
+            <div style={{ padding: '12px 16px', borderRight: '1px solid var(--border)' }} />
+            <div style={{ padding: '12px 16px', textAlign: 'right', borderRight: '1px solid var(--border)', ...CT_NUM, fontWeight: 700 }}>{fmt.money(totalValue)}</div>
+            <div style={{ padding: '12px 16px', textAlign: 'right', borderRight: '1px solid var(--border)', ...CT_NUM, fontWeight: 700 }}>{fmt.money(totalInvoiced)}</div>
+            <div style={{ padding: '12px 16px', borderRight: '1px solid var(--border)' }} />
+            <div style={{ padding: '12px 16px' }} />
+          </div>
+
+          {/* Contract rows */}
+          {contracts.map((c, idx) => {
+            const flag        = contractOverSev(c);
+            const invoiced    = Number(c.invoiced_amount) || 0;
+            const total       = Number(c.total_value) || 0;
             const invoicedPct = total > 0 ? Math.min((invoiced / total) * 100, 100) : 0;
-            const overPct     = total > 0 && invoiced > total ? Math.min(((invoiced - total) / total) * 100, 50) : 0;
+            const isOver      = invoiced > total && total > 0;
+            const borderColor = flag ? flag.color : '#d1cbc2';
+            const statusColors = {
+              active: { color: '#15803d', bg: 'rgba(22,163,74,0.08)' },
+              draft:  { color: '#7c7269', bg: 'rgba(0,0,0,0.06)' },
+              closed: { color: '#7c7269', bg: 'rgba(0,0,0,0.06)' },
+            };
+            const sc = statusColors[c.status] || statusColors.draft;
 
             return (
-              <div key={c.id}
+              <div
+                key={c.id}
                 onClick={() => setSelected(c.id)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 16,
-                  padding: '14px 18px',
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  borderLeft: `4px solid ${flag ? flag.color : 'var(--border)'}`,
-                  borderRadius: 8,
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 90px 100px 120px 100px 80px 80px',
+                  borderBottom: idx < contracts.length - 1 ? '1px solid var(--border)' : 'none',
+                  borderLeft: `4px solid ${borderColor}`,
                   cursor: 'pointer',
-                  transition: 'box-shadow 0.12s',
+                  background: 'var(--surface)',
+                  transition: 'background 0.1s',
                 }}
-                onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.1)'}
-                onMouseLeave={e => e.currentTarget.style.boxShadow = ''}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(26,22,18,0.025)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
               >
                 {/* Vendor + description */}
-                <div style={{ flex: '1 1 0', minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-                    <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ padding: '12px 16px', borderRight: '1px solid var(--border)', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.015em' }}>
                       {c.vendor_name}
                     </span>
                     {flag && (
                       <span style={{
-                        fontSize: 9, fontWeight: 800, letterSpacing: '0.08em',
-                        padding: '2px 6px', borderRadius: 4, flexShrink: 0,
+                        fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
+                        padding: '2px 7px', borderRadius: 4, flexShrink: 0,
                         background: flag.bg, color: flag.color, border: `1px solid ${flag.border}`,
                       }}>{flag.label}</span>
                     )}
                     {c.file_reference && (
                       <a href={`/api/files/${encodeURIComponent(c.file_reference)}`}
                          target="_blank" onClick={e => e.stopPropagation()}
-                         title="View PDF" style={{ flexShrink: 0, fontSize: 13, textDecoration: 'none' }}>📄</a>
+                         title="View PDF"
+                         style={{ flexShrink: 0, fontSize: 12, textDecoration: 'none', color: 'var(--text-3)' }}>PDF ↗</a>
                     )}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 12, color: 'rgba(26,22,18,0.45)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {c.description || <span style={{ fontStyle: 'italic' }}>No description</span>}
-                    {c.contract_date && <span style={{ marginLeft: 10 }}>{fmt.date(c.contract_date)}</span>}
                   </div>
                 </div>
 
-                {/* Mini invoice bar */}
-                <div style={{ flex: '0 0 120px' }}>
-                  <div style={{ height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'visible', position: 'relative', marginBottom: 4 }}>
-                    {invoicedPct > 0 && (
-                      <div style={{
-                        width: `${invoicedPct}%`, height: '100%',
-                        background: flag ? flag.color : '#16a34a',
-                        borderRadius: 3, transition: 'width 0.3s',
-                      }} />
-                    )}
-                    {overPct > 0 && (
-                      <div style={{
-                        position: 'absolute', top: 0, right: `-${overPct * 0.6}%`,
-                        width: `${overPct * 0.6}%`, height: '100%',
-                        background: '#dc2626', borderRadius: '0 3px 3px 0',
-                        boxShadow: '0 0 4px rgba(220,38,38,0.5)',
-                      }} />
-                    )}
-                  </div>
-                  <div style={{ fontSize: 10.5, color: 'var(--text-3)', textAlign: 'right' }}>
-                    {invoicedPct.toFixed(0)}% invoiced
-                  </div>
+                {/* Ref # */}
+                <div style={{ padding: '12px 16px', borderRight: '1px solid var(--border)', fontSize: 12, color: 'rgba(26,22,18,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                  {c.reference_number || <span style={{ color: 'rgba(26,22,18,0.18)' }}>—</span>}
                 </div>
 
-                {/* Amounts */}
-                <div style={{ flex: '0 0 110px', textAlign: 'right' }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>{fmt.money(total)}</div>
-                  <div style={{ fontSize: 11.5, color: flag ? flag.color : 'var(--text-3)', fontWeight: flag ? 600 : 400 }}>
-                    {fmt.money(invoiced)} invoiced
-                  </div>
+                {/* Date */}
+                <div style={{ padding: '12px 16px', borderRight: '1px solid var(--border)', fontSize: 13, color: 'var(--text-2)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                  {c.contract_date ? fmt.date(c.contract_date) : <span style={{ color: 'rgba(26,22,18,0.18)' }}>—</span>}
+                </div>
+
+                {/* Contract value */}
+                <div style={{ padding: '12px 16px', borderRight: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', ...CT_NUM, fontWeight: 700 }}>
+                  {fmt.money(total)}
+                </div>
+
+                {/* Invoiced */}
+                <div style={{ padding: '12px 16px', borderRight: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', ...CT_NUM, color: isOver ? '#dc2626' : invoiced > 0 ? 'var(--text-1)' : 'rgba(26,22,18,0.18)' }}>
+                  {invoiced > 0 ? fmt.money(invoiced) : '—'}
+                </div>
+
+                {/* % Billed */}
+                <div style={{ padding: '12px 16px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center', gap: 4 }}>
+                  {total > 0 ? (
+                    <>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, color: isOver ? '#dc2626' : 'var(--text-2)', fontFeatureSettings: '"tnum" 1' }}>
+                        {invoicedPct.toFixed(0)}%
+                      </span>
+                      <div style={{ width: 44, height: 4, borderRadius: 2, background: 'rgba(26,22,18,0.1)', overflow: 'hidden' }}>
+                        <div style={{ width: `${invoicedPct}%`, height: '100%', background: isOver ? '#dc2626' : flag ? flag.color : '#16a34a', borderRadius: 2 }} />
+                      </div>
+                    </>
+                  ) : <span style={{ color: 'rgba(26,22,18,0.18)', fontSize: 14 }}>—</span>}
                 </div>
 
                 {/* Status */}
-                <div style={{ flex: '0 0 64px', textAlign: 'right' }}>
-                  <span className={`badge ${c.status}`}>{c.status}</span>
+                <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 5,
+                    textTransform: 'uppercase', letterSpacing: '0.06em',
+                    background: sc.bg, color: sc.color,
+                  }}>{c.status}</span>
                 </div>
               </div>
             );
