@@ -474,6 +474,7 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
   const [confirmed, setConfirmed] = React.useState(false);
   const [err, setErr] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
+  const [dupWarning, setDupWarning] = React.useState(null); // { message, duplicates }
 
   function aiFieldStyle(field) {
     const c = confidence[field];
@@ -538,8 +539,9 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
   const allocSum = allocs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
   const allocDiff = (Number(amount) || 0) - allocSum;
 
-  async function save() {
+  async function save(force = false) {
     setErr(null);
+    if (!force) setDupWarning(null);
     if (!invoiceNumber || !amount) { setErr('Invoice number and amount are required.'); return; }
     if (mode === 'contract' && !contractId) { setErr('Select a contract or use standalone/multi mode.'); return; }
     if (mode === 'multi') {
@@ -555,6 +557,7 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
         description: description || null, file_reference: fileRef?.file_reference || null,
         invoice_type: invoiceType,
       };
+      if (force) body.force = true;
       if (mode === 'contract') {
         body.contract_id = Number(contractId);
       } else if (mode === 'multi') {
@@ -564,7 +567,13 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
       }
       await api.createInvoice(body);
       onSaved();
-    } catch (e) { setErr(e.message); }
+    } catch (e) {
+      if (e.status === 409 && e.payload?.soft_duplicate) {
+        setDupWarning(e.payload);
+      } else {
+        setErr(e.message);
+      }
+    }
     finally { setSaving(false); }
   }
 
@@ -777,6 +786,27 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
                 ⚠️ Amount exceeds remaining contract balance ({fmt.moneyPrecise(context.remaining)})
               </div>
             )}
+            {dupWarning && (
+              <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 6, background: 'rgba(245,158,11,0.08)', border: '1.5px solid rgba(245,158,11,0.4)' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#b45309', marginBottom: 6 }}>
+                  ⚠ Possible duplicate — {dupWarning.message}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
+                  {dupWarning.duplicates.map(d => (
+                    <div key={d.id} style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'var(--mono)' }}>
+                      #{d.invoice_number} · {fmt.money(d.amount)} · {d.status}{d.invoice_date ? ' · ' + fmt.date(d.invoice_date) : ''}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => setDupWarning(null)}>Go back</button>
+                  <button className="primary" style={{ fontSize: 12, padding: '4px 12px', background: '#b45309', borderColor: '#b45309' }}
+                    disabled={saving} onClick={() => save(true)}>
+                    {saving ? 'Saving…' : 'Save anyway'}
+                  </button>
+                </div>
+              </div>
+            )}
             {err && <div className="error" style={{ marginTop: 12 }}>{err}</div>}
           </div>
         </div>
@@ -800,7 +830,7 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
               </span>
             </label>
           )}
-          <button className="primary" disabled={saving || (!!fileRef && !confirmed)} onClick={save}>
+          <button className="primary" disabled={saving || (!!fileRef && !confirmed) || !!dupWarning} onClick={() => save(false)}>
             {saving ? 'Creating…' : 'Create Invoice'}
           </button>
         </div>

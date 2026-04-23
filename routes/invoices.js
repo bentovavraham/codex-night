@@ -168,12 +168,32 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
     // Primary contract_id stored on invoice = first allocation (for backward compat).
     const primaryContractId = allocs.length > 0 ? allocs[0].contract_id : null;
 
+    const force = req.body?.force === true;
+
     // Validate each contract allocation.
     for (const alloc of allocs) {
       const c = await pool.query('SELECT project_id, vendor_name, total_value FROM contracts WHERE id = $1', [alloc.contract_id]);
       if (!c.rows[0]) return res.status(404).json({ error: `Contract ${alloc.contract_id} not found` });
       resolvedProjectId = resolvedProjectId || c.rows[0].project_id;
       if (!resolvedVendor) resolvedVendor = c.rows[0].vendor_name;
+
+      // Hard duplicate: same vendor + invoice_number + contract, not rejected.
+      if (invoice_number) {
+        const hardDup = await pool.query(
+          `SELECT id, invoice_number, amount, status, invoice_date FROM invoices
+           WHERE LOWER(vendor_name) = LOWER($1) AND LOWER(invoice_number) = LOWER($2)
+             AND contract_id = $3 AND status != 'rejected'`,
+          [resolvedVendor, invoice_number, alloc.contract_id]);
+        if (hardDup.rows.length > 0) {
+          const d = hardDup.rows[0];
+          return res.status(409).json({
+            error: `Invoice #${invoice_number} from ${resolvedVendor} already exists for this contract (status: ${d.status}, amount: $${Number(d.amount).toFixed(2)}).`,
+            hard_duplicate: true,
+            existing_id: d.id,
+          });
+        }
+      }
+
       // Overspend check per contract.
       const invoiced = await pool.query(
         `SELECT COALESCE(SUM(ic.amount),0)::numeric AS total
@@ -201,6 +221,32 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
     if (!resolvedProjectId) return res.status(400).json({ error: 'contract_id or project_id required' });
     if (!(await projects.userCanAccess(req.session.userId, resolvedProjectId)))
       return res.status(403).json({ error: 'Forbidden' });
+
+    // Soft duplicate: same vendor + contract + amount within 90 days, unless force=true.
+    if (!force && allocs.length > 0) {
+      const refDate = req.body?.invoice_date || null;
+      const softDupRows = [];
+      for (const alloc of allocs) {
+        const sd = await pool.query(
+          `SELECT id, invoice_number, amount, status, invoice_date FROM invoices
+           WHERE LOWER(vendor_name) = LOWER($1)
+             AND contract_id = $2
+             AND amount = $3
+             AND status != 'rejected'
+             AND ABS(EXTRACT(EPOCH FROM (
+               COALESCE(invoice_date, created_at::date) - COALESCE($4::date, CURRENT_DATE)
+             )) / 86400) < 90`,
+          [resolvedVendor, alloc.contract_id, amt, refDate]);
+        softDupRows.push(...sd.rows);
+      }
+      if (softDupRows.length > 0) {
+        return res.status(409).json({
+          soft_duplicate: true,
+          message: `Found ${softDupRows.length} existing invoice${softDupRows.length > 1 ? 's' : ''} from ${resolvedVendor} for the same amount ($${amt.toFixed(2)}) within 90 days. Possible duplicate.`,
+          duplicates: softDupRows,
+        });
+      }
+    }
 
     await client.query('BEGIN');
     const result = await client.query(
