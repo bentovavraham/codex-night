@@ -725,7 +725,6 @@ function ContractDetail({ contractId, projectId, onClose }) {
     { k: 'change-orders', label: `Change Orders${ledger && ledger.pending_co_count > 0 ? ` (${ledger.pending_co_count})` : ''}` },
     { k: 't-and-m',       label: `T&M${pendingTM > 0 ? ` (${fmt.money(pendingTM)} pending)` : ''}` },
     { k: 'expenses',      label: `Expenses${pendingExp > 0 ? ` (${fmt.money(pendingExp)} pending)` : ''}` },
-    { k: 'billing',       label: 'Billing & Payment' },
     { k: 'invoices',      label: 'Invoices' },
     { k: 'history',       label: 'History' },
     { k: 'alerts',        label: 'Alert Status' },
@@ -943,14 +942,7 @@ function ContractDetail({ contractId, projectId, onClose }) {
             <Expenses contractId={contractId} onLedgerRefresh={load} />
           )}
 
-          {activeTab === 'billing' && ledger && (
-            <BillingPaymentTab ledger={ledger} onGoToInvoices={() => setActiveTab('invoices')} />
-          )}
-          {activeTab === 'billing' && !ledger && (
-            <div className="empty">Loading…</div>
-          )}
-
-          {activeTab === 'invoices' && (() => {
+{activeTab === 'invoices' && (() => {
             const userRole = window.__userRole || 'pm';
             const IN_PROGRESS_INV = ['pending','pm_approved','partner_approved'];
             async function invAction(label, fn, id, ...args) {
@@ -1393,6 +1385,7 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
   const expApproved   = Number(l.expense_approved) || 0;
 
   const outstanding   = Math.max(totalBilled - paid, 0);
+  const [billingOpen, setBillingOpen] = React.useState(false);
   const buffer        = earmarked > 0 ? earmarked - totalExposure : null;
   const overBudget    = earmarked > 0 && totalExposure > earmarked;
   const budgetUsedPct = earmarked > 0 ? (totalExposure / earmarked) * 100 : null;
@@ -1462,6 +1455,50 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
             {fmt.money(totalExposure)}
           </span>
         </div>
+
+        {/* BILLING & PAYMENT — collapsible accordion */}
+        <div
+          onClick={() => setBillingOpen(o => !o)}
+          style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '10px 0', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-2)', transition: 'transform 0.15s', display: 'inline-block', transform: billingOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-1)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Billing & Payment</span>
+          </div>
+          {totalBilled > 0
+            ? <span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--mono)', color: totalBilled > commitment ? 'var(--danger)' : '#1d4ed8' }}>{fmt.money(totalBilled)} billed</span>
+            : <span style={{ fontSize: 12, color: 'var(--text-3)' }}>No invoices yet</span>}
+        </div>
+
+        {billingOpen && (
+          <div style={{ paddingBottom: 4 }}>
+            <ContractLedgerRow label="Fixed Scope Invoiced" value={invoiced}   total={totalBilled || commitment} color="var(--accent)" onClick={() => onGoToTab('invoices')} />
+            <ContractLedgerRow label="+ T&M Invoiced"       value={tmInvoiced}  total={totalBilled || commitment} color="var(--warn)"   onClick={() => onGoToTab('invoices')} />
+            <ContractLedgerRow label="+ Expenses Invoiced"  value={expInvoiced} total={totalBilled || commitment} color="#2563eb"       onClick={() => onGoToTab('invoices')} />
+
+            <div style={{ borderTop: '2px solid var(--border)', paddingTop: 14, marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: totalBilled > 0 ? 16 : 0 }}>
+              <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>= Total Billed</span>
+              <span style={{ fontSize: 32, fontWeight: 800, fontFamily: 'var(--mono)', letterSpacing: '-0.02em',
+                color: totalBilled > commitment ? 'var(--danger)' : totalBilled > 0 ? '#1d4ed8' : 'var(--text-2)' }}>
+                {fmt.money(totalBilled)}
+              </span>
+            </div>
+
+            {totalBilled > 0 && (
+              <div style={{ display: 'flex', gap: 12 }}>
+                <div style={{ flex: 1, padding: '12px 16px', borderRadius: 8, background: paid > 0 ? 'rgba(34,197,94,0.07)' : 'var(--surface-2)', border: `1px solid ${paid > 0 ? 'rgba(34,197,94,0.25)' : 'var(--border)'}` }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-2)', marginBottom: 6 }}>Paid</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, fontFamily: 'var(--mono)', color: paid > 0 ? 'var(--ok)' : 'var(--text-2)', letterSpacing: '-0.02em' }}>{fmt.money(paid)}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3 }}>{Math.round((paid / totalBilled) * 100)}% of total billed</div>
+                </div>
+                <div style={{ flex: 1, padding: '12px 16px', borderRadius: 8, background: outstanding > 0 ? 'rgba(232,146,26,0.07)' : 'var(--surface-2)', border: `1px solid ${outstanding > 0 ? 'rgba(232,146,26,0.3)' : 'var(--border)'}` }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-2)', marginBottom: 6 }}>Outstanding</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, fontFamily: 'var(--mono)', color: outstanding > 0 ? 'var(--warn)' : 'var(--ok)', letterSpacing: '-0.02em' }}>{fmt.money(outstanding)}</div>
+                  {outstanding === 0 && <div style={{ fontSize: 12, color: 'var(--ok)', marginTop: 3 }}>Fully paid</div>}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Budget vs. Exposure — the key question */}
         {earmarked > 0 && (
