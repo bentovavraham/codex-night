@@ -128,7 +128,10 @@ router.get('/projects/:id/contracts', requireAuth, async (req, res, next) => {
                  AND invoice_type = 'fixed') AS invoiced_amount,
               (SELECT COALESCE(SUM(amount),0) FROM invoices
                  WHERE contract_id = c.id AND status IN ('approved','pushed','paid')
-                 AND invoice_type != 'fixed') AS tm_invoiced_amount
+                 AND invoice_type = 'tm') AS tm_invoiced_amount,
+              (SELECT COALESCE(SUM(amount),0) FROM invoices
+                 WHERE contract_id = c.id AND status IN ('approved','pushed','paid')
+                 AND invoice_type = 'expense') AS expense_invoiced_amount
        FROM contracts c
        WHERE ${filters.join(' AND ')}
        ORDER BY ${order}`,
@@ -237,7 +240,10 @@ router.get('/contracts/:id', requireAuth, async (req, res, next) => {
       .filter((i) => i.invoice_type === 'fixed')
       .reduce((s, i) => s + Number(i.amount), 0);
     const tmInvoiced = activeInvoices
-      .filter((i) => i.invoice_type !== 'fixed')
+      .filter((i) => i.invoice_type === 'tm')
+      .reduce((s, i) => s + Number(i.amount), 0);
+    const expenseInvoiced = activeInvoices
+      .filter((i) => i.invoice_type === 'expense')
       .reduce((s, i) => s + Number(i.amount), 0);
     res.json({
       ...c,
@@ -245,6 +251,7 @@ router.get('/contracts/:id', requireAuth, async (req, res, next) => {
       invoices: invoices.rows,
       invoiced_amount: invoicedAgainst,
       tm_invoiced_amount: tmInvoiced,
+      expense_invoiced_amount: expenseInvoiced,
       remaining_amount: Number(c.total_value) - invoicedAgainst,
     });
   } catch (err) { next(err); }
@@ -461,7 +468,7 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
     const access = await userCanAccessContract(req.session.userId, contractId);
     if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Not found' : 'Forbidden' });
 
-    const [contractR, cosR, tmR, expR, invoicedR, tmInvoicedR, paidR] = await Promise.all([
+    const [contractR, cosR, tmR, expR, invoicedR, tmInvoicedR, expInvoicedR, paidR] = await Promise.all([
       pool.query('SELECT total_value, earmarked_amount FROM contracts WHERE id = $1', [contractId]),
       // Approved change orders only count toward commitment
       pool.query(`SELECT
@@ -483,7 +490,10 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
         AND invoice_type = 'fixed'`, [contractId]),
       pool.query(`SELECT COALESCE(SUM(amount),0) AS total
         FROM invoices WHERE contract_id = $1 AND status IN ('approved','pushed','paid')
-        AND invoice_type != 'fixed'`, [contractId]),
+        AND invoice_type = 'tm'`, [contractId]),
+      pool.query(`SELECT COALESCE(SUM(amount),0) AS total
+        FROM invoices WHERE contract_id = $1 AND status IN ('approved','pushed','paid')
+        AND invoice_type = 'expense'`, [contractId]),
       pool.query(`SELECT COALESCE(SUM(amount),0) AS total
         FROM invoices WHERE contract_id = $1 AND status = 'paid'`, [contractId]),
     ]);
@@ -497,9 +507,10 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
     const tmPending   = Number(tmR.rows[0].pending_total);
     const expApproved = Number(expR.rows[0].approved_total);
     const expPending  = Number(expR.rows[0].pending_total);
-    const invoiced    = Number(invoicedR.rows[0].total);   // fixed-scope invoices only
-    const tmInvoiced  = Number(tmInvoicedR.rows[0].total); // T&M/expense invoices
-    const paid        = Number(paidR.rows[0].total);
+    const invoiced        = Number(invoicedR.rows[0].total);    // fixed-scope invoices only
+    const tmInvoiced      = Number(tmInvoicedR.rows[0].total);  // T&M invoices
+    const expenseInvoiced = Number(expInvoicedR.rows[0].total); // expense invoices
+    const paid            = Number(paidR.rows[0].total);
 
     // Commitment = contract + approved COs only (legal obligation on signed scope).
     // T&M and expenses are real money but not contractual commitment — they are exposure.
@@ -519,7 +530,8 @@ router.get('/contracts/:id/ledger', requireAuth, async (req, res, next) => {
       pending_co_count: pendingCOCount,
       tm_approved: tmApproved,
       tm_pending: tmPending,
-      tm_invoiced: tmInvoiced,   // T&M/expense invoices billed (additional to fixed commitment)
+      tm_invoiced: tmInvoiced,          // T&M invoices billed
+      expense_invoiced: expenseInvoiced, // expense invoices billed
       expense_approved: expApproved,
       expense_pending: expPending,
       commitment,        // contract + approved COs only

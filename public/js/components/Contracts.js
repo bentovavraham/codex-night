@@ -751,20 +751,22 @@ function ContractDetail({ contractId, projectId, onClose }) {
 
       {/* 6-block KPI grid + burn bar — persistent across all tabs */}
       {ledger && !editing && (() => {
-        const orig       = Number(ledger.original_contract) || 0;
-        const cos        = Number(ledger.approved_cos) || 0;
-        const tm         = Number(ledger.tm_approved) || 0;
-        const commitment = Number(ledger.commitment) || 0;
-        const earmarked  = Number(ledger.earmarked_amount) || 0;
-        const invoiced   = Number(ledger.invoiced) || 0;       // fixed-scope only
-        const tmInvoiced = Number(ledger.tm_invoiced) || 0;    // T&M / expense invoices
-        const paid       = Number(ledger.paid) || 0;
-        const exposure   = Number(ledger.total_exposure) || commitment;
-        const buffer     = earmarked > 0 ? earmarked - exposure : null;
-        const overBudget = earmarked > 0 && exposure > earmarked;
-        const cosPct     = orig > 0 && cos > 0 ? Math.round((cos / orig) * 100) : 0;
-        const invPct     = commitment > 0 && invoiced > 0 ? Math.round((invoiced / commitment) * 100) : 0;
-        const paidPct    = invoiced > 0 && paid > 0 ? Math.round((paid / invoiced) * 100) : 0;
+        const orig            = Number(ledger.original_contract) || 0;
+        const cos             = Number(ledger.approved_cos) || 0;
+        const tm              = Number(ledger.tm_approved) || 0;
+        const commitment      = Number(ledger.commitment) || 0;
+        const earmarked       = Number(ledger.earmarked_amount) || 0;
+        const invoiced        = Number(ledger.invoiced) || 0;          // fixed-scope only
+        const tmInvoiced      = Number(ledger.tm_invoiced) || 0;       // T&M invoices
+        const expenseInvoiced = Number(ledger.expense_invoiced) || 0;  // expense invoices
+        const totalBilled     = invoiced + tmInvoiced + expenseInvoiced;
+        const paid            = Number(ledger.paid) || 0;
+        const exposure        = Number(ledger.total_exposure) || commitment;
+        const buffer          = earmarked > 0 ? earmarked - exposure : null;
+        const overBudget      = earmarked > 0 && exposure > earmarked;
+        const cosPct          = orig > 0 && cos > 0 ? Math.round((cos / orig) * 100) : 0;
+        const invPct          = commitment > 0 && invoiced > 0 ? Math.round((invoiced / commitment) * 100) : 0;
+        const paidPct         = totalBilled > 0 && paid > 0 ? Math.round((paid / totalBilled) * 100) : 0;
 
         function KpiBlock({ label, value, sub, subColor, accent, tip, muted }) {
           return (
@@ -796,11 +798,11 @@ function ContractDetail({ contractId, projectId, onClose }) {
               <KpiBlock
                 label="+ Change Orders"
                 value={cos}
-                sub={cos > 0 ? `${cosPct}% above initial${tm > 0 ? ` · +${fmt.money(tm)} T&M` : ''}` : tm > 0 ? `+${fmt.money(tm)} T&M in exposure` : 'None yet'}
+                sub={cos > 0 ? `${cosPct}% above initial${tm > 0 ? ` · +${fmt.money(tm)} T&M authorized` : ''}` : tm > 0 ? `+${fmt.money(tm)} T&M authorized` : 'None yet'}
                 subColor={cos > 0 ? 'var(--warn)' : 'var(--text-3)'}
                 accent={cos > 0 ? 'var(--warn)' : 'var(--border-2)'}
                 muted={cos === 0}
-                tip="Approved change orders added to this contract. T&M is tracked separately as additional exposure."
+                tip="Approved change orders added to this contract. T&M authorized amount shows open-ended exposure."
               />
               <KpiBlock
                 label="= Commitment"
@@ -812,7 +814,38 @@ function ContractDetail({ contractId, projectId, onClose }) {
               />
             </div>
 
-            {/* Row 2 — budget & billing health */}
+            {/* Row 2 — billing breakdown by invoice type */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, background: 'var(--border)', borderTop: '1px solid var(--border)' }}>
+              <KpiBlock
+                label="Fixed Scope Invoiced"
+                value={invoiced}
+                sub={invoiced > 0 ? `${invPct}% of ${fmt.money(commitment)} commitment` : commitment > 0 ? `${fmt.money(commitment)} not yet invoiced` : 'No fixed invoices yet'}
+                subColor={invoiced > commitment ? 'var(--danger)' : invoiced > 0 ? 'var(--amber)' : 'var(--text-3)'}
+                accent="var(--amber)"
+                muted={invoiced === 0}
+                tip="Invoices billed against the fixed contract scope. These count against commitment and trigger an overspend warning if they exceed the remaining balance."
+              />
+              <KpiBlock
+                label="T&M Invoiced"
+                value={tmInvoiced}
+                sub={tmInvoiced > 0 ? 'Additional — beyond fixed scope' : 'No T&M invoices yet'}
+                subColor={tmInvoiced > 0 ? 'var(--warn)' : 'var(--text-3)'}
+                accent={tmInvoiced > 0 ? 'var(--warn)' : 'var(--border-2)'}
+                muted={tmInvoiced === 0}
+                tip="Time & Materials invoices billed on top of the fixed contract. These do not count against the committed contract value."
+              />
+              <KpiBlock
+                label="Expenses Invoiced"
+                value={expenseInvoiced}
+                sub={expenseInvoiced > 0 ? 'Reimbursables — beyond fixed scope' : 'No expense invoices yet'}
+                subColor={expenseInvoiced > 0 ? '#2563eb' : 'var(--text-3)'}
+                accent={expenseInvoiced > 0 ? '#93c5fd' : 'var(--border-2)'}
+                muted={expenseInvoiced === 0}
+                tip="Reimbursable expense invoices (travel, tolls, etc.). These do not count against the committed contract value."
+              />
+            </div>
+
+            {/* Row 3 — financial summary */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, background: 'var(--border)', borderTop: '1px solid var(--border)' }}>
               <KpiBlock
                 label="Internal Budget"
@@ -821,24 +854,24 @@ function ContractDetail({ contractId, projectId, onClose }) {
                 subColor={earmarked > 0 ? (overBudget ? '#dc2626' : 'var(--ok)') : 'var(--text-3)'}
                 accent={earmarked > 0 ? (overBudget ? '#dc2626' : 'var(--accent)') : 'var(--border-2)'}
                 muted={earmarked === 0}
-                tip="Your internal estimate for total expected spend — set this above the initial contract to account for T&M and overages."
+                tip="Your internal estimate for total expected spend — should cover fixed contract + T&M + expenses."
               />
               <KpiBlock
-                label="Invoiced to Date"
-                value={invoiced}
-                sub={invoiced > 0
-                  ? `${invPct}% of commitment${tmInvoiced > 0 ? ` · +${fmt.money(tmInvoiced)} T&M billed` : ''}`
-                  : tmInvoiced > 0 ? `+${fmt.money(tmInvoiced)} T&M billed` : 'No invoices yet'}
-                subColor={tmInvoiced > 0 ? 'var(--amber)' : 'var(--text-3)'}
-                accent="var(--amber)"
-                muted={invoiced === 0 && tmInvoiced === 0}
-                tip="Fixed-scope invoices count against commitment. T&M invoices are shown separately — they represent additional project cost beyond the fixed contract value."
+                label="Total Billed"
+                value={totalBilled}
+                sub={totalBilled > 0
+                  ? [invoiced > 0 && `${fmt.money(invoiced)} fixed`, tmInvoiced > 0 && `${fmt.money(tmInvoiced)} T&M`, expenseInvoiced > 0 && `${fmt.money(expenseInvoiced)} exp`].filter(Boolean).join(' · ')
+                  : 'Nothing billed yet'}
+                subColor="var(--text-3)"
+                accent={totalBilled > 0 ? 'var(--amber)' : 'var(--border-2)'}
+                muted={totalBilled === 0}
+                tip="All invoices combined: fixed scope + T&M + expenses."
               />
               <KpiBlock
                 label="Paid"
                 value={paid}
-                sub={paid > 0 ? `${paidPct}% of invoiced` : invoiced > 0 ? `${fmt.money(invoiced)} outstanding` : 'Nothing paid yet'}
-                subColor={paid === 0 && invoiced > 0 ? 'var(--amber)' : 'var(--text-3)'}
+                sub={paid > 0 ? `${paidPct}% of total billed` : totalBilled > 0 ? `${fmt.money(totalBilled)} outstanding` : 'Nothing paid yet'}
+                subColor={paid === 0 && totalBilled > 0 ? 'var(--amber)' : 'var(--text-3)'}
                 accent={paid > 0 ? 'var(--ok)' : 'var(--border-2)'}
                 muted={paid === 0}
                 tip="Cash actually sent to the vendor."
@@ -1281,13 +1314,16 @@ function ContractDashboard({ contract: c, ledger: l, onGoToTab }) {
   const commitment    = Number(l.commitment) || 0;
   const totalExposure = Number(l.total_exposure) || commitment;
   const invoiced      = Number(l.invoiced) || 0;
+  const tmInvoiced    = Number(l.tm_invoiced) || 0;
+  const expInvoiced   = Number(l.expense_invoiced) || 0;
+  const totalBilled   = invoiced + tmInvoiced + expInvoiced;
   const paid          = Number(l.paid) || 0;
   const earmarked     = Number(l.earmarked_amount) || 0;
   const approvedCOs   = Number(l.approved_cos) || 0;
   const tmApproved    = Number(l.tm_approved) || 0;
   const expApproved   = Number(l.expense_approved) || 0;
 
-  const outstanding   = Math.max(invoiced - paid, 0);
+  const outstanding   = Math.max(totalBilled - paid, 0);
   const buffer        = earmarked > 0 ? earmarked - totalExposure : null;
   const overBudget    = earmarked > 0 && totalExposure > earmarked;
   const budgetUsedPct = earmarked > 0 ? (totalExposure / earmarked) * 100 : null;
