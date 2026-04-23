@@ -371,14 +371,22 @@ router.get('/projects/:id/contracts/export', requireAuth, async (req, res, next)
       `SELECT c.vendor_name, c.total_value, c.contract_date, c.reference_number,
               c.status, c.description, c.created_at,
               (SELECT COALESCE(SUM(amount),0) FROM invoices WHERE contract_id = c.id
-                 AND status IN ('approved','pushed','paid')) AS invoiced
+                 AND status IN ('approved','pushed','paid')
+                 AND COALESCE(invoice_type,'fixed') = 'fixed') AS invoiced_fixed,
+              (SELECT COALESCE(SUM(amount),0) FROM invoices WHERE contract_id = c.id
+                 AND status IN ('approved','pushed','paid')
+                 AND invoice_type = 'tm') AS invoiced_tm,
+              (SELECT COALESCE(SUM(amount),0) FROM invoices WHERE contract_id = c.id
+                 AND status IN ('approved','pushed','paid')
+                 AND invoice_type = 'expense') AS invoiced_expense
        FROM contracts c WHERE c.project_id = $1 ORDER BY c.contract_date DESC NULLS LAST`, [projectId]);
-    const header = 'Vendor,Total,Date,Reference,Status,Description,Invoiced,Created\n';
-    const rows = result.rows.map(r =>
-      [r.vendor_name, r.total_value, r.contract_date || '', r.reference_number || '',
+    const header = 'Vendor,Total,Date,Reference,Status,Description,Invoiced (Fixed),Invoiced (T&M),Invoiced (Expense),Total Invoiced,Created\n';
+    const rows = result.rows.map(r => {
+      const totalInvoiced = Number(r.invoiced_fixed) + Number(r.invoiced_tm) + Number(r.invoiced_expense);
+      return [r.vendor_name, r.total_value, r.contract_date || '', r.reference_number || '',
        r.status, `"${(r.description || '').replace(/"/g, '""')}"`,
-       r.invoiced, r.created_at].join(',')
-    ).join('\n');
+       r.invoiced_fixed, r.invoiced_tm, r.invoiced_expense, totalInvoiced.toFixed(2), r.created_at].join(',');
+    }).join('\n');
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="contracts-project-${projectId}.csv"`);
     res.send(header + rows);
