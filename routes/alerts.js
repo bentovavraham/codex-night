@@ -58,6 +58,7 @@ router.get('/alerts', requireAuth, async (req, res, next) => {
         SELECT contract_id, SUM(amount) AS invoiced_amount
         FROM invoices
         WHERE status IN ('approved','pushed','paid')
+          AND COALESCE(invoice_type, 'fixed') = 'fixed'
         GROUP BY contract_id
       ) inv ON inv.contract_id = c.id
       LEFT JOIN (
