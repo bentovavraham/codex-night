@@ -50,6 +50,13 @@ window.api = {
   updateUncommitted:    (pid, lid, val)    => request('PUT',  `/api/projects/${pid}/budget-lines/${lid}/uncommitted`, { uncommitted_estimate: val }),
   getBudgetHistory:     (pid, lid)         => request('GET',  `/api/projects/${pid}/budget-lines/${lid}/history`),
 
+  getByTrade:           (filters={})       => {
+    const params = new URLSearchParams();
+    if (filters.status) params.set('status', filters.status);
+    const qs = params.toString();
+    return request('GET', `/api/by-trade${qs ? '?' + qs : ''}`);
+  },
+
   listContracts:     (pid, filters={})  => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([,v])=>v)).toString();
     return request('GET', `/api/projects/${pid}/contracts${qs ? '?' + qs : ''}`);

@@ -157,6 +157,8 @@ router.get('/:id/budget/tree', requireAuth, async (req, res, next) => {
           c.description,
           c.earmarked_amount,
           c.total_value,
+          c.contract_date,
+          c.reference_number,
           COALESCE(co.co_total,       0) AS co_total,
           COALESCE(inv_fixed.invoiced, 0) AS invoiced_fixed,
           COALESCE(inv_tm.tm_total,   0) AS tm_total,
@@ -204,6 +206,7 @@ router.get('/:id/budget/tree', requireAuth, async (req, res, next) => {
         COALESCE(bl.uncommitted_estimate, 0) AS uncommitted_estimate,
         bl.current_amount IS NULL          AS budget_not_set,
         q.code, q.name, q.parent_id, q.level,
+        q2.code AS parent_code, q2.name AS parent_name,
         COALESCE(SUM(cd.cl_amount), 0)     AS contracted,
         JSON_AGG(
           JSON_BUILD_OBJECT(
@@ -212,19 +215,34 @@ router.get('/:id/budget/tree', requireAuth, async (req, res, next) => {
             'description',      cd.description,
             'earmarked_amount', cd.earmarked_amount,
             'total_value',      cd.total_value,
+            'contract_date',    cd.contract_date,
+            'reference_number', cd.reference_number,
             'cl_amount',        cd.cl_amount,
             'co_total',         cd.co_total,
             'invoiced_fixed',   cd.invoiced_fixed,
             'tm_total',         cd.tm_total,
-            'exp_total',        cd.exp_total
+            'exp_total',        cd.exp_total,
+            'cos', (
+              SELECT COALESCE(JSON_AGG(
+                JSON_BUILD_OBJECT(
+                  'id',          co2.id,
+                  'co_number',   co2.co_number,
+                  'amount',      co2.amount,
+                  'status',      co2.status,
+                  'description', co2.description
+                ) ORDER BY co2.created_at
+              ), '[]'::json)
+              FROM change_orders co2 WHERE co2.contract_id = cd.contract_id
+            )
           ) ORDER BY cd.vendor_name
         ) FILTER (WHERE cd.contract_id IS NOT NULL) AS contracts
       FROM project_codes pc
       JOIN qb_codes q ON q.id = pc.qb_code_id
+      LEFT JOIN qb_codes q2 ON q2.id = q.parent_id
       LEFT JOIN budget_lines bl ON bl.qb_code_id = pc.qb_code_id AND bl.project_id = $1
       LEFT JOIN contract_data cd ON cd.qb_code_id = pc.qb_code_id
       GROUP BY bl.id, pc.qb_code_id, bl.current_amount, bl.uncommitted_estimate,
-               q.code, q.name, q.parent_id, q.level
+               q.code, q.name, q.parent_id, q.level, q2.code, q2.name
       ORDER BY q.code ASC
     `, [projectId]);
 
@@ -240,6 +258,7 @@ router.get('/:id/budget/tree', requireAuth, async (req, res, next) => {
         const earmarked  = Number(c.earmarked_amount) || 0;
         const commitment = tv + co;
         const exposure   = commitment + tm + exp;
+        const spent      = Number(c.invoiced_fixed) + tm + exp;
         return {
           ...c,
           total_value:      tv,
@@ -250,33 +269,53 @@ router.get('/:id/budget/tree', requireAuth, async (req, res, next) => {
           commitment,
           total_exposure:   exposure,
           expected_overage: tv - earmarked,
+          total_spent:      spent,
+          cos:              Array.isArray(c.cos) ? c.cos : [],
         };
       });
-      const totalExposure = contracted + uncommitted;
+      const tmExpTotal    = contracts.reduce((s, c) => s + c.tm_total + c.exp_total, 0);
+      const totalSpent    = contracts.reduce((s, c) => s + c.total_spent, 0);
+      const totalExposure = contracted + tmExpTotal + uncommitted;
       return {
         budget_line_id:       r.budget_line_id,
         qb_code_id:           r.qb_code_id,
         code:                 r.code,
         name:                 r.name,
         parent_id:            r.parent_id,
+        parent_code:          r.parent_code || null,
+        parent_name:          r.parent_name || null,
         level:                Number(r.level) || 0,
         budget,
         budget_not_set:       r.budget_not_set === true,
+        budget_delta:         contracted - budget,
         contracted,
+        tm_exp_total:         tmExpTotal,
+        total_spent:          totalSpent,
         uncommitted_estimate: uncommitted,
-        expected_overage:     contracted - budget,
         total_exposure:       totalExposure,
         contracts,
       };
     });
 
+    // Deduplicate contracts across QB codes for accurate project-level T&M totals
+    const allContractMap = new Map();
+    for (const row of rows) {
+      for (const c of row.contracts) {
+        if (!allContractMap.has(c.contract_id)) allContractMap.set(c.contract_id, c);
+      }
+    }
+    const totalTmExp   = [...allContractMap.values()].reduce((s, c) => s + c.tm_total + c.exp_total, 0);
+    const totalSpentAll = [...allContractMap.values()].reduce((s, c) => s + c.total_spent, 0);
+
     const totals = rows.reduce((acc, r) => ({
-      budget:           acc.budget           + r.budget,
-      contracted:       acc.contracted       + r.contracted,
-      uncommitted:      acc.uncommitted      + r.uncommitted_estimate,
-      expected_overage: acc.expected_overage + r.expected_overage,
-      total_exposure:   acc.total_exposure   + r.total_exposure,
-    }), { budget: 0, contracted: 0, uncommitted: 0, expected_overage: 0, total_exposure: 0 });
+      budget:         acc.budget         + r.budget,
+      contracted:     acc.contracted     + r.contracted,
+      uncommitted:    acc.uncommitted    + r.uncommitted_estimate,
+      total_exposure: acc.total_exposure + r.total_exposure,
+    }), { budget: 0, contracted: 0, uncommitted: 0, total_exposure: 0 });
+    totals.tm_exp_total = totalTmExp;
+    totals.total_spent  = totalSpentAll;
+    totals.budget_delta = totals.contracted - totals.budget;
 
     res.json({ codes: rows, totals });
   } catch (err) { next(err); }

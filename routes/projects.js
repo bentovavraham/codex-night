@@ -42,9 +42,10 @@ router.get('/health', requireAuth, async (req, res, next) => {
         COALESCE(c_stats.total_contract_value, 0) AS total_contract_value,
         COALESCE(co_stats.co_approved, 0)        AS co_approved,
         COALESCE(co_stats.co_pending_count, 0)   AS pending_cos,
-        COALESCE(tm_stats.tm_approved, 0)        AS tm_approved,
-        COALESCE(exp_stats.exp_approved, 0)      AS exp_approved,
+        COALESCE(inv_stats.tm_approved, 0)       AS tm_approved,
+        COALESCE(inv_stats.exp_approved, 0)      AS exp_approved,
         COALESCE(inv_stats.invoiced, 0)          AS invoiced,
+        COALESCE(inv_stats.invoiced_fixed, 0)    AS invoiced_fixed,
         COALESCE(inv_stats.paid, 0)              AS paid,
         COALESCE(inv_stats.pending_count, 0)     AS pending_invoices
       FROM projects p
@@ -67,20 +68,9 @@ router.get('/health', requireAuth, async (req, res, next) => {
 
       LEFT JOIN (
         SELECT c.project_id,
-          COALESCE(SUM(tm.amount) FILTER (WHERE tm.status = 'approved'), 0) AS tm_approved
-        FROM tm_charges tm JOIN contracts c ON c.id = tm.contract_id
-        GROUP BY c.project_id
-      ) tm_stats ON tm_stats.project_id = p.id
-
-      LEFT JOIN (
-        SELECT c.project_id,
-          COALESCE(SUM(e.amount) FILTER (WHERE e.status = 'approved'), 0) AS exp_approved
-        FROM contract_expenses e JOIN contracts c ON c.id = e.contract_id
-        GROUP BY c.project_id
-      ) exp_stats ON exp_stats.project_id = p.id
-
-      LEFT JOIN (
-        SELECT c.project_id,
+          COALESCE(SUM(i.amount) FILTER (WHERE i.status IN ('approved','pushed','paid') AND COALESCE(i.invoice_type,'fixed') = 'fixed'), 0) AS invoiced_fixed,
+          COALESCE(SUM(i.amount) FILTER (WHERE i.status IN ('approved','pushed','paid') AND i.invoice_type = 'tm'), 0)      AS tm_approved,
+          COALESCE(SUM(i.amount) FILTER (WHERE i.status IN ('approved','pushed','paid') AND i.invoice_type = 'expense'), 0) AS exp_approved,
           COALESCE(SUM(i.amount) FILTER (WHERE i.status IN ('approved','pushed','paid')), 0) AS invoiced,
           COALESCE(SUM(i.amount) FILTER (WHERE i.status = 'paid'), 0) AS paid,
           COUNT(*) FILTER (WHERE i.status = 'pending') AS pending_count

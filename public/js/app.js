@@ -181,6 +181,11 @@ function App() {
               )}
             </button>
 
+            <button className={`sidebar-item ${view === 'by-trade' ? 'active' : ''}`}
+              onClick={() => { setView('by-trade'); setProject(null); }}>
+              <span className="icon">⊟</span> By Trade
+            </button>
+
             {user.role === 'admin' && (
               <button className={`sidebar-item ${view === 'admin' ? 'active' : ''}`}
                 onClick={() => { setView('admin'); setProject(null); }}>
@@ -246,6 +251,7 @@ function App() {
         {/* ── Main content ── */}
         <main className="main-content">
           {view === 'admin' && <Admin onClose={() => setView('projects')} />}
+          {view === 'by-trade' && <ByTrade />}
           {view === 'projects' && <ProjectList onOpen={openProject} />}
           {view === 'project' && project && (
             <ProjectView

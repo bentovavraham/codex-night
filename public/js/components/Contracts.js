@@ -928,7 +928,7 @@ function ContractDetail({ contractId, projectId, onClose }) {
 
 
 {activeTab === 'invoices' && (
-            <Invoices projectId={projectId} contractId={contractId} userRole={userRole} />
+            <Invoices projectId={projectId} contractId={contractId} />
           )}
 
           {activeTab === 'alerts' && ledger && (

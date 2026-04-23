@@ -23,6 +23,7 @@ const vendorRoutes = require('./routes/vendors');
 const customerRoutes = require('./routes/customers');
 const changeOrderRoutes = require('./routes/changeOrders');
 const alertRoutes = require('./routes/alerts');
+const byTradeRoutes = require('./routes/byTrade');
 
 const app = express();
 app.disable('x-powered-by');
@@ -70,8 +71,14 @@ app.use('/api/vendors', vendorRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api', changeOrderRoutes);
 app.use('/api', alertRoutes);
+app.use('/api', byTradeRoutes);
 
 // --- Static SPA ---
+// Disable caching for JS components so edits are picked up without hard refresh
+app.use('/js', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.get(/^\/(?!api\/).*/, (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
