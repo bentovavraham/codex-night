@@ -33,7 +33,9 @@ function InvoiceTypeBadge({ type }) {
   );
 }
 
-window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
+// contractId prop: when provided, locks the list + NewInvoiceModal to that contract.
+// This is how the contract-level Invoices tab reuses the same component as the project view.
+window.Invoices = function Invoices({ projectId, contractId, userRole: userRoleProp }) {
   const userRole = userRoleProp || window.__userRole || 'pm';
   const [invoices, setInvoices] = React.useState([]);
   const [contracts, setContracts] = React.useState([]);
@@ -42,7 +44,7 @@ window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
   const [showNew, setShowNew] = React.useState(false);
   const [editingId, setEditingId] = React.useState(null);
   const [view, setView] = React.useState('all');
-  const [filter, setFilter] = React.useState({ status: '', contract_id: '', vendor: '', sort: '', invoice_type: '' });
+  const [filter, setFilter] = React.useState({ status: '', contract_id: contractId ? String(contractId) : '', vendor: '', sort: '', invoice_type: '' });
   const [selected, setSelected] = React.useState(new Set());
   const [busy, setBusy] = React.useState({}); // id -> true
 
@@ -173,7 +175,7 @@ window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <a href={`/api/projects/${projectId}/invoices/export`} target="_blank" className="btn" style={{ fontSize: 12 }}>Export CSV</a>
+          {!contractId && <a href={`/api/projects/${projectId}/invoices/export`} target="_blank" className="btn" style={{ fontSize: 12 }}>Export CSV</a>}
           <button className="primary" onClick={() => setShowNew(true)}>+ New Invoice</button>
         </div>
       </div>
@@ -248,11 +250,13 @@ window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
               <option value="pushed">Pushed</option>
               <option value="paid">Paid</option>
             </select>
-            <select value={filter.contract_id} onChange={e => setFilter({ ...filter, contract_id: e.target.value })} style={{ width: 200 }}>
-              <option value="">All contracts</option>
-              <option value="none">Standalone only</option>
-              {contracts.map(c => <option key={c.id} value={c.id}>{c.vendor_name} — {fmt.money(c.total_value)}</option>)}
-            </select>
+            {!contractId && (
+              <select value={filter.contract_id} onChange={e => setFilter({ ...filter, contract_id: e.target.value })} style={{ width: 200 }}>
+                <option value="">All contracts</option>
+                <option value="none">Standalone only</option>
+                {contracts.map(c => <option key={c.id} value={c.id}>{c.vendor_name} — {fmt.money(c.total_value)}</option>)}
+              </select>
+            )}
             <select value={filter.sort} onChange={e => setFilter({ ...filter, sort: e.target.value })} style={{ width: 130 }}>
               <option value="">Sort: Date</option>
               <option value="amount">Sort: Amount</option>
@@ -403,8 +407,13 @@ window.Invoices = function Invoices({ projectId, userRole: userRoleProp }) {
         </div>
       )}
 
-      {showNew && <NewInvoiceModal projectId={projectId} contracts={contracts}
-        onClose={() => setShowNew(false)} onSaved={async () => { setShowNew(false); toast('Invoice created'); await load(); }} />}
+      {showNew && <NewInvoiceModal
+        projectId={projectId}
+        contracts={contracts}
+        defaultContractId={contractId ? String(contractId) : undefined}
+        lockedContract={contractId ? contracts.find(c => c.id === contractId || String(c.id) === String(contractId)) : undefined}
+        onClose={() => setShowNew(false)}
+        onSaved={async () => { setShowNew(false); toast('Invoice created'); await load(); }} />}
     </div>
   );
 };
