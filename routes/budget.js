@@ -148,6 +148,7 @@ router.get('/:id/budget/tree', requireAuth, async (req, res, next) => {
 
     const result = await pool.query(`
       WITH contract_data AS (
+        -- All contract_lines on non-closed contracts for this project, with financials
         SELECT
           cl.qb_code_id,
           cl.amount           AS cl_amount,
@@ -156,10 +157,10 @@ router.get('/:id/budget/tree', requireAuth, async (req, res, next) => {
           c.description,
           c.earmarked_amount,
           c.total_value,
-          COALESCE(co.co_total,        0) AS co_total,
-          COALESCE(inv_fixed.invoiced,  0) AS invoiced_fixed,
-          COALESCE(inv_tm.tm_total,    0) AS tm_total,
-          COALESCE(inv_exp.exp_total,  0) AS exp_total
+          COALESCE(co.co_total,       0) AS co_total,
+          COALESCE(inv_fixed.invoiced, 0) AS invoiced_fixed,
+          COALESCE(inv_tm.tm_total,   0) AS tm_total,
+          COALESCE(inv_exp.exp_total, 0) AS exp_total
         FROM contract_lines cl
         JOIN contracts c ON c.id = cl.contract_id
           AND c.project_id = $1
@@ -188,14 +189,22 @@ router.get('/:id/budget/tree', requireAuth, async (req, res, next) => {
           WHERE status IN ('approved','pushed','paid') AND invoice_type = 'expense'
           GROUP BY contract_id
         ) inv_exp ON inv_exp.contract_id = c.id
+      ),
+      -- Union of QB codes with budget lines AND QB codes touched by contracts.
+      -- This ensures contracts always flow into the tree even with no budget set.
+      project_codes AS (
+        SELECT qb_code_id FROM budget_lines WHERE project_id = $1
+        UNION
+        SELECT DISTINCT qb_code_id FROM contract_data
       )
       SELECT
-        bl.id                 AS budget_line_id,
-        bl.qb_code_id,
-        bl.current_amount     AS budget,
-        bl.uncommitted_estimate,
+        bl.id                              AS budget_line_id,
+        pc.qb_code_id,
+        COALESCE(bl.current_amount, 0)     AS budget,
+        COALESCE(bl.uncommitted_estimate, 0) AS uncommitted_estimate,
+        bl.current_amount IS NULL          AS budget_not_set,
         q.code, q.name, q.parent_id, q.level,
-        COALESCE(SUM(cd.cl_amount), 0) AS contracted,
+        COALESCE(SUM(cd.cl_amount), 0)     AS contracted,
         JSON_AGG(
           JSON_BUILD_OBJECT(
             'contract_id',      cd.contract_id,
@@ -210,13 +219,13 @@ router.get('/:id/budget/tree', requireAuth, async (req, res, next) => {
             'exp_total',        cd.exp_total
           ) ORDER BY cd.vendor_name
         ) FILTER (WHERE cd.contract_id IS NOT NULL) AS contracts
-      FROM budget_lines bl
-      JOIN qb_codes q ON q.id = bl.qb_code_id
-      LEFT JOIN contract_data cd ON cd.qb_code_id = bl.qb_code_id
-      WHERE bl.project_id = $1
-      GROUP BY bl.id, bl.qb_code_id, bl.current_amount, bl.uncommitted_estimate,
+      FROM project_codes pc
+      JOIN qb_codes q ON q.id = pc.qb_code_id
+      LEFT JOIN budget_lines bl ON bl.qb_code_id = pc.qb_code_id AND bl.project_id = $1
+      LEFT JOIN contract_data cd ON cd.qb_code_id = pc.qb_code_id
+      GROUP BY bl.id, pc.qb_code_id, bl.current_amount, bl.uncommitted_estimate,
                q.code, q.name, q.parent_id, q.level
-      ORDER BY q.code
+      ORDER BY q.code ASC
     `, [projectId]);
 
     const rows = result.rows.map(r => {
@@ -252,6 +261,7 @@ router.get('/:id/budget/tree', requireAuth, async (req, res, next) => {
         parent_id:            r.parent_id,
         level:                Number(r.level) || 0,
         budget,
+        budget_not_set:       r.budget_not_set === true,
         contracted,
         uncommitted_estimate: uncommitted,
         expected_overage:     contracted - budget,

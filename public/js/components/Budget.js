@@ -44,10 +44,10 @@ window.Budget = function Budget({ projectId }) {
       <div className="panel">
         <div className="panel-header">
           <h2>Budget</h2>
-          <button onClick={() => setShowInit(true)}>+ Add/Update Codes</button>
+          <button onClick={() => setShowInit(true)}>+ Set Budgets</button>
         </div>
         <div className="empty">
-          No budget lines yet. <a onClick={() => setShowInit(true)}>Select QB codes</a> to initialize.
+          No budget data yet. Create contracts with QB code allocations and they will appear here automatically. Use <a onClick={() => setShowInit(true)}>Set Budgets</a> to add target amounts.
         </div>
         {showInit && <InitBudgetModal projectId={projectId} codes={qbCodes} existing={[]}
           onClose={() => setShowInit(false)} onSaved={async () => { setShowInit(false); await load(); }} />}
@@ -61,7 +61,7 @@ window.Budget = function Budget({ projectId }) {
     <div className="panel" style={{ overflowX: 'auto' }}>
       <div className="panel-header" style={{ marginBottom: 0 }}>
         <h2>Budget</h2>
-        <button onClick={() => setShowInit(true)}>+ Add/Update Codes</button>
+        <button onClick={() => setShowInit(true)}>+ Set Budgets</button>
       </div>
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginTop: 0 }}>
@@ -88,6 +88,7 @@ window.Budget = function Budget({ projectId }) {
                 onUncommittedChange={v => setEditingUncommitted(prev => ({ ...prev, value: v }))}
                 onSaveUncommitted={() => saveUncommitted(row)}
                 onCancelUncommitted={() => setEditingUncommitted(null)}
+                onSetBudget={() => setShowInit(true)}
               />
               {expanded[row.qb_code_id] && row.contracts.map(c => (
                 <ContractSubRow key={c.contract_id} contract={c} />
@@ -119,8 +120,9 @@ function BudgetTH({ children, tip }) {
 }
 
 function TotalsRow({ totals }) {
-  const overageColor = totals.expected_overage > 0 ? 'var(--danger)' : totals.expected_overage < 0 ? 'var(--ok)' : 'var(--text-2)';
-  const exposureColor = totals.total_exposure > totals.budget ? 'var(--danger)' : 'var(--text-1)';
+  const hasBudget = totals.budget > 0;
+  const overageColor = !hasBudget ? 'var(--text-3)' : totals.expected_overage > 0 ? 'var(--danger)' : totals.expected_overage < 0 ? 'var(--ok)' : 'var(--text-2)';
+  const exposureColor = hasBudget && totals.total_exposure > totals.budget ? 'var(--danger)' : 'var(--text-1)';
   return (
     <tr style={{ background: 'var(--surface-2)', borderBottom: '2px solid var(--border)' }}>
       <td style={{ padding: '10px 12px', fontWeight: 700, fontSize: 13, color: 'var(--text-1)' }}>
@@ -135,10 +137,10 @@ function TotalsRow({ totals }) {
   );
 }
 
-function QBCodeRow({ row, isExpanded, onToggle, editingUncommitted, onEditUncommitted, onUncommittedChange, onSaveUncommitted, onCancelUncommitted }) {
+function QBCodeRow({ row, isExpanded, onToggle, editingUncommitted, onEditUncommitted, onUncommittedChange, onSaveUncommitted, onCancelUncommitted, onSetBudget }) {
   const isEditingThis = editingUncommitted?.budget_line_id === row.budget_line_id;
-  const overageColor = row.expected_overage > 0 ? 'var(--danger)' : row.expected_overage < 0 ? 'var(--ok)' : 'var(--text-3)';
-  const exposureColor = row.total_exposure > row.budget ? 'var(--danger)' : 'var(--text-1)';
+  const overageColor = row.budget_not_set ? 'var(--text-3)' : row.expected_overage > 0 ? 'var(--danger)' : row.expected_overage < 0 ? 'var(--ok)' : 'var(--text-3)';
+  const exposureColor = (!row.budget_not_set && row.total_exposure > row.budget) ? 'var(--danger)' : 'var(--text-1)';
   const indent = (Number(row.level) || 0) * 16;
 
   return (
@@ -163,7 +165,15 @@ function QBCodeRow({ row, isExpanded, onToggle, editingUncommitted, onEditUncomm
           </div>
         </div>
       </td>
-      <MoneyCell val={row.budget} />
+      {row.budget_not_set ? (
+        <td style={{ textAlign: 'right', padding: '9px 12px' }}>
+          <span onClick={onSetBudget} style={{ fontSize: 11, color: 'var(--accent)', cursor: 'pointer', borderBottom: '1px dashed var(--accent)', whiteSpace: 'nowrap' }}>
+            Set budget →
+          </span>
+        </td>
+      ) : (
+        <MoneyCell val={row.budget} />
+      )}
       <MoneyCell val={row.contracted} />
       <MoneyCell val={row.expected_overage} color={overageColor} signed />
       <td style={{ textAlign: 'right', padding: '9px 12px', whiteSpace: 'nowrap' }}>
