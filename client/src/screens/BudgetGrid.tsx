@@ -338,7 +338,7 @@ export default function BudgetGrid() {
                       </tr>
                     ] : []),
 
-                    ...(sgOpen ? sgRows.map(row => {
+                    ...(sgOpen ? sgRows.map((row: BudgetRow) => {
                       const isA = (f: string) => active.rowId === row.id && active.field === f;
                       return (
                         <tr key={row.id} className={styles.dataRow}>

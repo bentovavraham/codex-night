@@ -79,15 +79,26 @@ app.use('/api', phaseRoutes);                   // /phases/:phaseId and /phases/
 app.use('/api', phaseBudgetRoutes);             // /phases/:phaseId/budget, /budget-lines/:id, /qb-accounts
 
 // --- Static SPA ---
-// Disable caching for JS components so edits are picked up without hard refresh
-app.use('/js', (req, res, next) => {
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  next();
-});
-app.use(express.static(path.join(__dirname, 'public')));
-app.get(/^\/(?!api\/).*/, (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+const clientDist = path.join(__dirname, 'client', 'dist');
+const hasClientBuild = fs.existsSync(path.join(clientDist, 'index.html'));
+
+if (hasClientBuild) {
+  // Serve the Vite-built React app
+  app.use(express.static(clientDist));
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+} else {
+  // Fall back to legacy public/ app (dev without a client build)
+  app.use('/js', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    next();
+  });
+  app.use(express.static(path.join(__dirname, 'public')));
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  });
+}
 
 // --- Error handler ---
 app.use((err, req, res, _next) => {
