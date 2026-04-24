@@ -531,6 +531,8 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
   const [err, setErr] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
   const [dupWarning, setDupWarning] = React.useState(null); // { message, duplicates }
+  const [g703Lines, setG703Lines] = React.useState([]); // [{qb_code_id, code, name, contract_amount, prev_billed, current}]
+  const [g703Loading, setG703Loading] = React.useState(false);
 
   function aiFieldStyle(field) {
     const c = confidence[field];
@@ -540,15 +542,28 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
   }
 
   React.useEffect(() => {
-    if (mode !== 'contract' || !contractId) { setContext(null); return; }
+    if (mode !== 'contract' || !contractId) { setContext(null); setG703Lines([]); return; }
     api.getContract(contractId).then(c => {
       const remaining = Number(c.remaining_amount);
       const tmInvoiced = Number(c.tm_invoiced_amount || 0);
       setContext({ total: Number(c.total_value), invoiced: Number(c.invoiced_amount), remaining, tmInvoiced });
       if (!vendor) setVendor(c.vendor_name);
-      // Only prefill amount with remaining for fixed-scope invoices
-      if (invoiceType === 'fixed' && (!amount || Number(amount) === 0)) setAmount(String(remaining));
     }).catch(e => setErr(e.message));
+  }, [contractId, mode]);
+
+  // Load G703 summary for line-item entry (fixed-scope only)
+  React.useEffect(() => {
+    if (mode !== 'contract' || !contractId || invoiceType !== 'fixed') { setG703Lines([]); return; }
+    setG703Loading(true);
+    api.getContractG703(contractId).then(g => {
+      const lines = (g.contract_lines || []).map(cl => ({
+        qb_code_id: cl.qb_code_id, code: cl.code, name: cl.name,
+        contract_amount: cl.contract_amount,
+        prev_billed: cl.total_billed,
+        current: '',
+      }));
+      setG703Lines(lines);
+    }).catch(() => setG703Lines([])).finally(() => setG703Loading(false));
   }, [contractId, mode, invoiceType]);
 
   async function onFile(f) {
@@ -595,10 +610,17 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
   const allocSum = allocs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
   const allocDiff = (Number(amount) || 0) - allocSum;
 
+  // For G703 line-entry mode, amount derives from line totals
+  const g703Total = g703Lines.reduce((s, l) => s + (Number(l.current) || 0), 0);
+  const usesG703 = mode === 'contract' && invoiceType === 'fixed' && g703Lines.length > 0;
+  const effectiveAmount = usesG703 ? g703Total : (Number(amount) || 0);
+
   async function save(force = false) {
     setErr(null);
     if (!force) setDupWarning(null);
-    if (!invoiceNumber || !amount) { setErr('Invoice number and amount are required.'); return; }
+    if (!invoiceNumber) { setErr('Invoice number is required.'); return; }
+    if (!usesG703 && !amount) { setErr('Invoice number and amount are required.'); return; }
+    if (usesG703 && g703Total <= 0) { setErr('Enter at least one line item amount.'); return; }
     if (mode === 'contract' && !contractId) { setErr('Select a contract or use standalone/multi mode.'); return; }
     if (mode === 'multi') {
       const cleaned = allocs.filter(a => a.contract_id && a.amount);
@@ -609,13 +631,19 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
     try {
       const body = {
         project_id: projectId, invoice_number: invoiceNumber, vendor_name: vendor,
-        amount: Number(amount), invoice_date: date || null,
+        amount: effectiveAmount, invoice_date: date || null,
         description: description || null, file_reference: fileRef?.file_reference || null,
         invoice_type: invoiceType,
       };
       if (force) body.force = true;
       if (mode === 'contract') {
         body.contract_id = Number(contractId);
+        // Include G703 line breakdown for fixed-scope invoices
+        if (usesG703) {
+          body.lines = g703Lines
+            .filter(l => Number(l.current) > 0)
+            .map(l => ({ qb_code_id: l.qb_code_id, current_amount: Number(l.current) }));
+        }
       } else if (mode === 'multi') {
         body.contracts = allocs.filter(a => a.contract_id && a.amount).map(a => ({
           contract_id: Number(a.contract_id), amount: Number(a.amount),
@@ -633,7 +661,7 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
     finally { setSaving(false); }
   }
 
-  const overspend = mode === 'contract' && invoiceType === 'fixed' && context && Number(amount) > context.remaining + 0.01;
+  const overspend = mode === 'contract' && invoiceType === 'fixed' && context && effectiveAmount > context.remaining + 0.01 && !usesG703;
   const pdfUrl = fileRef ? `/api/files/${encodeURIComponent(fileRef.file_reference)}` : null;
   const hasPdf = !!pdfUrl;
   const isLocked = !!defaultContractId; // contract context — locked to this contract
@@ -779,12 +807,14 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
                 </label>
                 <input value={invoiceNumber} onChange={e => { setInvoiceNumber(e.target.value); setConfidence(c => ({ ...c, invoice_number: undefined })); setConfirmed(false); }} placeholder="e.g. INV-001" autoFocus={!hasPdf} style={aiFieldStyle('invoice_number')} />
               </div>
-              <div>
-                <label data-tip="Total dollar amount billed on this invoice">
-                  Amount <ConfidenceDot level={confidence.amount} />
-                </label>
-                <input type="number" step="0.01" value={amount} onChange={e => { setAmount(e.target.value); setConfidence(c => ({ ...c, amount: undefined })); setConfirmed(false); }} placeholder="0.00" style={aiFieldStyle('amount')} />
-              </div>
+              {!usesG703 && (
+                <div>
+                  <label data-tip="Total dollar amount billed on this invoice">
+                    Amount <ConfidenceDot level={confidence.amount} />
+                  </label>
+                  <input type="number" step="0.01" value={amount} onChange={e => { setAmount(e.target.value); setConfidence(c => ({ ...c, amount: undefined })); setConfirmed(false); }} placeholder="0.00" style={aiFieldStyle('amount')} />
+                </div>
+              )}
               <div>
                 <label data-tip="Date printed on the vendor's invoice — may differ from today's date">
                   Invoice date <ConfidenceDot level={confidence.invoice_date} />
@@ -803,6 +833,67 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
                   placeholder="What is this invoice for?" />
               </div>
             </div>
+
+            {/* G703 Line-item entry — fixed-scope invoices against a contract */}
+            {usesG703 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>
+                    Pay Application Line Items
+                  </div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: g703Total > 0 ? 'var(--text-1)' : 'var(--text-3)' }}>
+                    Total: {fmt.money(g703Total)}
+                  </div>
+                </div>
+                {g703Loading && <div style={{ fontSize: 13, color: 'var(--text-3)', padding: '8px 0' }}>Loading contract lines…</div>}
+                {!g703Loading && (
+                  <div style={{ border: '1px solid var(--border-2)', borderRadius: 8, overflow: 'hidden' }}>
+                    {/* Table header */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 110px 110px 120px 100px', background: '#e8e3db', borderBottom: '2px solid var(--border-2)' }}>
+                      {['Code', 'Line Item', 'Contract Amt', 'Prev Billed', 'This Period', 'Remaining'].map((h, i) => (
+                        <div key={i} style={{ padding: '8px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(26,22,18,0.5)', textAlign: i > 1 ? 'right' : 'left', borderRight: i < 5 ? '1px solid var(--border)' : 'none' }}>{h}</div>
+                      ))}
+                    </div>
+                    {g703Lines.map((line, idx) => {
+                      const prev = line.prev_billed;
+                      const curr = Number(line.current) || 0;
+                      const remaining = line.contract_amount - prev - curr;
+                      const isOver = remaining < -0.01;
+                      return (
+                        <div key={line.qb_code_id} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 110px 110px 120px 100px', borderBottom: idx < g703Lines.length - 1 ? '1px solid var(--border)' : 'none', background: curr > 0 ? 'rgba(232,146,26,0.04)' : '#fff' }}>
+                          <div style={{ padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 12, color: 'rgba(26,22,18,0.5)', display: 'flex', alignItems: 'center', borderRight: '1px solid var(--border)' }}>{line.code}</div>
+                          <div style={{ padding: '6px 10px', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', borderRight: '1px solid var(--border)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{line.name}</div>
+                          <div style={{ padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 13, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', borderRight: '1px solid var(--border)' }}>{fmt.money(line.contract_amount)}</div>
+                          <div style={{ padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 13, textAlign: 'right', color: 'var(--text-3)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', borderRight: '1px solid var(--border)' }}>{prev > 0 ? fmt.money(prev) : '—'}</div>
+                          <div style={{ padding: '3px 6px', display: 'flex', alignItems: 'center', borderRight: '1px solid var(--border)' }}>
+                            <input type="number" step="0.01" min="0" value={line.current}
+                              onChange={e => {
+                                const n = g703Lines.slice();
+                                n[idx] = { ...n[idx], current: e.target.value };
+                                setG703Lines(n);
+                              }}
+                              placeholder="0.00"
+                              style={{ width: '100%', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 13, padding: '4px 6px', border: isOver ? '1.5px solid #dc2626' : '1px solid var(--border)', borderRadius: 4, background: isOver ? '#fef2f2' : '#fff' }} />
+                          </div>
+                          <div style={{ padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 13, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', color: isOver ? '#dc2626' : remaining === 0 ? '#15803d' : 'var(--text-1)' }}>
+                            {fmt.money(remaining)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {/* Totals row */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 110px 110px 120px 100px', background: '#ede8e0', borderTop: '2px solid var(--border-2)' }}>
+                      <div style={{ padding: '8px 10px', borderRight: '1px solid var(--border)' }} />
+                      <div style={{ padding: '8px 10px', fontSize: 13, fontWeight: 700, borderRight: '1px solid var(--border)' }}>Total</div>
+                      <div style={{ padding: '8px 10px', fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, textAlign: 'right', borderRight: '1px solid var(--border)' }}>{fmt.money(g703Lines.reduce((s, l) => s + l.contract_amount, 0))}</div>
+                      <div style={{ padding: '8px 10px', fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, textAlign: 'right', borderRight: '1px solid var(--border)' }}>{fmt.money(g703Lines.reduce((s, l) => s + l.prev_billed, 0))}</div>
+                      <div style={{ padding: '8px 10px', fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, textAlign: 'right', borderRight: '1px solid var(--border)', color: g703Total > 0 ? 'var(--accent)' : 'var(--text-3)' }}>{fmt.money(g703Total)}</div>
+                      <div style={{ padding: '8px 10px', fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, textAlign: 'right' }}>{fmt.money(g703Lines.reduce((s, l) => s + l.contract_amount - l.prev_billed - (Number(l.current) || 0), 0))}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Multi-contract split */}
             {mode === 'multi' && (
@@ -886,7 +977,7 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
               </span>
             </label>
           )}
-          <button className="primary" disabled={saving || (!!fileRef && !confirmed) || !!dupWarning} onClick={() => save(false)}>
+          <button className="primary" disabled={saving || (!!fileRef && !confirmed) || !!dupWarning || (usesG703 && g703Total <= 0)} onClick={() => save(false)}>
             {saving ? 'Creating…' : 'Create Invoice'}
           </button>
         </div>
@@ -894,3 +985,200 @@ window.NewInvoiceModal = function NewInvoiceModal({ projectId, contracts, onClos
     </div>
   );
 }
+
+// ── G703 Pay Application History ─────────────────────────────────────────────
+// Shown in the Invoices tab when viewing a specific contract.
+// Mirrors Seth's Excel: summary table per QB code + per-invoice line breakdown.
+window.InvoiceG703View = function InvoiceG703View({ contractId, projectId, onNewInvoice }) {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState(null);
+  const [expandedInv, setExpandedInv] = React.useState(new Set());
+
+  function load() {
+    setLoading(true);
+    api.getContractG703(contractId)
+      .then(d => { setData(d); setLoading(false); })
+      .catch(e => { setErr(e.message); setLoading(false); });
+  }
+  React.useEffect(load, [contractId]);
+
+  if (loading) return <div className="empty">Loading pay application history…</div>;
+  if (err) return <div className="error">{err}</div>;
+  if (!data) return null;
+
+  const { contract_lines, invoices } = data;
+  const hasLines = invoices.some(i => i.lines && i.lines.length > 0);
+
+  const NUM = { fontFamily: 'var(--mono)', fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em' };
+  const GRID = '1px solid var(--border)';
+  const BG_HEAD = '#e8e3db';
+  const BG_TOTAL = '#ede8e0';
+
+  function money(n) { return n != null && n !== 0 ? fmt.money(n) : <span style={{ color: '#c8c3ba' }}>—</span>; }
+  function pct(n) { return n != null ? `${n.toFixed(1)}%` : '—'; }
+
+  // Running cumulative total per invoice
+  let runningTotal = 0;
+  const invoiceTotals = invoices.map(inv => {
+    const thisAmt = Number(inv.amount) || 0;
+    runningTotal += thisAmt;
+    return { ...inv, running_total: runningTotal };
+  });
+
+  const grandTotal = invoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+  function toggleInv(id) {
+    setExpandedInv(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+
+  const statusColors = {
+    pending:          { color: '#b45309', bg: 'rgba(245,158,11,0.1)' },
+    pm_approved:      { color: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
+    partner_approved: { color: '#7c3aed', bg: 'rgba(124,58,237,0.08)' },
+    approved:         { color: '#15803d', bg: 'rgba(22,163,74,0.08)' },
+    pushed:           { color: '#0891b2', bg: 'rgba(8,145,178,0.08)' },
+    paid:             { color: '#15803d', bg: 'rgba(22,163,74,0.12)' },
+  };
+
+  return (
+    <div>
+      {/* Controls */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em' }}>Pay Application History</h3>
+          <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 3 }}>
+            {invoices.length} invoice{invoices.length !== 1 ? 's' : ''} · {fmt.money(grandTotal)} total billed
+          </div>
+        </div>
+        {onNewInvoice && (
+          <button className="primary" onClick={onNewInvoice}>+ New Invoice</button>
+        )}
+      </div>
+
+      {/* ── Summary Table (Seth's middle column) ── */}
+      {contract_lines.length > 0 && (
+        <div style={{ marginBottom: 24, borderRadius: 10, border: '1px solid var(--border-2)', overflow: 'hidden', boxShadow: '0 1px 4px rgba(28,24,20,0.06)' }}>
+          {/* Header */}
+          <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 130px 130px 90px', background: BG_HEAD, borderBottom: '2px solid var(--border-2)' }}>
+            {['Code', 'Line Item', 'Contract Amount', 'Total Billed', '% Complete'].map((h, i) => (
+              <div key={i} style={{ padding: '10px 13px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(26,22,18,0.5)', textAlign: i > 1 ? 'right' : 'left', borderRight: i < 4 ? `1px solid var(--border)` : 'none' }}>{h}</div>
+            ))}
+          </div>
+          {contract_lines.map((cl, idx) => {
+            const pctVal = cl.pct_complete;
+            const isOver = pctVal != null && pctVal > 100;
+            return (
+              <div key={cl.qb_code_id} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 130px 130px 90px', borderBottom: idx < contract_lines.length - 1 ? GRID : 'none', background: '#fff' }}>
+                <div style={{ padding: '9px 13px', ...NUM, fontSize: 12, color: 'rgba(26,22,18,0.45)', display: 'flex', alignItems: 'center', borderRight: GRID }}>{cl.code}</div>
+                <div style={{ padding: '9px 13px', fontSize: 14, fontWeight: 500, display: 'flex', alignItems: 'center', borderRight: GRID }}>{cl.name}</div>
+                <div style={{ padding: '9px 13px', ...NUM, fontSize: 14, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', borderRight: GRID }}>{money(cl.contract_amount)}</div>
+                <div style={{ padding: '9px 13px', ...NUM, fontSize: 14, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', color: isOver ? '#dc2626' : cl.total_billed > 0 ? 'var(--text-1)' : 'rgba(26,22,18,0.25)', borderRight: GRID }}>{money(cl.total_billed)}</div>
+                <div style={{ padding: '9px 13px', ...NUM, fontSize: 14, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', color: isOver ? '#dc2626' : pctVal >= 100 ? '#15803d' : pctVal >= 75 ? 'var(--text-1)' : 'var(--text-3)' }}>
+                  {pctVal != null ? `${pctVal.toFixed(1)}%` : '—'}
+                </div>
+              </div>
+            );
+          })}
+          {/* Summary totals row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 130px 130px 90px', background: BG_TOTAL, borderTop: '2px solid var(--border-2)' }}>
+            <div style={{ padding: '10px 13px', borderRight: GRID }} />
+            <div style={{ padding: '10px 13px', fontSize: 14, fontWeight: 700, borderRight: GRID }}>Total</div>
+            <div style={{ padding: '10px 13px', ...NUM, fontSize: 14, fontWeight: 700, textAlign: 'right', borderRight: GRID }}>{fmt.money(contract_lines.reduce((s, cl) => s + cl.contract_amount, 0))}</div>
+            <div style={{ padding: '10px 13px', ...NUM, fontSize: 14, fontWeight: 700, textAlign: 'right', borderRight: GRID }}>{fmt.money(contract_lines.reduce((s, cl) => s + cl.total_billed, 0))}</div>
+            <div style={{ padding: '10px 13px', borderRight: 'none' }} />
+          </div>
+        </div>
+      )}
+
+      {invoices.length === 0 && (
+        <div className="empty">No invoices yet. {onNewInvoice && <button className="primary" onClick={onNewInvoice} style={{ marginLeft: 10 }}>+ New Invoice</button>}</div>
+      )}
+
+      {/* ── Per-Invoice Pay Applications (Seth's left column) ── */}
+      {invoiceTotals.length > 0 && (
+        <div style={{ borderRadius: 10, border: '1px solid var(--border-2)', overflow: 'hidden', boxShadow: '0 1px 4px rgba(28,24,20,0.06)' }}>
+          {/* Table header */}
+          <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 130px 130px 110px 110px', background: BG_HEAD, borderBottom: '2px solid var(--border-2)' }}>
+            {['Invoice #', 'Date', 'This Period', 'Cumulative', 'Status', ''].map((h, i) => (
+              <div key={i} style={{ padding: '10px 13px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(26,22,18,0.5)', textAlign: i >= 2 && i < 5 ? 'right' : 'left', borderRight: i < 5 ? GRID : 'none' }}>{h}</div>
+            ))}
+          </div>
+
+          {invoiceTotals.map((inv, idx) => {
+            const isExpanded = expandedInv.has(inv.id);
+            const sc = statusColors[inv.status] || { color: 'var(--text-3)', bg: 'rgba(0,0,0,0.04)' };
+            const hasLineItems = inv.lines && inv.lines.length > 0;
+
+            return (
+              <div key={inv.id}>
+                {/* Invoice row */}
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 130px 130px 110px 110px', borderBottom: (!isExpanded || !hasLineItems) && idx < invoiceTotals.length - 1 ? GRID : 'none', background: isExpanded ? 'rgba(232,146,26,0.04)' : '#fff', cursor: hasLineItems ? 'pointer' : 'default' }}
+                  onClick={() => hasLineItems && toggleInv(inv.id)}>
+                  <div style={{ padding: '11px 13px', ...NUM, fontSize: 14, fontWeight: 600, color: 'var(--accent)', borderRight: GRID, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {hasLineItems && <span style={{ fontSize: 10, color: 'rgba(26,22,18,0.4)', userSelect: 'none' }}>{isExpanded ? '▼' : '▶'}</span>}
+                    {inv.invoice_number}
+                  </div>
+                  <div style={{ padding: '11px 13px', fontSize: 14, color: 'var(--text-2)', borderRight: GRID, display: 'flex', alignItems: 'center' }}>
+                    {inv.invoice_date ? fmt.date(inv.invoice_date) : <span style={{ color: 'rgba(26,22,18,0.25)' }}>—</span>}
+                  </div>
+                  <div style={{ padding: '11px 13px', ...NUM, fontSize: 14, fontWeight: 600, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', borderRight: GRID }}>{fmt.money(inv.amount)}</div>
+                  <div style={{ padding: '11px 13px', ...NUM, fontSize: 14, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', color: 'var(--text-3)', borderRight: GRID }}>{fmt.money(inv.running_total)}</div>
+                  <div style={{ padding: '11px 13px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', borderRight: GRID }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 5, textTransform: 'uppercase', letterSpacing: '0.06em', background: sc.bg, color: sc.color }}>{inv.status.replace('_', ' ')}</span>
+                  </div>
+                  <div style={{ padding: '11px 13px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                    {inv.file_reference && (
+                      <a href={`/api/files/${encodeURIComponent(inv.file_reference)}`} target="_blank"
+                        onClick={e => e.stopPropagation()}
+                        style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none' }}>PDF ↗</a>
+                    )}
+                  </div>
+                </div>
+
+                {/* Expanded G703 lines */}
+                {isExpanded && hasLineItems && (
+                  <div style={{ borderBottom: idx < invoiceTotals.length - 1 ? GRID : 'none', background: 'var(--surface-2)' }}>
+                    {/* Line detail header */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 130px 130px 120px', background: '#f0ece6', borderBottom: '1px solid var(--border)', borderTop: '1px solid var(--border-2)' }}>
+                      {['Code', 'Line Item', 'Contract Amt', 'Previously Billed', 'This Period'].map((h, i) => (
+                        <div key={i} style={{ padding: '7px 13px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(26,22,18,0.45)', textAlign: i > 1 ? 'right' : 'left', borderRight: i < 4 ? GRID : 'none' }}>{h}</div>
+                      ))}
+                    </div>
+                    {inv.lines.map((line, li) => (
+                      <div key={line.id || li} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 130px 130px 120px', borderBottom: li < inv.lines.length - 1 ? '1px solid var(--border)' : 'none', background: '#faf9f7' }}>
+                        <div style={{ padding: '8px 13px', ...NUM, fontSize: 12, color: 'rgba(26,22,18,0.4)', display: 'flex', alignItems: 'center', borderRight: GRID }}>{line.code}</div>
+                        <div style={{ padding: '8px 13px', fontSize: 13, display: 'flex', alignItems: 'center', borderRight: GRID }}>{line.name}</div>
+                        <div style={{ padding: '8px 13px', ...NUM, fontSize: 13, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', borderRight: GRID }}>{line.contract_amount > 0 ? fmt.money(line.contract_amount) : <span style={{ color: '#c8c3ba' }}>—</span>}</div>
+                        <div style={{ padding: '8px 13px', ...NUM, fontSize: 13, textAlign: 'right', color: 'var(--text-3)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', borderRight: GRID }}>{line.previous_billed > 0 ? fmt.money(line.previous_billed) : <span style={{ color: '#c8c3ba' }}>—</span>}</div>
+                        <div style={{ padding: '8px 13px', ...NUM, fontSize: 13, fontWeight: 600, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>{fmt.money(line.current_amount)}</div>
+                      </div>
+                    ))}
+                    {/* Line subtotal */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 130px 130px 120px', background: '#ede8e0', borderTop: '2px solid var(--border-2)' }}>
+                      <div style={{ padding: '8px 13px', borderRight: GRID }} />
+                      <div style={{ padding: '8px 13px', fontSize: 13, fontWeight: 700, borderRight: GRID }}>Subtotal</div>
+                      <div style={{ padding: '8px 13px', borderRight: GRID }} />
+                      <div style={{ padding: '8px 13px', borderRight: GRID }} />
+                      <div style={{ padding: '8px 13px', ...NUM, fontSize: 13, fontWeight: 700, textAlign: 'right' }}>{fmt.money(inv.lines.reduce((s, l) => s + l.current_amount, 0))}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Grand total row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 130px 130px 110px 110px', background: BG_TOTAL, borderTop: '2px solid var(--border-2)' }}>
+            <div style={{ padding: '11px 13px', borderRight: GRID }} />
+            <div style={{ padding: '11px 13px', fontSize: 14, fontWeight: 700, borderRight: GRID }}>Total</div>
+            <div style={{ padding: '11px 13px', ...NUM, fontSize: 14, fontWeight: 700, textAlign: 'right', borderRight: GRID }}>{fmt.money(grandTotal)}</div>
+            <div style={{ padding: '11px 13px', borderRight: GRID }} />
+            <div style={{ padding: '11px 13px', borderRight: GRID }} />
+            <div style={{ padding: '11px 13px' }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

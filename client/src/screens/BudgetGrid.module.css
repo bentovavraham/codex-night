@@ -74,16 +74,40 @@
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
 
-.thead {
+.theadGroup {
   position: sticky;
   top: 0;
+  z-index: 11;
+  background: var(--bg-2);
+}
+
+.thGroup {
+  padding: 0 8px;
+  height: 20px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--accent);
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.thGroupAlt { color: var(--amber); }
+
+.thead {
+  position: sticky;
+  top: 20px;
   z-index: 10;
   background: var(--bg-2);
 }
 
 .th {
   padding: 0 8px;
-  height: 28px;
+  height: 26px;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -225,8 +249,13 @@
 .tdCalc  { font-size: 11px; color: var(--text-3); }
 .tdMoney { text-align: right; font-family: var(--font-mono); font-size: 11.5px; }
 .tdPct   { text-align: right; font-family: var(--font-mono); font-size: 11.5px; }
-.tdQb    { padding: 0 4px; }
+.tdText  { font-size: 11.5px; }
+.tdQb    { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tdNotes { font-size: 11px; color: var(--text-3); }
+
+/* section number cells (used in section/sg rows) */
+.sn  { padding: 0 8px; text-align: right; font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text-2); border-bottom: 1px solid #3a3028; white-space: nowrap; height: 30px; }
+.sgn { padding: 0 8px; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--text-3); border-bottom: 1px solid var(--border); white-space: nowrap; height: 26px; }
 
 /* read-only computed cells */
 .ro { background: var(--bg); color: var(--text-2); }

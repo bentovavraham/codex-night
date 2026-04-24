@@ -110,6 +110,19 @@ CREATE TABLE IF NOT EXISTS invoices (
 CREATE INDEX IF NOT EXISTS idx_invoices_contract ON invoices(contract_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
 
+-- AIA G703 pay-application line items: each invoice broken down by QB code.
+-- current_amount = what is being billed on THIS invoice for this code.
+-- previous_billed is computed at query time (sum of prior invoice_lines for same contract+code).
+CREATE TABLE IF NOT EXISTS invoice_lines (
+    id             SERIAL PRIMARY KEY,
+    invoice_id     INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    qb_code_id     INTEGER NOT NULL REFERENCES qb_codes(id),
+    current_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_lines_invoice ON invoice_lines(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_lines_code    ON invoice_lines(qb_code_id);
+
 -- Vendors: seeded from a QuickBooks export. Used for smart-search on the
 -- contract vendor field. Kept as a separate table rather than free-text so
 -- we can link to QB IDs once real QB integration lands.

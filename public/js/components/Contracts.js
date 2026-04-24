@@ -713,6 +713,8 @@ function ContractDetail({ contractId, projectId, onClose }) {
   const [history, setHistory] = React.useState([]);
   const [err, setErr] = React.useState(null);
   const [activeTab, setActiveTab] = React.useState('overview');
+  const [showInvModal, setShowInvModal] = React.useState(false);
+  const [invRefreshKey, setInvRefreshKey] = React.useState(0);
 
   async function load() {
     try {
@@ -752,39 +754,98 @@ function ContractDetail({ contractId, projectId, onClose }) {
   if (err) return <div className="error">{err}</div>;
 
   const tabs = [
-    { k: 'overview',      label: 'Overview' },
+    { k: 'overview',      label: 'Schedule of Values' },
     { k: 'change-orders', label: `Change Orders${ledger && ledger.pending_co_count > 0 ? ` (${ledger.pending_co_count})` : ''}` },
     { k: 'invoices',      label: 'Invoices' },
+    { k: 'narrative',     label: 'How We Got Here' },
     { k: 'history',       label: 'History' },
     { k: 'alerts',        label: 'Alert Status' },
   ];
 
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <div>
-          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.025em' }}>{data.vendor_name}</h2>
-          <div style={{ display: 'flex', gap: 10, marginTop: 5, alignItems: 'center' }}>
-            <span style={{
-              fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
-              textTransform: 'uppercase', letterSpacing: '0.06em',
-              background: data.status === 'active' ? 'rgba(22,163,74,0.1)' : 'rgba(0,0,0,0.07)',
-              color: data.status === 'active' ? '#15803d' : '#7c7269',
-            }}>{data.status}</span>
-            {data.reference_number && <span style={{ fontSize: 13, color: 'rgba(26,22,18,0.45)' }}>Ref: {data.reference_number}</span>}
-            {data.file_reference && (
-              <a href={`/api/files/${encodeURIComponent(data.file_reference)}`} target="_blank" style={{ fontSize: 13, color: 'var(--accent)' }}>PDF ↗</a>
-            )}
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setEditing(!editing)}>{editing ? 'Cancel' : 'Edit'}</button>
-          <button onClick={onClose}>← Back</button>
-        </div>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', margin: '0 -32px -28px', background: '#fff' }}>
+      {/* Terminal header bar */}
+      {(() => {
+        const orig       = ledger ? Number(ledger.original_contract) || 0 : Number(data.total_value) || 0;
+        const commitment = ledger ? Number(ledger.commitment) || 0 : orig;
+        const earmarked  = ledger ? Number(ledger.earmarked_amount) || 0 : 0;
+        const exposure   = ledger ? Number(ledger.total_exposure) || commitment : commitment;
+        const invoiced   = ledger ? Number(ledger.invoiced) || 0 : 0;
+        const paid       = ledger ? Number(ledger.paid) || 0 : 0;
+        const cos        = ledger ? Number(ledger.approved_cos) || 0 : 0;
+        const expPct     = earmarked > 0 ? (exposure / earmarked) * 100 : null;
+        const invPct     = commitment > 0 ? (invoiced / commitment) * 100 : null;
+        const statusColor = data.status === 'active' ? '#4ade80' : data.status === 'closed' ? '#94a3b8' : '#fbbf24';
 
-      {/* KPI Spreadsheet — Equals.com style: tight rows, full grid, double-border totals */}
-      {ledger && !editing && (() => {
+        const Stat = ({ label, value, color }) => (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)' }}>{label}</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 16, fontWeight: 600, color: color || 'rgba(255,255,255,0.92)', fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em' }}>{value}</span>
+          </div>
+        );
+
+        return (
+          <div style={{ background: '#14110e', padding: '16px 24px 18px', borderBottom: '2px solid #2a2520' }}>
+            {/* Row 1: name + actions */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#fff', letterSpacing: '-0.025em' }}>{data.vendor_name}</h2>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: statusColor }}>● {data.status}</span>
+                {data.reference_number && (
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>REF {data.reference_number}</span>
+                )}
+                {data.contract_date && (
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{fmt.date(data.contract_date)}</span>
+                )}
+                {data.file_reference && (
+                  <a href={`/api/files/${encodeURIComponent(data.file_reference)}`} target="_blank"
+                     style={{ fontFamily: 'var(--mono)', fontSize: 11, color: '#e8921a', textDecoration: 'none', letterSpacing: '0.02em' }}>PDF ↗</a>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => setEditing(!editing)} style={{ fontSize: 12, padding: '5px 12px', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.7)', borderRadius: 4, cursor: 'pointer' }}>{editing ? 'Cancel' : 'Edit'}</button>
+                <button onClick={onClose} style={{ fontSize: 12, padding: '5px 12px', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.7)', borderRadius: 4, cursor: 'pointer' }}>← Back</button>
+              </div>
+            </div>
+            {/* Row 2: key stats ticker */}
+            <div style={{ display: 'flex', gap: 36, flexWrap: 'wrap' }}>
+              <Stat label="Contract"  value={fmt.money(orig)} />
+              {cos > 0 && <Stat label="+ COs"    value={`+${fmt.money(cos)}`} color="#fbbf24" />}
+              <Stat label="Commitment" value={fmt.money(commitment)} color="#fff" />
+              {earmarked > 0 && <Stat label="Budget"    value={fmt.money(earmarked)} />}
+              {earmarked > 0 && <Stat label="Exposure"  value={fmt.money(exposure)}  color={exposure > earmarked ? '#f87171' : '#4ade80'} />}
+              {earmarked > 0 && expPct !== null && <Stat label="% of Budget" value={`${expPct.toFixed(1)}%`} color={expPct >= 100 ? '#f87171' : expPct >= 90 ? '#fbbf24' : '#4ade80'} />}
+              <Stat label="Invoiced"  value={invoiced > 0 ? fmt.money(invoiced) : '—'} color={invoiced > 0 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.3)'} />
+              {invPct !== null && <Stat label="% Billed"  value={`${invPct.toFixed(1)}%`} color={invPct >= 100 ? '#4ade80' : '#fbbf24'} />}
+              <Stat label="Paid"      value={paid > 0 ? fmt.money(paid) : '—'} color={paid > 0 ? '#4ade80' : 'rgba(255,255,255,0.3)'} />
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Tab bar */}
+      {!editing && (
+        <div style={{ display: 'flex', gap: 0, background: '#1e1a16', borderBottom: '1px solid #2e2a24' }}>
+          {tabs.map(t => (
+            <button key={t.k} onClick={() => setActiveTab(t.k)} style={{
+              padding: '10px 18px',
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+              color: activeTab === t.k ? '#e8921a' : 'rgba(255,255,255,0.45)',
+              borderBottom: activeTab === t.k ? '2px solid #e8921a' : '2px solid transparent',
+              marginBottom: -1, whiteSpace: 'nowrap',
+              transition: 'color 0.1s',
+            }}
+            onMouseEnter={e => { if (activeTab !== t.k) e.currentTarget.style.color = 'rgba(255,255,255,0.65)'; }}
+            onMouseLeave={e => { if (activeTab !== t.k) e.currentTarget.style.color = 'rgba(255,255,255,0.38)'; }}
+            >{t.label}</button>
+          ))}
+        </div>
+      )}
+
+      {/* Schedule of Values — AIA G703 / Procore style: QB lines × financial columns */}
+      {activeTab === 'overview' && ledger && data && !editing && (() => {
         const orig            = Number(ledger.original_contract) || 0;
         const cos             = Number(ledger.approved_cos) || 0;
         const commitment      = Number(ledger.commitment) || 0;
@@ -795,211 +856,233 @@ function ContractDetail({ contractId, projectId, onClose }) {
         const totalBilled     = invoiced + tmInvoiced + expenseInvoiced;
         const paid            = Number(ledger.paid) || 0;
         const exposure        = Number(ledger.total_exposure) || commitment;
-        const buffer          = earmarked > 0 ? earmarked - exposure : null;
         const overBudget      = earmarked > 0 && exposure > earmarked;
 
-        // Grid constants — Equals-style
-        const GRID  = '1px solid #e2dfd8';
-        const GRID2 = '2px solid #c8c3ba';  // double-border for totals (accounting convention)
-        const NUM   = { fontFamily: 'var(--mono)', fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em' };
-        const CELL  = { padding: '5px 12px', borderRight: GRID, borderBottom: GRID, verticalAlign: 'middle' };
-        const DASH  = <span style={{ color: 'rgba(26,22,18,0.2)', fontFamily: 'var(--mono)' }}>—</span>;
+        // Shared style tokens — Equals.com aesthetic
+        const GRID    = '1px solid #e2dfd8';
+        const GRID2   = '2px solid #b8b2a8';
+        const NUM     = { fontFamily: 'var(--mono)', fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em' };
+        const DASH    = <span style={{ color: '#c8c3ba', fontFamily: 'var(--mono)', fontSize: 14 }}>—</span>;
+        const CP      = { padding: '8px 13px', borderRight: GRID, borderBottom: GRID, verticalAlign: 'middle' };
 
-        function N({ v, bold, color }) {
-          if (v === null || v === undefined) return DASH;
-          return <span style={{ ...NUM, fontSize: 13, fontWeight: bold ? 700 : 400, color: color || '#1a1612' }}>{fmt.money(v)}</span>;
-        }
-        function P({ v, color }) {
-          if (v === null || v === undefined) return DASH;
-          return <span style={{ ...NUM, fontSize: 13, fontWeight: 400, color: color || '#1a1612' }}>{v.toFixed(1)}%</span>;
-        }
-        function V({ v, bold }) {
-          if (v === null || v === undefined) return DASH;
-          const pos = v >= 0;
-          const color = pos ? '#15803d' : '#dc2626';
-          return <span style={{ ...NUM, fontSize: 13, fontWeight: bold ? 700 : 400, color }}>{pos ? '+' : ''}{fmt.money(v)}</span>;
-        }
-
-        // Section divider — thin rule with label, no background band
-        function Section({ label }) {
+        function Num({ v, bold, color, prefix }) {
+          if (v === null || v === undefined || v === '') return DASH;
+          const n = Number(v);
+          if (isNaN(n)) return DASH;
           return (
-            <tr>
-              <td colSpan={5} style={{
-                padding: '10px 12px 4px',
-                fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                textTransform: 'uppercase', color: 'rgba(26,22,18,0.38)',
-                borderBottom: GRID, background: '#faf9f7',
-                borderTop: '2px solid #d6d1c8',
+            <span style={{ ...NUM, fontSize: 14, fontWeight: bold ? 700 : 500, color: color || '#1a1612' }}>
+              {prefix || ''}{fmt.money(n)}
+            </span>
+          );
+        }
+        function Pct({ v, color }) {
+          if (v === null || v === undefined) return DASH;
+          return <span style={{ ...NUM, fontSize: 14, fontWeight: 500, color: color || '#1a1612' }}>{v.toFixed(1)}%</span>;
+        }
+
+        // QB lines pro-rated invoice share
+        const lines = (data.lines || []).sort((a, b) => (a.code||'').localeCompare(b.code||''));
+        const lineTotal = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+
+        function lineInvoiced(l) {
+          if (!lineTotal || !invoiced) return 0;
+          return invoiced * (Number(l.amount) / lineTotal);
+        }
+        function linePaid(l) {
+          if (!lineTotal || !paid) return 0;
+          return paid * (Number(l.amount) / lineTotal);
+        }
+
+        const exposurePct = earmarked > 0 ? (exposure / earmarked) * 100 : null;
+        const billPct     = commitment > 0 ? (totalBilled / commitment) * 100 : null;
+        const paidPct     = totalBilled > 0 ? (paid / totalBilled) * 100 : null;
+        const expColor    = overBudget ? '#dc2626' : earmarked > 0 && exposurePct >= 90 ? '#d97706' : null;
+
+        const COLS = [
+          { label: 'Line Item',         w: '30%', left: true },
+          { label: 'Sched. Value',      w: '12%', tip: 'Original contract allocation for this line' },
+          { label: '+ COs',             w: '10%', tip: 'Approved change orders (contract-level, not line-level)' },
+          { label: '= Revised',         w: '12%', tip: 'Scheduled value + change orders' },
+          { label: 'Invoiced',          w: '12%', tip: 'Approved invoices billed against this line (pro-rated by allocation share)' },
+          { label: 'Remaining',         w: '12%', tip: 'Revised contract value minus invoiced' },
+          { label: '% Billed',          w: '8%',  tip: 'Invoiced ÷ revised contract value' },
+          { label: 'Paid',              w: '10%', tip: 'Cash confirmed paid (pro-rated)' },
+        ];
+
+        function TH({ children, left, tip, last }) {
+          return (
+            <th data-tip={tip} style={{
+              padding: '9px 13px',
+              textAlign: left ? 'left' : 'right',
+              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+              color: 'rgba(255,255,255,0.5)',
+              textTransform: 'uppercase', letterSpacing: '0.07em',
+              background: '#1e1a16',
+              borderRight: last ? 'none' : '1px solid #2e2a24',
+              borderBottom: '2px solid #2e2a24',
+              whiteSpace: 'nowrap',
+            }}>{children}</th>
+          );
+        }
+
+        function DataRow({ label, subLabel, schedVal, cos: rowCos, revised, inv, remaining, pct, pctColor, paidAmt, bold, total, muted, indentPx }) {
+          const bg = total ? '#faf9f7' : '#ffffff';
+          const bTop = total ? GRID2 : 'none';
+          const fw = total || bold ? 700 : 500;
+          const fc = muted ? '#b8b2a8' : '#1a1612';
+          const fs = 14;
+          return (
+            <tr style={{ background: bg }}>
+              <td style={{ ...CP, borderTop: bTop, paddingLeft: indentPx || 11, fontSize: fs, fontWeight: fw, color: fc }}>
+                {subLabel
+                  ? <><span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'rgba(26,22,18,0.4)', marginRight: 8 }}>{subLabel}</span>{label}</>
+                  : label
+                }
+              </td>
+              <td style={{ ...CP, borderTop: bTop, textAlign: 'right' }}><Num v={schedVal} bold={bold || total} /></td>
+              <td style={{ ...CP, borderTop: bTop, textAlign: 'right' }}>
+                {rowCos > 0 ? <Num v={rowCos} bold={bold || total} color="#d97706" prefix="+" /> : DASH}
+              </td>
+              <td style={{ ...CP, borderTop: bTop, textAlign: 'right' }}><Num v={revised} bold={bold || total} /></td>
+              <td style={{ ...CP, borderTop: bTop, textAlign: 'right' }}>
+                <Num v={inv > 0 ? inv : null} bold={bold || total} color={inv > (revised || 0) ? '#dc2626' : null} />
+              </td>
+              <td style={{ ...CP, borderTop: bTop, textAlign: 'right' }}>
+                <Num v={remaining !== null && remaining !== undefined ? remaining : null}
+                     bold={bold || total}
+                     color={remaining < 0 ? '#dc2626' : remaining === 0 ? '#15803d' : null} />
+              </td>
+              <td style={{ ...CP, borderTop: bTop, textAlign: 'right' }}>
+                <Pct v={pct} color={pctColor} />
+              </td>
+              <td style={{ ...CP, borderTop: bTop, textAlign: 'right', borderRight: 'none' }}>
+                <Num v={paidAmt > 0 ? paidAmt : null} bold={bold || total} color="#15803d" />
+              </td>
+            </tr>
+          );
+        }
+
+        function SectionRow({ label }) {
+          return (
+            <tr style={{ background: '#262018', borderTop: '2px solid #2e2a24' }}>
+              <td colSpan={8} style={{
+                padding: '6px 13px 5px',
+                fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                letterSpacing: '0.09em', textTransform: 'uppercase',
+                color: 'rgba(255,255,255,0.4)',
+                borderBottom: '1px solid #2e2a24',
               }}>{label}</td>
             </tr>
           );
         }
 
-        // Standard row
-        function Row({ label, tip, goal, actual, variance, vColor, pct, pColor, bold, total, indent }) {
-          const rowBg = total ? '#faf9f7' : '#ffffff';
-          const topBorder = total ? GRID2 : 'none';
-          const fw = bold || total ? 600 : 400;
-          const fs = 13;
-          return (
-            <tr style={{ background: rowBg }}>
-              <td data-tip={tip} style={{
-                ...CELL,
-                paddingLeft: indent ? 24 : 12,
-                borderTop: topBorder,
-                fontSize: fs, fontWeight: fw, color: '#1a1612',
-                minWidth: 220,
-              }}>
-                {label}
-              </td>
-              <td style={{ ...CELL, textAlign: 'right', borderTop: topBorder, width: 130 }}>
-                <N v={goal} bold={bold || total} />
-              </td>
-              <td style={{ ...CELL, textAlign: 'right', borderTop: topBorder, width: 130 }}>
-                <N v={actual} bold={bold || total} color={vColor && actual > (goal || 0) ? vColor : null} />
-              </td>
-              <td style={{ ...CELL, textAlign: 'right', borderTop: topBorder, width: 120 }}>
-                {variance !== undefined ? <V v={variance} bold={bold || total} /> : DASH}
-              </td>
-              <td style={{ ...CELL, textAlign: 'right', borderTop: topBorder, borderRight: 'none', width: 80 }}>
-                <P v={pct} color={pColor} />
-              </td>
-            </tr>
-          );
-        }
-
-        // Derived
-        const cosPct      = orig > 0 && cos > 0  ? (cos / orig) * 100             : null;
-        const exposurePct = earmarked > 0          ? (exposure / earmarked) * 100   : null;
-        const invPct      = commitment > 0         ? (invoiced / commitment) * 100  : null;
-        const billPct     = commitment > 0         ? (totalBilled / commitment) * 100 : null;
-        const paidPct     = totalBilled > 0        ? (paid / totalBilled) * 100     : null;
-
-        const expColor    = overBudget ? '#dc2626' : earmarked > 0 && exposurePct >= 90 ? '#d97706' : null;
-        const bufColor    = buffer === null ? null : buffer < 0 ? '#dc2626' : '#15803d';
-
         return (
-          <div style={{ borderTop: '2px solid #d6d1c8', borderBottom: '2px solid #d6d1c8', background: '#fff' }}>
+          <div style={{ borderTop: '2px solid #2e2a24', borderBottom: '2px solid #2e2a24', background: '#fff' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
               <colgroup>
-                <col style={{ width: '40%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
+                {COLS.map((c, i) => <col key={i} style={{ width: c.w }} />)}
               </colgroup>
               <thead>
-                <tr style={{ background: '#f0ede8' }}>
-                  {[
-                    { label: 'Metric',           left: true,  tip: null },
-                    { label: 'Budget / Goal',    left: false, tip: 'Target or internal budget for this line' },
-                    { label: 'Actual',           left: false, tip: 'Current committed, billed, or paid amount' },
-                    { label: 'Variance',         left: false, tip: 'Actual minus goal — green = under, red = over' },
-                    { label: '% of Goal',        left: false, tip: 'Actual as a percentage of the goal' },
-                  ].map((h, i) => (
-                    <th key={i} data-tip={h.tip} style={{
-                      padding: '8px 12px',
-                      textAlign: h.left ? 'left' : 'right',
-                      fontSize: 10, fontWeight: 700,
-                      color: 'rgba(26,22,18,0.45)',
-                      textTransform: 'uppercase', letterSpacing: '0.09em',
-                      borderRight: i < 4 ? GRID : 'none',
-                      borderBottom: '2px solid #d6d1c8',
-                      whiteSpace: 'nowrap',
-                    }}>{h.label}</th>
+                <tr>
+                  {COLS.map((c, i) => (
+                    <TH key={i} left={c.left} tip={c.tip} last={i === COLS.length - 1}>{c.label}</TH>
                   ))}
                 </tr>
               </thead>
               <tbody>
 
-                <Section label="Contract Scope" />
-                <Row label="Initial Contract"
-                  tip="The original signed contract value"
-                  actual={orig} />
-                <Row label="  + Change Orders"
-                  tip="Approved change orders added to the contract"
-                  indent
-                  actual={cos > 0 ? cos : null}
-                  variance={cos > 0 ? cos : undefined}
-                  pct={cosPct}
-                  pColor={cosPct >= 25 ? '#dc2626' : cosPct > 0 ? '#d97706' : null} />
-                <Row label="= Commitment"
-                  tip="Legal obligation: initial contract + all approved COs"
-                  total
-                  actual={commitment}
-                  goal={earmarked > 0 ? earmarked : null}
-                  variance={earmarked > 0 ? earmarked - commitment : undefined}
-                  pct={earmarked > 0 ? (commitment / earmarked) * 100 : null}
-                  pColor={earmarked > 0 && commitment > earmarked ? '#dc2626' : null} />
+                {/* QB code line items */}
+                <SectionRow label="Schedule of Values" />
+                {lines.map(l => {
+                  const lAmt  = Number(l.amount) || 0;
+                  const lInv  = lineInvoiced(l);
+                  const lPaid = linePaid(l);
+                  const lPct  = lAmt > 0 ? (lInv / lAmt) * 100 : null;
+                  return (
+                    <DataRow key={l.id}
+                      subLabel={l.code}
+                      label={l.name}
+                      schedVal={lAmt}
+                      cos={0}
+                      revised={lAmt}
+                      inv={lInv}
+                      remaining={lAmt - lInv}
+                      pct={lPct}
+                      pctColor={lPct > 100 ? '#dc2626' : null}
+                      paidAmt={lPaid}
+                    />
+                  );
+                })}
+                {lines.length === 0 && (
+                  <tr><td colSpan={8} style={{ padding: '10px 11px', fontSize: 13, color: '#b8b2a8', borderBottom: GRID }}>No QB code lines on this contract.</td></tr>
+                )}
 
-                <Section label="Additional Exposure" />
-                <Row label="  + T&M Invoiced"
-                  tip="Time & Materials billed beyond fixed scope"
-                  indent
-                  actual={tmInvoiced > 0 ? tmInvoiced : null} />
-                <Row label="  + Expenses Invoiced"
-                  tip="Reimbursable expenses billed beyond fixed scope"
-                  indent
-                  actual={expenseInvoiced > 0 ? expenseInvoiced : null} />
-                <Row label="= Total Exposure"
-                  tip="Commitment + T&M + expenses — full cost projection"
+                {/* Fixed scope total row */}
+                <DataRow
+                  label="Fixed Scope Total"
+                  schedVal={orig}
+                  cos={cos}
+                  revised={commitment}
+                  inv={invoiced}
+                  remaining={commitment - invoiced}
+                  pct={commitment > 0 ? (invoiced / commitment) * 100 : null}
+                  pctColor={invoiced > commitment ? '#dc2626' : null}
+                  paidAmt={paid}
                   total
-                  actual={exposure}
-                  goal={earmarked > 0 ? earmarked : null}
-                  variance={earmarked > 0 ? earmarked - exposure : undefined}
+                />
+
+                {/* T&M + Expenses */}
+                {(tmInvoiced > 0 || expenseInvoiced > 0) && (
+                  <SectionRow label="Additional Exposure (above contract)" />
+                )}
+                {tmInvoiced > 0 && (
+                  <DataRow
+                    label="T&M" subLabel="Time & Materials"
+                    schedVal={null} cos={0} revised={null}
+                    inv={tmInvoiced} remaining={null} pct={null} paidAmt={0}
+                    muted={false}
+                  />
+                )}
+                {expenseInvoiced > 0 && (
+                  <DataRow
+                    label="Expenses" subLabel="Reimbursables"
+                    schedVal={null} cos={0} revised={null}
+                    inv={expenseInvoiced} remaining={null} pct={null} paidAmt={0}
+                    muted={false}
+                  />
+                )}
+
+                {/* Grand total */}
+                <SectionRow label="Summary" />
+                <DataRow
+                  label="Total Exposure"
+                  schedVal={earmarked > 0 ? earmarked : null}
+                  cos={cos}
+                  revised={earmarked > 0 ? earmarked : null}
+                  inv={exposure}
+                  remaining={earmarked > 0 ? earmarked - exposure : null}
                   pct={exposurePct}
-                  pColor={expColor} />
-
-                <Section label="Billing" />
-                <Row label="  Fixed Scope Invoiced"
-                  tip="Invoices billed against the fixed contract commitment"
-                  indent
-                  actual={invoiced > 0 ? invoiced : null}
-                  goal={commitment}
-                  variance={invoiced - commitment}
-                  pct={invPct}
-                  pColor={invoiced > commitment ? '#dc2626' : null} />
-                <Row label="  T&M Invoiced"
-                  tip="T&M invoices billed — these are above fixed scope"
-                  indent
-                  actual={tmInvoiced > 0 ? tmInvoiced : null} />
-                <Row label="  Expenses Invoiced"
-                  tip="Expense reimbursements billed"
-                  indent
-                  actual={expenseInvoiced > 0 ? expenseInvoiced : null} />
-                <Row label="= Total Billed"
-                  tip="All approved invoices: fixed + T&M + expenses"
-                  total
-                  actual={totalBilled > 0 ? totalBilled : null}
-                  goal={commitment}
-                  variance={totalBilled > 0 ? totalBilled - commitment : undefined}
-                  pct={billPct}
-                  pColor={totalBilled > commitment ? '#dc2626' : null} />
-
-                <Section label="Collections" />
-                <Row label="Paid to Vendor"
-                  tip="Cash actually sent — confirmed payments"
-                  actual={paid > 0 ? paid : null}
-                  goal={totalBilled > 0 ? totalBilled : null}
-                  variance={totalBilled > 0 ? paid - totalBilled : undefined}
-                  pct={paidPct}
-                  pColor={paidPct !== null && paidPct < 100 ? '#d97706' : '#15803d'} />
+                  pctColor={expColor}
+                  paidAmt={paid}
+                  total bold
+                />
 
               </tbody>
             </table>
+
+            {/* Pending CO notice */}
+            {ledger.pending_co_count > 0 && (
+              <div style={{ padding: '7px 11px', borderTop: '1px solid #2e2a24', fontFamily: 'var(--mono)', fontSize: 11, color: '#fbbf24', background: '#1e1a16', letterSpacing: '0.02em' }}>
+                ⚠ {ledger.pending_co_count} CO{ledger.pending_co_count > 1 ? 's' : ''} PENDING — {fmt.money(ledger.pending_cos)} not yet committed
+              </div>
+            )}
           </div>
         );
       })()}
 
-      {/* Alerts */}
-      {ledger && ledger.pending_co_count > 0 && (
-        <div style={{ padding: '8px 14px', marginBottom: 12, borderRadius: 5, background: 'rgba(230,160,30,0.1)', border: '1px solid rgba(230,160,30,0.3)', fontSize: 12, color: 'var(--warn)' }}>
-          ⚠️ {ledger.pending_co_count} change order{ledger.pending_co_count > 1 ? 's' : ''} pending — {fmt.money(ledger.pending_cos)} not yet committed
-        </div>
-      )}
 
       {editing ? (
-        <div className="form-grid" style={{ marginBottom: 16 }}>
+        <div className="form-grid" style={{ marginBottom: 16, padding: '20px 32px' }}>
           <div><label>Vendor</label><input value={form.vendor_name} onChange={e => setForm({ ...form, vendor_name: e.target.value })} /></div>
           <div><label>Reference #</label><input value={form.reference_number} onChange={e => setForm({ ...form, reference_number: e.target.value })} /></div>
           <div><label>Initial Contract Amount</label><input type="number" step="0.01" value={form.total_value} onChange={e => setForm({ ...form, total_value: e.target.value })} /></div>
@@ -1017,34 +1100,27 @@ function ContractDetail({ contractId, projectId, onClose }) {
         </div>
       ) : (
         <>
-          {/* Sub-tabs */}
-          <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: 18 }}>
-            {tabs.map(t => (
-              <button key={t.k} onClick={() => setActiveTab(t.k)} style={{
-                padding: '10px 18px', background: 'transparent', border: 'none', cursor: 'pointer',
-                fontSize: 14, fontWeight: activeTab === t.k ? 700 : 500,
-                color: activeTab === t.k ? 'var(--accent)' : 'var(--text-2)',
-                borderBottom: activeTab === t.k ? '2px solid var(--accent)' : '2px solid transparent',
-                marginBottom: -1,
-              }}>{t.label}</button>
-            ))}
-          </div>
-
-          {activeTab === 'overview' && ledger && (
-            <ContractDashboard contract={data} ledger={ledger} onGoToTab={setActiveTab} />
-          )}
           {activeTab === 'overview' && !ledger && (
             <div className="empty">Loading…</div>
           )}
+
+          {activeTab === 'narrative' && ledger && (
+            <div style={{ padding: '20px 32px' }}>
+              <ContractDashboard contract={data} ledger={ledger} onGoToTab={setActiveTab} />
+            </div>
+          )}
+          {activeTab === 'narrative' && !ledger && <div className="empty">Loading…</div>}
 
           {activeTab === 'change-orders' && (
             <ChangeOrders contractId={contractId} contractVendor={data.vendor_name}
               onLedgerRefresh={load} />
           )}
 
-
-{activeTab === 'invoices' && (
-            <Invoices projectId={projectId} contractId={contractId} />
+          {activeTab === 'invoices' && (
+            <div style={{ padding: '24px 32px' }}>
+              <InvoiceG703View key={invRefreshKey} contractId={contractId} projectId={projectId}
+                onNewInvoice={() => setShowInvModal(true)} />
+            </div>
           )}
 
           {activeTab === 'alerts' && ledger && (
@@ -1144,6 +1220,17 @@ function ContractDetail({ contractId, projectId, onClose }) {
             </div>
           )}
         </>
+      )}
+
+      {showInvModal && (
+        <NewInvoiceModal
+          projectId={projectId}
+          defaultContractId={contractId}
+          lockedContract={data}
+          contracts={[]}
+          onClose={() => setShowInvModal(false)}
+          onSaved={() => { setShowInvModal(false); setInvRefreshKey(k => k + 1); load(); }}
+        />
       )}
     </div>
   );

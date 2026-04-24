@@ -274,6 +274,19 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
         description: description || null,
       }, req.session.userId);
     }
+    // Insert G703 line items (pay-application line breakdown)
+    const lines = req.body?.lines;
+    if (Array.isArray(lines) && lines.length > 0 && invoiceType === 'fixed') {
+      for (const line of lines) {
+        const lineAmt = Number(line.current_amount);
+        if (!line.qb_code_id || !lineAmt || lineAmt <= 0) continue;
+        await client.query(
+          'INSERT INTO invoice_lines (invoice_id, qb_code_id, current_amount) VALUES ($1, $2, $3)',
+          [invoiceId, Number(line.qb_code_id), lineAmt]
+        );
+      }
+    }
+
     await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); next(err); }
@@ -292,7 +305,28 @@ router.get('/invoices/:id', requireAuth, async (req, res, next) => {
       `SELECT ic.contract_id, ic.amount, c.vendor_name
        FROM invoice_contracts ic JOIN contracts c ON c.id = ic.contract_id
        WHERE ic.invoice_id = $1 ORDER BY ic.id`, [inv.id]);
-    res.json({ ...inv, contract_allocations: allocs.rows });
+    // Fetch G703 line items with previous_billed computed
+    const lines = await pool.query(
+      `SELECT il.id, il.qb_code_id, il.current_amount,
+              qc.code, qc.name AS qc_name,
+              cl.amount AS contract_amount,
+              COALESCE((
+                SELECT SUM(il2.current_amount)
+                FROM invoice_lines il2
+                JOIN invoices i2 ON i2.id = il2.invoice_id
+                WHERE il2.qb_code_id = il.qb_code_id
+                  AND i2.contract_id = $2
+                  AND (i2.invoice_date < $3 OR (i2.invoice_date = $3 AND i2.id < $4))
+                  AND i2.status != 'rejected'
+              ), 0) AS previous_billed
+       FROM invoice_lines il
+       JOIN qb_codes qc ON qc.id = il.qb_code_id
+       LEFT JOIN contract_lines cl ON cl.contract_id = $2 AND cl.qb_code_id = il.qb_code_id
+       WHERE il.invoice_id = $1
+       ORDER BY qc.code`,
+      [inv.id, inv.contract_id || 0, inv.invoice_date, inv.id]
+    );
+    res.json({ ...inv, contract_allocations: allocs.rows, lines: lines.rows });
   } catch (err) { next(err); }
 });
 
@@ -552,6 +586,80 @@ router.post('/invoices/:id/mark-paid', requireAuth, async (req, res, next) => {
     res.json(result.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); next(err); }
   finally { client.release(); }
+});
+
+// GET /api/contracts/:id/g703 ------------------------------------------------
+// Full AIA G703 pay-application history for a contract.
+// Returns: { contract, contract_lines (with cumulative totals), invoices (with per-invoice lines + previous_billed) }
+router.get('/contracts/:id/g703', requireAuth, async (req, res, next) => {
+  try {
+    const contractId = Number(req.params.id);
+    const contractRes = await pool.query('SELECT * FROM contracts WHERE id = $1', [contractId]);
+    if (!contractRes.rows[0]) return res.status(404).json({ error: 'Not found' });
+    const contract = contractRes.rows[0];
+    if (!(await projects.userCanAccess(req.session.userId, contract.project_id)))
+      return res.status(403).json({ error: 'Forbidden' });
+
+    const [contractLinesRes, invoicesRes] = await Promise.all([
+      pool.query(
+        `SELECT cl.qb_code_id, cl.amount, qc.code, qc.name
+         FROM contract_lines cl
+         JOIN qb_codes qc ON qc.id = cl.qb_code_id
+         WHERE cl.contract_id = $1
+         ORDER BY qc.code`,
+        [contractId]
+      ),
+      pool.query(
+        `SELECT * FROM invoices
+         WHERE contract_id = $1 AND status != 'rejected'
+         ORDER BY invoice_date NULLS LAST, id`,
+        [contractId]
+      ),
+    ]);
+
+    const invoiceIds = invoicesRes.rows.map(i => i.id);
+    let allLines = [];
+    if (invoiceIds.length > 0) {
+      const linesRes = await pool.query(
+        `SELECT il.*, qc.code, qc.name AS qc_name, cl.amount AS contract_amount
+         FROM invoice_lines il
+         JOIN qb_codes qc ON qc.id = il.qb_code_id
+         LEFT JOIN contract_lines cl ON cl.contract_id = $1 AND cl.qb_code_id = il.qb_code_id
+         WHERE il.invoice_id = ANY($2::int[])
+         ORDER BY il.invoice_id, qc.code`,
+        [contractId, invoiceIds]
+      );
+      allLines = linesRes.rows;
+    }
+
+    // Process invoices in chronological order, tracking cumulative per code
+    const cumulativeByCode = {};
+    const invoicesWithLines = invoicesRes.rows.map(inv => {
+      const invLines = allLines.filter(l => Number(l.invoice_id) === inv.id);
+      const linesWithPrev = invLines.map(l => ({
+        id: l.id, qb_code_id: l.qb_code_id,
+        code: l.code, name: l.qc_name,
+        contract_amount: Number(l.contract_amount) || 0,
+        previous_billed: cumulativeByCode[l.qb_code_id] || 0,
+        current_amount: Number(l.current_amount),
+      }));
+      for (const l of invLines) {
+        cumulativeByCode[l.qb_code_id] = (cumulativeByCode[l.qb_code_id] || 0) + Number(l.current_amount);
+      }
+      return { ...inv, lines: linesWithPrev };
+    });
+
+    const contractLines = contractLinesRes.rows.map(cl => ({
+      qb_code_id: cl.qb_code_id, code: cl.code, name: cl.name,
+      contract_amount: Number(cl.amount),
+      total_billed: cumulativeByCode[cl.qb_code_id] || 0,
+      pct_complete: cl.amount > 0
+        ? ((cumulativeByCode[cl.qb_code_id] || 0) / Number(cl.amount)) * 100
+        : null,
+    }));
+
+    res.json({ contract, contract_lines: contractLines, invoices: invoicesWithLines });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

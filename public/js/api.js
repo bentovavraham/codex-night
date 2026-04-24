@@ -83,6 +83,7 @@ window.api = {
   bulkApprove:       (ids)              => request('POST', '/api/invoices/bulk-approve', { ids }),
   markPushed:        (id)               => request('POST', `/api/invoices/${id}/mark-pushed`),
   markPaid:          (id, paid_date)    => request('POST', `/api/invoices/${id}/mark-paid`, { paid_date }),
+  getContractG703:   (contractId)       => request('GET',  `/api/contracts/${contractId}/g703`),
 
   // File upload / extraction
   uploadFile: async (file) => {
