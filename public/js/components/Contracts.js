@@ -763,12 +763,17 @@ function ContractDetail({ contractId, projectId, onClose }) {
     <div className="panel">
       <div className="panel-header">
         <div>
-          <h2 style={{ margin: 0 }}>{data.vendor_name}</h2>
-          <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
-            <span className={`badge ${data.status}`}>{data.status}</span>
-            {data.reference_number && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Ref: {data.reference_number}</span>}
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.025em' }}>{data.vendor_name}</h2>
+          <div style={{ display: 'flex', gap: 10, marginTop: 5, alignItems: 'center' }}>
+            <span style={{
+              fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+              textTransform: 'uppercase', letterSpacing: '0.06em',
+              background: data.status === 'active' ? 'rgba(22,163,74,0.1)' : 'rgba(0,0,0,0.07)',
+              color: data.status === 'active' ? '#15803d' : '#7c7269',
+            }}>{data.status}</span>
+            {data.reference_number && <span style={{ fontSize: 13, color: 'rgba(26,22,18,0.45)' }}>Ref: {data.reference_number}</span>}
             {data.file_reference && (
-              <a href={`/api/files/${encodeURIComponent(data.file_reference)}`} target="_blank" style={{ fontSize: 12 }}>📄 Contract</a>
+              <a href={`/api/files/${encodeURIComponent(data.file_reference)}`} target="_blank" style={{ fontSize: 13, color: 'var(--accent)' }}>PDF ↗</a>
             )}
           </div>
         </div>
@@ -778,137 +783,184 @@ function ContractDetail({ contractId, projectId, onClose }) {
         </div>
       </div>
 
-      {/* 6-block KPI grid + burn bar — persistent across all tabs */}
+      {/* KPI Spreadsheet — persistent across all tabs */}
       {ledger && !editing && (() => {
         const orig            = Number(ledger.original_contract) || 0;
         const cos             = Number(ledger.approved_cos) || 0;
-        const tm              = Number(ledger.tm_approved) || 0;
         const commitment      = Number(ledger.commitment) || 0;
         const earmarked       = Number(ledger.earmarked_amount) || 0;
-        const invoiced        = Number(ledger.invoiced) || 0;          // fixed-scope only
-        const tmInvoiced      = Number(ledger.tm_invoiced) || 0;       // T&M invoices
-        const expenseInvoiced = Number(ledger.expense_invoiced) || 0;  // expense invoices
+        const invoiced        = Number(ledger.invoiced) || 0;
+        const tmInvoiced      = Number(ledger.tm_invoiced) || 0;
+        const expenseInvoiced = Number(ledger.expense_invoiced) || 0;
         const totalBilled     = invoiced + tmInvoiced + expenseInvoiced;
         const paid            = Number(ledger.paid) || 0;
         const exposure        = Number(ledger.total_exposure) || commitment;
         const buffer          = earmarked > 0 ? earmarked - exposure : null;
         const overBudget      = earmarked > 0 && exposure > earmarked;
-        const cosPct          = orig > 0 && cos > 0 ? Math.round((cos / orig) * 100) : 0;
-        const invPct          = commitment > 0 && invoiced > 0 ? Math.round((invoiced / commitment) * 100) : 0;
-        const paidPct         = totalBilled > 0 && paid > 0 ? Math.round((paid / totalBilled) * 100) : 0;
 
-        function KpiBlock({ label, value, sub, subColor, accent, tip, muted }) {
+        const KS = {
+          num: { fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 500, fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em' },
+          numBold: { fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700, fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em' },
+          dash: { color: 'rgba(26,22,18,0.22)', fontSize: 14 },
+        };
+
+        function KSMoney({ val, bold, color, dash }) {
+          if (dash || val === null || val === undefined) return <span style={KS.dash}>—</span>;
+          return <span style={{ ...(bold ? KS.numBold : KS.num), color: color || 'var(--text-1)' }}>{fmt.money(val)}</span>;
+        }
+        function KSPct({ val, color }) {
+          if (val === null || val === undefined) return <span style={KS.dash}>—</span>;
+          return <span style={{ ...KS.num, color: color || 'var(--text-2)' }}>{val.toFixed(1)}%</span>;
+        }
+
+        // Section header row
+        function SectionHead({ label }) {
           return (
-            <div data-tip={tip} style={{
-              background: 'var(--surface)', padding: '16px 20px',
-              borderBottom: `3px solid ${accent}`,
-              display: 'flex', flexDirection: 'column', gap: 4,
-            }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{label}</div>
-              <div style={{ fontSize: 26, fontWeight: 800, fontFamily: 'var(--mono)', color: muted ? 'var(--text-3)' : 'var(--text-1)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
-                {value != null && value > 0 ? fmt.money(value) : <span style={{ color: 'var(--text-3)', fontSize: 20 }}>—</span>}
-              </div>
-              {sub && <div style={{ fontSize: 12, color: subColor || 'var(--text-3)', fontWeight: 500 }}>{sub}</div>}
-            </div>
+            <tr style={{ background: '#e8e3db', borderTop: '2px solid var(--border-2)' }}>
+              <td colSpan={5} style={{ padding: '7px 16px', fontSize: 10, fontWeight: 700, color: 'rgba(26,22,18,0.5)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                {label}
+              </td>
+            </tr>
           );
         }
 
+        // Standard data row
+        function KRow({ label, note, goal, actual, variance, varianceColor, pct, pctColor, bold, indent, highlight }) {
+          const rowStyle = {
+            borderBottom: '1px solid var(--border)',
+            background: highlight ? '#ede8e0' : 'var(--surface)',
+          };
+          const labelStyle = {
+            padding: `${bold ? 11 : 10}px 16px ${bold ? 11 : 10}px ${indent ? 32 : 16}px`,
+            fontSize: bold ? 14 : 13,
+            fontWeight: bold ? 700 : 500,
+            color: 'var(--text-1)',
+            letterSpacing: bold ? '-0.01em' : 'normal',
+            borderRight: '1px solid var(--border)',
+            minWidth: 200,
+          };
+          const cellStyle = {
+            padding: `${bold ? 11 : 10}px 16px`,
+            textAlign: 'right',
+            borderRight: '1px solid var(--border)',
+            verticalAlign: 'middle',
+          };
+          return (
+            <tr style={rowStyle}>
+              <td style={labelStyle}>
+                {label}
+                {note && <div style={{ fontSize: 11, fontWeight: 400, color: 'rgba(26,22,18,0.4)', marginTop: 1 }}>{note}</div>}
+              </td>
+              <td style={cellStyle}><KSMoney val={goal} bold={bold} /></td>
+              <td style={cellStyle}><KSMoney val={actual} bold={bold} /></td>
+              <td style={cellStyle}>
+                {variance !== null && variance !== undefined
+                  ? <span style={{ ...(bold ? KS.numBold : KS.num), color: varianceColor || 'var(--text-1)' }}>
+                      {variance >= 0 ? '+' : ''}{fmt.money(variance)}
+                    </span>
+                  : <span style={KS.dash}>—</span>
+                }
+              </td>
+              <td style={{ ...cellStyle, borderRight: 'none' }}><KSPct val={pct} color={pctColor} /></td>
+            </tr>
+          );
+        }
+
+        // Derived values
+        const cosPct        = orig > 0 && cos > 0     ? (cos / orig) * 100             : null;
+        const exposurePct   = earmarked > 0            ? (exposure / earmarked) * 100   : null;
+        const invPct        = commitment > 0           ? (invoiced / commitment) * 100  : null;
+        const billPct       = commitment > 0           ? (totalBilled / commitment) * 100 : null;
+        const paidPct       = totalBilled > 0          ? (paid / totalBilled) * 100     : null;
+
+        const exposureColor = overBudget ? '#dc2626' : earmarked > 0 && exposurePct >= 90 ? '#d97706' : null;
+        const bufferColor   = !buffer ? null : buffer < 0 ? '#dc2626' : '#16a34a';
+
         return (
-          <>
-            {/* Row 1 — the commitment equation */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, background: 'var(--border)', borderTop: '1px solid var(--border)' }}>
-              <KpiBlock
-                label="Initial Contract"
-                value={orig}
-                sub="What was signed"
-                accent="var(--border-2)"
-                tip="The original signed contract value."
-              />
-              <KpiBlock
-                label="+ Change Orders"
-                value={cos}
-                sub={cos > 0 ? `${cosPct}% above initial${tm > 0 ? ` · +${fmt.money(tm)} T&M authorized` : ''}` : tm > 0 ? `+${fmt.money(tm)} T&M authorized` : 'None yet'}
-                subColor={cos > 0 ? 'var(--warn)' : 'var(--text-3)'}
-                accent={cos > 0 ? 'var(--warn)' : 'var(--border-2)'}
-                muted={cos === 0}
-                tip="Approved change orders added to this contract. T&M authorized amount shows open-ended exposure."
-              />
-              <KpiBlock
-                label="= Commitment"
-                value={commitment}
-                sub={cos > 0 ? `Initial + ${fmt.money(cos)} COs` : 'Contract only — no COs yet'}
-                subColor={ledger.cost_creep ? 'var(--danger)' : 'var(--text-3)'}
-                accent="rgba(196,82,42,0.7)"
-                tip="Legal obligation: initial contract + all approved change orders."
-              />
-            </div>
+          <div style={{ borderTop: '1px solid var(--border-2)', borderBottom: '1px solid var(--border-2)', marginBottom: 0 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: '#e8e3db', borderBottom: '2px solid var(--border-2)' }}>
+                  {[
+                    { label: 'Metric',            left: true },
+                    { label: 'Budget · Goal',      tip: 'Target or internal budget for this line' },
+                    { label: 'Actual · To Date',   tip: 'Current amount committed, billed, or paid' },
+                    { label: 'Variance',           tip: 'Actual minus goal — positive = under, negative = over' },
+                    { label: '% Used',             tip: 'Actual as a percentage of goal' },
+                  ].map((h, i) => (
+                    <th key={i} data-tip={h.tip} style={{
+                      padding: '11px 16px',
+                      textAlign: h.left ? 'left' : 'right',
+                      fontSize: 11, fontWeight: 700,
+                      color: 'rgba(26,22,18,0.5)',
+                      textTransform: 'uppercase', letterSpacing: '0.08em',
+                      borderRight: i < 4 ? '1px solid var(--border)' : 'none',
+                      whiteSpace: 'nowrap',
+                    }}>{h.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
 
-            {/* Row 2 — billing breakdown by invoice type */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, background: 'var(--border)', borderTop: '1px solid var(--border)' }}>
-              <KpiBlock
-                label="Fixed Scope Invoiced"
-                value={invoiced}
-                sub={invoiced > 0 ? `${invPct}% of ${fmt.money(commitment)} commitment` : commitment > 0 ? `${fmt.money(commitment)} not yet invoiced` : 'No fixed invoices yet'}
-                subColor={invoiced > commitment ? 'var(--danger)' : invoiced > 0 ? 'var(--amber)' : 'var(--text-3)'}
-                accent="var(--amber)"
-                muted={invoiced === 0}
-                tip="Invoices billed against the fixed contract scope. These count against commitment and trigger an overspend warning if they exceed the remaining balance."
-              />
-              <KpiBlock
-                label="T&M Invoiced"
-                value={tmInvoiced}
-                sub={tmInvoiced > 0 ? 'Additional — beyond fixed scope' : 'No T&M invoices yet'}
-                subColor={tmInvoiced > 0 ? 'var(--warn)' : 'var(--text-3)'}
-                accent={tmInvoiced > 0 ? 'var(--warn)' : 'var(--border-2)'}
-                muted={tmInvoiced === 0}
-                tip="Time & Materials invoices billed on top of the fixed contract. These do not count against the committed contract value."
-              />
-              <KpiBlock
-                label="Expenses Invoiced"
-                value={expenseInvoiced}
-                sub={expenseInvoiced > 0 ? 'Reimbursables — beyond fixed scope' : 'No expense invoices yet'}
-                subColor={expenseInvoiced > 0 ? '#2563eb' : 'var(--text-3)'}
-                accent={expenseInvoiced > 0 ? '#93c5fd' : 'var(--border-2)'}
-                muted={expenseInvoiced === 0}
-                tip="Reimbursable expense invoices (travel, tolls, etc.). These do not count against the committed contract value."
-              />
-            </div>
+                <SectionHead label="Contract Scope" />
+                <KRow label="Initial Contract"    note="Signed value"
+                  actual={orig}       goal={null}       variance={null}                         pct={null} />
+                <KRow label="+ Change Orders"     note={cos > 0 ? `${(cosPct).toFixed(1)}% above initial` : 'None approved'}
+                  indent actual={cos || null}  goal={null}
+                  variance={cos > 0 ? cos : null}
+                  varianceColor={cos > 0 ? '#d97706' : null}
+                  pct={cosPct} pctColor={cosPct >= 25 ? '#dc2626' : cosPct > 0 ? '#d97706' : null} />
+                <KRow label="= Commitment"        note="Legal obligation"
+                  bold highlight
+                  actual={commitment} goal={null}       variance={null}                         pct={null} />
 
-            {/* Row 3 — financial summary */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, background: 'var(--border)', borderTop: '1px solid var(--border)' }}>
-              <KpiBlock
-                label="Internal Budget"
-                value={earmarked}
-                sub={earmarked > 0 ? (overBudget ? `${fmt.money(Math.abs(buffer))} OVER` : `${fmt.money(buffer)} remaining`) : 'Not set'}
-                subColor={earmarked > 0 ? (overBudget ? '#dc2626' : 'var(--ok)') : 'var(--text-3)'}
-                accent={earmarked > 0 ? (overBudget ? '#dc2626' : 'var(--accent)') : 'var(--border-2)'}
-                muted={earmarked === 0}
-                tip="Your internal estimate for total expected spend — should cover fixed contract + T&M + expenses."
-              />
-              <KpiBlock
-                label="Total Billed"
-                value={totalBilled}
-                sub={totalBilled > 0
-                  ? [invoiced > 0 && `${fmt.money(invoiced)} fixed`, tmInvoiced > 0 && `${fmt.money(tmInvoiced)} T&M`, expenseInvoiced > 0 && `${fmt.money(expenseInvoiced)} exp`].filter(Boolean).join(' · ')
-                  : 'Nothing billed yet'}
-                subColor="var(--text-3)"
-                accent={totalBilled > 0 ? 'var(--amber)' : 'var(--border-2)'}
-                muted={totalBilled === 0}
-                tip="All invoices combined: fixed scope + T&M + expenses."
-              />
-              <KpiBlock
-                label="Paid"
-                value={paid}
-                sub={paid > 0 ? `${paidPct}% of total billed` : totalBilled > 0 ? `${fmt.money(totalBilled)} outstanding` : 'Nothing paid yet'}
-                subColor={paid === 0 && totalBilled > 0 ? 'var(--amber)' : 'var(--text-3)'}
-                accent={paid > 0 ? 'var(--ok)' : 'var(--border-2)'}
-                muted={paid === 0}
-                tip="Cash actually sent to the vendor."
-              />
-            </div>
+                <KRow label="+ T&M Invoiced"      note="Beyond fixed scope"
+                  indent actual={tmInvoiced || null} goal={null} variance={null}               pct={null} />
+                <KRow label="+ Expenses Invoiced" note="Reimbursables"
+                  indent actual={expenseInvoiced || null} goal={null} variance={null}          pct={null} />
+                <KRow label="= Total Exposure"    note={earmarked > 0 ? `vs. ${fmt.money(earmarked)} internal budget` : 'No internal budget set'}
+                  bold highlight
+                  actual={exposure}
+                  goal={earmarked > 0 ? earmarked : null}
+                  variance={earmarked > 0 ? earmarked - exposure : null}
+                  varianceColor={bufferColor}
+                  pct={exposurePct}
+                  pctColor={exposureColor} />
 
-            <ContractBurnBar ledger={ledger} />
-          </>
+                <SectionHead label="Billing" />
+                <KRow label="Fixed Scope Invoiced" note="Against commitment"
+                  indent
+                  actual={invoiced || null}
+                  goal={commitment}
+                  variance={invoiced - commitment}
+                  varianceColor={invoiced > commitment ? '#dc2626' : invoiced > 0 ? null : 'rgba(26,22,18,0.35)'}
+                  pct={invPct}
+                  pctColor={invoiced > commitment ? '#dc2626' : null} />
+                <KRow label="T&M Invoiced"         note="Time & Materials"
+                  indent actual={tmInvoiced || null} goal={null} variance={null}               pct={null} />
+                <KRow label="Expenses Invoiced"    note="Reimbursables"
+                  indent actual={expenseInvoiced || null} goal={null} variance={null}          pct={null} />
+                <KRow label="= Total Billed"       note="All invoice types"
+                  bold highlight
+                  actual={totalBilled || null}
+                  goal={commitment}
+                  variance={totalBilled - commitment}
+                  varianceColor={totalBilled > commitment ? '#dc2626' : null}
+                  pct={billPct}
+                  pctColor={totalBilled > commitment ? '#dc2626' : null} />
+
+                <SectionHead label="Collections" />
+                <KRow label="Paid to Vendor"       note="Cash out"
+                  actual={paid || null}
+                  goal={totalBilled || null}
+                  variance={totalBilled > 0 ? paid - totalBilled : null}
+                  varianceColor={totalBilled > 0 && paid < totalBilled ? '#d97706' : '#16a34a'}
+                  pct={paidPct}
+                  pctColor={paidPct !== null && paidPct < 50 ? '#d97706' : '#16a34a'} />
+
+              </tbody>
+            </table>
+          </div>
         );
       })()}
 
