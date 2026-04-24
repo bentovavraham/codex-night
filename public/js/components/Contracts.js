@@ -783,7 +783,7 @@ function ContractDetail({ contractId, projectId, onClose }) {
         </div>
       </div>
 
-      {/* KPI Spreadsheet — persistent across all tabs */}
+      {/* KPI Spreadsheet — Equals.com style: tight rows, full grid, double-border totals */}
       {ledger && !editing && (() => {
         const orig            = Number(ledger.original_contract) || 0;
         const cos             = Number(ledger.approved_cos) || 0;
@@ -798,103 +798,113 @@ function ContractDetail({ contractId, projectId, onClose }) {
         const buffer          = earmarked > 0 ? earmarked - exposure : null;
         const overBudget      = earmarked > 0 && exposure > earmarked;
 
-        const KS = {
-          num: { fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 500, fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em' },
-          numBold: { fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700, fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em' },
-          dash: { color: 'rgba(26,22,18,0.22)', fontSize: 14 },
-        };
+        // Grid constants — Equals-style
+        const GRID  = '1px solid #e2dfd8';
+        const GRID2 = '2px solid #c8c3ba';  // double-border for totals (accounting convention)
+        const NUM   = { fontFamily: 'var(--mono)', fontFeatureSettings: '"tnum" 1', letterSpacing: '-0.01em' };
+        const CELL  = { padding: '5px 12px', borderRight: GRID, borderBottom: GRID, verticalAlign: 'middle' };
+        const DASH  = <span style={{ color: 'rgba(26,22,18,0.2)', fontFamily: 'var(--mono)' }}>—</span>;
 
-        function KSMoney({ val, bold, color, dash }) {
-          if (dash || val === null || val === undefined) return <span style={KS.dash}>—</span>;
-          return <span style={{ ...(bold ? KS.numBold : KS.num), color: color || 'var(--text-1)' }}>{fmt.money(val)}</span>;
+        function N({ v, bold, color }) {
+          if (v === null || v === undefined) return DASH;
+          return <span style={{ ...NUM, fontSize: 13, fontWeight: bold ? 700 : 400, color: color || '#1a1612' }}>{fmt.money(v)}</span>;
         }
-        function KSPct({ val, color }) {
-          if (val === null || val === undefined) return <span style={KS.dash}>—</span>;
-          return <span style={{ ...KS.num, color: color || 'var(--text-2)' }}>{val.toFixed(1)}%</span>;
+        function P({ v, color }) {
+          if (v === null || v === undefined) return DASH;
+          return <span style={{ ...NUM, fontSize: 13, fontWeight: 400, color: color || '#1a1612' }}>{v.toFixed(1)}%</span>;
+        }
+        function V({ v, bold }) {
+          if (v === null || v === undefined) return DASH;
+          const pos = v >= 0;
+          const color = pos ? '#15803d' : '#dc2626';
+          return <span style={{ ...NUM, fontSize: 13, fontWeight: bold ? 700 : 400, color }}>{pos ? '+' : ''}{fmt.money(v)}</span>;
         }
 
-        // Section header row
-        function SectionHead({ label }) {
+        // Section divider — thin rule with label, no background band
+        function Section({ label }) {
           return (
-            <tr style={{ background: '#e8e3db', borderTop: '2px solid var(--border-2)' }}>
-              <td colSpan={5} style={{ padding: '7px 16px', fontSize: 10, fontWeight: 700, color: 'rgba(26,22,18,0.5)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            <tr>
+              <td colSpan={5} style={{
+                padding: '10px 12px 4px',
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                textTransform: 'uppercase', color: 'rgba(26,22,18,0.38)',
+                borderBottom: GRID, background: '#faf9f7',
+                borderTop: '2px solid #d6d1c8',
+              }}>{label}</td>
+            </tr>
+          );
+        }
+
+        // Standard row
+        function Row({ label, tip, goal, actual, variance, vColor, pct, pColor, bold, total, indent }) {
+          const rowBg = total ? '#faf9f7' : '#ffffff';
+          const topBorder = total ? GRID2 : 'none';
+          const fw = bold || total ? 600 : 400;
+          const fs = 13;
+          return (
+            <tr style={{ background: rowBg }}>
+              <td data-tip={tip} style={{
+                ...CELL,
+                paddingLeft: indent ? 24 : 12,
+                borderTop: topBorder,
+                fontSize: fs, fontWeight: fw, color: '#1a1612',
+                minWidth: 220,
+              }}>
                 {label}
+              </td>
+              <td style={{ ...CELL, textAlign: 'right', borderTop: topBorder, width: 130 }}>
+                <N v={goal} bold={bold || total} />
+              </td>
+              <td style={{ ...CELL, textAlign: 'right', borderTop: topBorder, width: 130 }}>
+                <N v={actual} bold={bold || total} color={vColor && actual > (goal || 0) ? vColor : null} />
+              </td>
+              <td style={{ ...CELL, textAlign: 'right', borderTop: topBorder, width: 120 }}>
+                {variance !== undefined ? <V v={variance} bold={bold || total} /> : DASH}
+              </td>
+              <td style={{ ...CELL, textAlign: 'right', borderTop: topBorder, borderRight: 'none', width: 80 }}>
+                <P v={pct} color={pColor} />
               </td>
             </tr>
           );
         }
 
-        // Standard data row
-        function KRow({ label, note, goal, actual, variance, varianceColor, pct, pctColor, bold, indent, highlight }) {
-          const rowStyle = {
-            borderBottom: '1px solid var(--border)',
-            background: highlight ? '#ede8e0' : 'var(--surface)',
-          };
-          const labelStyle = {
-            padding: `${bold ? 11 : 10}px 16px ${bold ? 11 : 10}px ${indent ? 32 : 16}px`,
-            fontSize: bold ? 14 : 13,
-            fontWeight: bold ? 700 : 500,
-            color: 'var(--text-1)',
-            letterSpacing: bold ? '-0.01em' : 'normal',
-            borderRight: '1px solid var(--border)',
-            minWidth: 200,
-          };
-          const cellStyle = {
-            padding: `${bold ? 11 : 10}px 16px`,
-            textAlign: 'right',
-            borderRight: '1px solid var(--border)',
-            verticalAlign: 'middle',
-          };
-          return (
-            <tr style={rowStyle}>
-              <td style={labelStyle}>
-                {label}
-                {note && <div style={{ fontSize: 11, fontWeight: 400, color: 'rgba(26,22,18,0.4)', marginTop: 1 }}>{note}</div>}
-              </td>
-              <td style={cellStyle}><KSMoney val={goal} bold={bold} /></td>
-              <td style={cellStyle}><KSMoney val={actual} bold={bold} /></td>
-              <td style={cellStyle}>
-                {variance !== null && variance !== undefined
-                  ? <span style={{ ...(bold ? KS.numBold : KS.num), color: varianceColor || 'var(--text-1)' }}>
-                      {variance >= 0 ? '+' : ''}{fmt.money(variance)}
-                    </span>
-                  : <span style={KS.dash}>—</span>
-                }
-              </td>
-              <td style={{ ...cellStyle, borderRight: 'none' }}><KSPct val={pct} color={pctColor} /></td>
-            </tr>
-          );
-        }
+        // Derived
+        const cosPct      = orig > 0 && cos > 0  ? (cos / orig) * 100             : null;
+        const exposurePct = earmarked > 0          ? (exposure / earmarked) * 100   : null;
+        const invPct      = commitment > 0         ? (invoiced / commitment) * 100  : null;
+        const billPct     = commitment > 0         ? (totalBilled / commitment) * 100 : null;
+        const paidPct     = totalBilled > 0        ? (paid / totalBilled) * 100     : null;
 
-        // Derived values
-        const cosPct        = orig > 0 && cos > 0     ? (cos / orig) * 100             : null;
-        const exposurePct   = earmarked > 0            ? (exposure / earmarked) * 100   : null;
-        const invPct        = commitment > 0           ? (invoiced / commitment) * 100  : null;
-        const billPct       = commitment > 0           ? (totalBilled / commitment) * 100 : null;
-        const paidPct       = totalBilled > 0          ? (paid / totalBilled) * 100     : null;
-
-        const exposureColor = overBudget ? '#dc2626' : earmarked > 0 && exposurePct >= 90 ? '#d97706' : null;
-        const bufferColor   = !buffer ? null : buffer < 0 ? '#dc2626' : '#16a34a';
+        const expColor    = overBudget ? '#dc2626' : earmarked > 0 && exposurePct >= 90 ? '#d97706' : null;
+        const bufColor    = buffer === null ? null : buffer < 0 ? '#dc2626' : '#15803d';
 
         return (
-          <div style={{ borderTop: '1px solid var(--border-2)', borderBottom: '1px solid var(--border-2)', marginBottom: 0 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div style={{ borderTop: '2px solid #d6d1c8', borderBottom: '2px solid #d6d1c8', background: '#fff' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '40%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '15%' }} />
+              </colgroup>
               <thead>
-                <tr style={{ background: '#e8e3db', borderBottom: '2px solid var(--border-2)' }}>
+                <tr style={{ background: '#f0ede8' }}>
                   {[
-                    { label: 'Metric',            left: true },
-                    { label: 'Budget · Goal',      tip: 'Target or internal budget for this line' },
-                    { label: 'Actual · To Date',   tip: 'Current amount committed, billed, or paid' },
-                    { label: 'Variance',           tip: 'Actual minus goal — positive = under, negative = over' },
-                    { label: '% Used',             tip: 'Actual as a percentage of goal' },
+                    { label: 'Metric',           left: true,  tip: null },
+                    { label: 'Budget / Goal',    left: false, tip: 'Target or internal budget for this line' },
+                    { label: 'Actual',           left: false, tip: 'Current committed, billed, or paid amount' },
+                    { label: 'Variance',         left: false, tip: 'Actual minus goal — green = under, red = over' },
+                    { label: '% of Goal',        left: false, tip: 'Actual as a percentage of the goal' },
                   ].map((h, i) => (
                     <th key={i} data-tip={h.tip} style={{
-                      padding: '11px 16px',
+                      padding: '8px 12px',
                       textAlign: h.left ? 'left' : 'right',
-                      fontSize: 11, fontWeight: 700,
-                      color: 'rgba(26,22,18,0.5)',
-                      textTransform: 'uppercase', letterSpacing: '0.08em',
-                      borderRight: i < 4 ? '1px solid var(--border)' : 'none',
+                      fontSize: 10, fontWeight: 700,
+                      color: 'rgba(26,22,18,0.45)',
+                      textTransform: 'uppercase', letterSpacing: '0.09em',
+                      borderRight: i < 4 ? GRID : 'none',
+                      borderBottom: '2px solid #d6d1c8',
                       whiteSpace: 'nowrap',
                     }}>{h.label}</th>
                   ))}
@@ -902,61 +912,78 @@ function ContractDetail({ contractId, projectId, onClose }) {
               </thead>
               <tbody>
 
-                <SectionHead label="Contract Scope" />
-                <KRow label="Initial Contract"    note="Signed value"
-                  actual={orig}       goal={null}       variance={null}                         pct={null} />
-                <KRow label="+ Change Orders"     note={cos > 0 ? `${(cosPct).toFixed(1)}% above initial` : 'None approved'}
-                  indent actual={cos || null}  goal={null}
-                  variance={cos > 0 ? cos : null}
-                  varianceColor={cos > 0 ? '#d97706' : null}
-                  pct={cosPct} pctColor={cosPct >= 25 ? '#dc2626' : cosPct > 0 ? '#d97706' : null} />
-                <KRow label="= Commitment"        note="Legal obligation"
-                  bold highlight
-                  actual={commitment} goal={null}       variance={null}                         pct={null} />
+                <Section label="Contract Scope" />
+                <Row label="Initial Contract"
+                  tip="The original signed contract value"
+                  actual={orig} />
+                <Row label="  + Change Orders"
+                  tip="Approved change orders added to the contract"
+                  indent
+                  actual={cos > 0 ? cos : null}
+                  variance={cos > 0 ? cos : undefined}
+                  pct={cosPct}
+                  pColor={cosPct >= 25 ? '#dc2626' : cosPct > 0 ? '#d97706' : null} />
+                <Row label="= Commitment"
+                  tip="Legal obligation: initial contract + all approved COs"
+                  total
+                  actual={commitment}
+                  goal={earmarked > 0 ? earmarked : null}
+                  variance={earmarked > 0 ? earmarked - commitment : undefined}
+                  pct={earmarked > 0 ? (commitment / earmarked) * 100 : null}
+                  pColor={earmarked > 0 && commitment > earmarked ? '#dc2626' : null} />
 
-                <KRow label="+ T&M Invoiced"      note="Beyond fixed scope"
-                  indent actual={tmInvoiced || null} goal={null} variance={null}               pct={null} />
-                <KRow label="+ Expenses Invoiced" note="Reimbursables"
-                  indent actual={expenseInvoiced || null} goal={null} variance={null}          pct={null} />
-                <KRow label="= Total Exposure"    note={earmarked > 0 ? `vs. ${fmt.money(earmarked)} internal budget` : 'No internal budget set'}
-                  bold highlight
+                <Section label="Additional Exposure" />
+                <Row label="  + T&M Invoiced"
+                  tip="Time & Materials billed beyond fixed scope"
+                  indent
+                  actual={tmInvoiced > 0 ? tmInvoiced : null} />
+                <Row label="  + Expenses Invoiced"
+                  tip="Reimbursable expenses billed beyond fixed scope"
+                  indent
+                  actual={expenseInvoiced > 0 ? expenseInvoiced : null} />
+                <Row label="= Total Exposure"
+                  tip="Commitment + T&M + expenses — full cost projection"
+                  total
                   actual={exposure}
                   goal={earmarked > 0 ? earmarked : null}
-                  variance={earmarked > 0 ? earmarked - exposure : null}
-                  varianceColor={bufferColor}
+                  variance={earmarked > 0 ? earmarked - exposure : undefined}
                   pct={exposurePct}
-                  pctColor={exposureColor} />
+                  pColor={expColor} />
 
-                <SectionHead label="Billing" />
-                <KRow label="Fixed Scope Invoiced" note="Against commitment"
+                <Section label="Billing" />
+                <Row label="  Fixed Scope Invoiced"
+                  tip="Invoices billed against the fixed contract commitment"
                   indent
-                  actual={invoiced || null}
+                  actual={invoiced > 0 ? invoiced : null}
                   goal={commitment}
                   variance={invoiced - commitment}
-                  varianceColor={invoiced > commitment ? '#dc2626' : invoiced > 0 ? null : 'rgba(26,22,18,0.35)'}
                   pct={invPct}
-                  pctColor={invoiced > commitment ? '#dc2626' : null} />
-                <KRow label="T&M Invoiced"         note="Time & Materials"
-                  indent actual={tmInvoiced || null} goal={null} variance={null}               pct={null} />
-                <KRow label="Expenses Invoiced"    note="Reimbursables"
-                  indent actual={expenseInvoiced || null} goal={null} variance={null}          pct={null} />
-                <KRow label="= Total Billed"       note="All invoice types"
-                  bold highlight
-                  actual={totalBilled || null}
+                  pColor={invoiced > commitment ? '#dc2626' : null} />
+                <Row label="  T&M Invoiced"
+                  tip="T&M invoices billed — these are above fixed scope"
+                  indent
+                  actual={tmInvoiced > 0 ? tmInvoiced : null} />
+                <Row label="  Expenses Invoiced"
+                  tip="Expense reimbursements billed"
+                  indent
+                  actual={expenseInvoiced > 0 ? expenseInvoiced : null} />
+                <Row label="= Total Billed"
+                  tip="All approved invoices: fixed + T&M + expenses"
+                  total
+                  actual={totalBilled > 0 ? totalBilled : null}
                   goal={commitment}
-                  variance={totalBilled - commitment}
-                  varianceColor={totalBilled > commitment ? '#dc2626' : null}
+                  variance={totalBilled > 0 ? totalBilled - commitment : undefined}
                   pct={billPct}
-                  pctColor={totalBilled > commitment ? '#dc2626' : null} />
+                  pColor={totalBilled > commitment ? '#dc2626' : null} />
 
-                <SectionHead label="Collections" />
-                <KRow label="Paid to Vendor"       note="Cash out"
-                  actual={paid || null}
-                  goal={totalBilled || null}
-                  variance={totalBilled > 0 ? paid - totalBilled : null}
-                  varianceColor={totalBilled > 0 && paid < totalBilled ? '#d97706' : '#16a34a'}
+                <Section label="Collections" />
+                <Row label="Paid to Vendor"
+                  tip="Cash actually sent — confirmed payments"
+                  actual={paid > 0 ? paid : null}
+                  goal={totalBilled > 0 ? totalBilled : null}
+                  variance={totalBilled > 0 ? paid - totalBilled : undefined}
                   pct={paidPct}
-                  pctColor={paidPct !== null && paidPct < 50 ? '#d97706' : '#16a34a'} />
+                  pColor={paidPct !== null && paidPct < 100 ? '#d97706' : '#15803d'} />
 
               </tbody>
             </table>
