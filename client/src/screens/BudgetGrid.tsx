@@ -47,6 +47,9 @@ function statusClass(val: number, budget: number) {
   return '';
 }
 
+const remPct = (spent: number, budget: number): string =>
+  budget > 0 ? `${Math.round(((budget - spent) / budget) * 100)}%` : '—';
+
 const SECTIONS = [
   { key: 'professional_fees', label: 'Professional Fees' },
   { key: 'application_fees',  label: 'Application & Other Fees' },
@@ -234,6 +237,17 @@ export default function BudgetGrid() {
     <td className={`${styles.sn} ${statusClass(t.billed, budget)}`}>
       {budget > 0 && t.billed > 0 ? `${Math.round((t.billed / budget) * 100)}%` : '—'}
     </td>
+    {/* Invoice Burn */}
+    <td className={`${styles.sn}`}>{moneyD(t.billed)}</td>
+    <td className={`${styles.sn}`}>{moneyD(t.paid)}</td>
+    <td className={`${styles.sn} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
+    <td className={`${styles.sn}`}>{remPct(t.billed, t.budgeted)}</td>
+    {/* Contract Burn */}
+    <td className={`${styles.sn}`}>{moneyD(t.committed)}</td>
+    <td className={`${styles.sn}`}>{t.co_value > 0 ? moneyD(t.co_value) : '—'}</td>
+    <td className={`${styles.sn} ${t.total_commitment > t.budgeted && t.budgeted > 0 ? styles.danger : ''}`}>{moneyD(t.total_commitment)}</td>
+    <td className={`${styles.sn} ${t.rem_commit < 0 ? styles.danger : ''}`}>{moneyD(t.rem_commit)}</td>
+    <td className={`${styles.sn}`}>{remPct(t.total_commitment, t.budgeted)}</td>
   </>;
 
   return (
@@ -267,6 +281,17 @@ export default function BudgetGrid() {
             <col style={{ width: 110 }} />   {/* consultant */}
             <col style={{ width: 120 }} />   {/* QB codes */}
             <col style={{ width: 160 }} />   {/* notes */}
+            {/* ── Invoice Burn ── */}
+            <col style={{ width: 96 }} />    {/* inv invoiced */}
+            <col style={{ width: 88 }} />    {/* inv paid */}
+            <col style={{ width: 96 }} />    {/* inv rem $ */}
+            <col style={{ width: 52 }} />    {/* inv rem % */}
+            {/* ── Contract Burn ── */}
+            <col style={{ width: 96 }} />    {/* con init contract */}
+            <col style={{ width: 88 }} />    {/* con cos */}
+            <col style={{ width: 96 }} />    {/* con total commit */}
+            <col style={{ width: 96 }} />    {/* con rem $ */}
+            <col style={{ width: 52 }} />    {/* con rem % */}
           </colgroup>
           <thead>
             {/* Group header row */}
@@ -276,6 +301,8 @@ export default function BudgetGrid() {
               <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={3}>Invoices by Type</th>
               <th className={`${styles.thGroup}`} colSpan={4}>Totals</th>
               <th className={styles.th} colSpan={4} />
+              <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={4}>Invoice Burn</th>
+              <th className={`${styles.thGroup}`} colSpan={5}>Contract Burn</th>
             </tr>
             {/* Column header row */}
             <tr className={styles.thead}>
@@ -297,6 +324,15 @@ export default function BudgetGrid() {
               <th className={`${styles.th} ${styles.thLeft}`}>Consultant</th>
               <th className={`${styles.th} ${styles.thLeft}`}>QB Codes</th>
               <th className={`${styles.th} ${styles.thLeft}`}>Notes</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Invoiced</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Paid to Date</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. $</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Init. Contract</th>
+              <th className={`${styles.th} ${styles.thRight}`}>COs</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Total Commit</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. $</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
             </tr>
           </thead>
           <tbody>
@@ -311,7 +347,7 @@ export default function BudgetGrid() {
                   <td className={styles.secGutter}><span className={styles.chevron}>{secOpen ? '▼' : '▶'}</span></td>
                   <td className={styles.secLabel} colSpan={3}>{sec.label}</td>
                   <TotalsCells t={st} budget={st.budgeted} />
-                  <td className={styles.secCell} colSpan={3} />
+                  <td className={styles.secCell} colSpan={3} />  {/* consultant, QB, notes */}
                 </tr>,
 
                 ...(secOpen ? Array.from(subMap.entries()).flatMap(([sgKey, sgRows]) => {
@@ -334,7 +370,18 @@ export default function BudgetGrid() {
                         <td className={styles.sgn}>{money(sgt.paid)}</td>
                         <td className={`${styles.sgn} ${sgt.rem_budget < 0 ? styles.danger : ''}`}>{money(sgt.rem_budget)}</td>
                         <td className={`${styles.sgn} ${sgt.rem_commit < 0 ? styles.danger : ''}`}>{money(sgt.rem_commit)}</td>
-                        <td className={styles.sgn} colSpan={4} />
+                        <td className={styles.sgn} colSpan={4} />  {/* %, consultant, QB, notes */}
+                        {/* Invoice Burn */}
+                        <td className={styles.sgn}>{money(sgt.billed)}</td>
+                        <td className={styles.sgn}>{money(sgt.paid)}</td>
+                        <td className={`${styles.sgn} ${sgt.rem_budget < 0 ? styles.danger : ''}`}>{money(sgt.rem_budget)}</td>
+                        <td className={styles.sgn}>{remPct(sgt.billed, sgt.budgeted)}</td>
+                        {/* Contract Burn */}
+                        <td className={styles.sgn}>{money(sgt.committed)}</td>
+                        <td className={styles.sgn}>{money(sgt.co_value)}</td>
+                        <td className={styles.sgn}>{money(sgt.total_commitment)}</td>
+                        <td className={`${styles.sgn} ${sgt.rem_commit < 0 ? styles.danger : ''}`}>{money(sgt.rem_commit)}</td>
+                        <td className={styles.sgn}>{remPct(sgt.total_commitment, sgt.budgeted)}</td>
                       </tr>
                     ] : []),
 
@@ -398,6 +445,29 @@ export default function BudgetGrid() {
                           <EditCell value={row.notes} rowId={row.id} field="notes"
                             isActive={isA('notes')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
                             onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdNotes} />
+                          {/* Invoice Burn */}
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.billed)}</td>
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.remaining_budget < 0 ? styles.danger : ''}`}>
+                            {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
+                          </td>
+                          <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${statusClass(row.billed, row.budgeted_amount)}`}>
+                            {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}
+                          </td>
+                          {/* Contract Burn */}
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.committed)}</td>
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
+                            {row.co_count > 0 ? money(row.co_value) : ''}
+                          </td>
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.warn : ''}`}>
+                            {money(row.total_commitment)}
+                          </td>
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.remaining_commit < 0 ? styles.danger : ''}`}>
+                            {row.budgeted_amount > 0 ? usd.format(row.remaining_commit) : '—'}
+                          </td>
+                          <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${statusClass(row.total_commitment, row.budgeted_amount)}`}>
+                            {row.budgeted_amount > 0 ? remPct(row.total_commitment, row.budgeted_amount) : '—'}
+                          </td>
                         </tr>
                       );
                     }) : []),
@@ -424,6 +494,17 @@ export default function BudgetGrid() {
                 {grand.budgeted > 0 ? `${Math.round((grand.billed / grand.budgeted) * 100)}%` : '—'}
               </td>
               <td className={styles.totalCell} colSpan={3} />
+              {/* Invoice Burn totals */}
+              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.billed)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.paid)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.rem_budget < 0 ? styles.danger : ''}`}>{usd.format(grand.rem_budget)}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{remPct(grand.billed, grand.budgeted)}</td>
+              {/* Contract Burn totals */}
+              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.committed)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.co_value)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.total_commitment > grand.budgeted ? styles.danger : ''}`}>{moneyD(grand.total_commitment)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.rem_commit < 0 ? styles.danger : ''}`}>{usd.format(grand.rem_commit)}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{remPct(grand.total_commitment, grand.budgeted)}</td>
             </tr>
           </tfoot>
         </table>
