@@ -1,0 +1,72 @@
+:root {
+  /* ── Brand ─────────────────────────────────────── */
+  --accent:          #c4522a;
+  --accent-hover:    #b04824;
+  --accent-dim:      rgba(196, 82, 42, 0.08);
+  --amber:           #e8921a;
+  --amber-dim:       rgba(232, 146, 26, 0.10);
+
+  /* ── Backgrounds (warm, never cold gray) ────────── */
+  --bg:              #faf8f5;
+  --surface:         #ffffff;
+  --surface-2:       #f5f2ee;
+  --surface-3:       #ede9e3;
+
+  /* ── Borders ─────────────────────────────────────── */
+  --border:          #e0dbd3;
+  --border-2:        #ccc7be;
+  --border-3:        #b8b2a8;
+
+  /* ── Text ────────────────────────────────────────── */
+  --text-1:          #1a1612;
+  --text-2:          #4a443e;
+  --text-3:          #8a847c;
+  --text-4:          #b8b2a8;
+
+  /* ── Sidebar ─────────────────────────────────────── */
+  --sidebar-bg:      #1c1814;
+  --sidebar-border:  rgba(255, 255, 255, 0.07);
+  --sidebar-w:       208px;
+
+  /* ── Semantic ────────────────────────────────────── */
+  --ok:              #059669;
+  --ok-bg:           #ecfdf5;
+  --warn:            #d97706;
+  --warn-bg:         #fffbeb;
+  --danger:          #dc2626;
+  --danger-bg:       #fef2f2;
+  --info:            #2563eb;
+  --info-bg:         #eff6ff;
+
+  /* ── Status border colors ────────────────────────── */
+  --status-pending:          #d97706;
+  --status-pm-approved:      #2563eb;
+  --status-partner-approved: #7c3aed;
+  --status-approved:         #059669;
+  --status-pushed:           #0891b2;
+  --status-paid:             #065f46;
+  --status-rejected:         #dc2626;
+  --status-draft:            #9ca3af;
+
+  /* ── Typography ──────────────────────────────────── */
+  --font-sans: Inter, system-ui, -apple-system, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, 'Cascadia Code', 'Fira Code', Consolas, monospace;
+
+  /* ── Sizing ──────────────────────────────────────── */
+  --topbar-h:    48px;
+  --tabbar-h:    36px;
+  --toolbar-h:   40px;
+  --row-sm:      28px;
+  --row-md:      36px;
+  --row-lg:      44px;
+  --panel-w:     480px;
+
+  /* ── Radius ──────────────────────────────────────── */
+  --radius-sm:   3px;
+  --radius-md:   5px;
+  --radius-lg:   8px;
+
+  /* ── Shadows ─────────────────────────────────────── */
+  --shadow:      0 1px 3px rgba(0, 0, 0, 0.07);
+  --shadow-md:   0 2px 8px rgba(0, 0, 0, 0.10);
+}

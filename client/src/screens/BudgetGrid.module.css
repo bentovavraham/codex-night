@@ -1,0 +1,335 @@
+/* BudgetGrid — mirrors the budget spreadsheet layout */
+
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  height: var(--toolbar-h);
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.toolLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-3);
+  margin-right: auto;
+}
+
+.toolActions { display: flex; gap: 6px; }
+
+.tbBtn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.tbBtn:hover { background: var(--bg-2); }
+
+/* ── Scroll area ─────────────────────────────────────────────────────────── */
+
+.scrollArea {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ── Table ───────────────────────────────────────────────────────────────── */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+
+/* ── Column widths ───────────────────────────────────────────────────────── */
+
+.cTask       { width: 240px; }
+.cDisc       { width: 120px; }
+.cCalc       { width: 160px; }
+.cMoney      { width: 100px; }
+.cConsultant { width: 110px; }
+.cPct        { width: 52px; }
+.cQb         { width: 150px; }
+.cNotes      { width: 180px; }
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+.thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-2);
+}
+
+.th {
+  padding: 0 8px;
+  height: 28px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-3);
+  border-bottom: 2px solid var(--border-strong);
+  white-space: nowrap;
+  user-select: none;
+}
+.thLeft  { text-align: left; }
+.thRight { text-align: right; }
+
+/* ── Section rows (level 1 — dark charcoal, amber text) ─────────────────── */
+
+.secRow {
+  background: var(--sidebar-bg);
+  cursor: pointer;
+}
+.secRow:hover { background: #262118; }
+
+.secGutter {
+  padding: 0 0 0 6px;
+  height: 30px;
+  border-bottom: 1px solid #3a3028;
+}
+
+.secLabel {
+  padding: 0 8px;
+  height: 30px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--amber);
+  border-bottom: 1px solid #3a3028;
+  white-space: nowrap;
+}
+
+.secCell {
+  padding: 0 8px;
+  height: 30px;
+  border-bottom: 1px solid #3a3028;
+}
+
+.secNum {
+  padding: 0 8px;
+  height: 30px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  border-bottom: 1px solid #3a3028;
+  white-space: nowrap;
+}
+
+/* ── Sub-group rows (level 2 — lighter, italic label) ───────────────────── */
+
+.sgRow {
+  background: #f0ece6;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.sgRow:hover { background: #e8e4de; }
+
+.sgGutter {
+  padding: 0 0 0 14px;
+  height: 26px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sgLabel {
+  padding: 0 8px 0 4px;
+  height: 26px;
+  font-size: 11px;
+  font-weight: 600;
+  font-style: italic;
+  color: var(--text-2);
+  letter-spacing: .01em;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sgNum {
+  padding: 0 8px;
+  height: 26px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.sgCell {
+  padding: 0;
+  height: 26px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chevron {
+  font-size: 8px;
+  color: var(--text-3);
+  vertical-align: middle;
+}
+
+/* ── Row gutter (indent for data rows) ──────────────────────────────────── */
+.rowGutter {
+  padding: 0;
+  border-right: 3px solid transparent;
+}
+
+/* ── Data rows ───────────────────────────────────────────────────────────── */
+
+.dataRow { border-bottom: 1px solid var(--border); }
+.dataRow:hover { background: var(--bg-2); }
+
+/* ── Cells ───────────────────────────────────────────────────────────────── */
+
+.cell {
+  padding: 0 8px;
+  height: var(--row-md);
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  border-right: 1px solid var(--border);
+}
+.cell:last-child { border-right: none; }
+
+/* editable cells show text cursor on hover */
+.cell:not(.ro):hover { cursor: text; }
+
+.tdTask  { font-weight: 500; }
+.tdDisc  { font-size: 11px; color: var(--text-2); }
+.tdCalc  { font-size: 11px; color: var(--text-3); }
+.tdMoney { text-align: right; font-family: var(--font-mono); font-size: 11.5px; }
+.tdPct   { text-align: right; font-family: var(--font-mono); font-size: 11.5px; }
+.tdQb    { padding: 0 4px; }
+.tdNotes { font-size: 11px; color: var(--text-3); }
+
+/* read-only computed cells */
+.ro { background: var(--bg); color: var(--text-2); }
+.dataRow:hover .ro { background: transparent; }
+
+/* editing state */
+.editing {
+  padding: 0 !important;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: #fff9f5 !important;
+}
+
+.editInput {
+  width: 100%;
+  height: 100%;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #1a1208;
+  outline: none;
+}
+
+/* empty/hint */
+.empty  { color: var(--text-4); }
+.hint   { font-size: 10.5px; color: var(--text-4); font-style: italic; }
+
+/* ── QB Code picker ──────────────────────────────────────────────────────── */
+
+.qbSelect {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  color: var(--text-2);
+  cursor: pointer;
+  outline: none;
+  font-family: var(--font-mono);
+}
+.qbSelect:hover { color: var(--text-1); }
+.qbSelect:focus { outline: 1px solid var(--accent); }
+
+/* ── Status colors ───────────────────────────────────────────────────────── */
+
+.danger { color: var(--status-overdue) !important; font-weight: 600; }
+.warn   { color: var(--amber) !important; }
+
+/* ── Total row ───────────────────────────────────────────────────────────── */
+
+.totalRow {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-2);
+  border-top: 2px solid var(--border-strong);
+}
+
+.totalLabel {
+  padding: 0 8px;
+  height: 32px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-1);
+}
+
+.totalCell {
+  padding: 0 8px;
+  height: 32px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+/* ── Splash / init ───────────────────────────────────────────────────────── */
+
+.splash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  height: 100%;
+  color: var(--text-3);
+}
+
+.splashMsg  { font-size: 13px; }
+.splashErr  { font-size: 12px; color: var(--status-overdue); }
+
+.initBtn {
+  padding: 9px 24px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: .01em;
+}
+.initBtn:hover    { background: #b34820; }
+.initBtn:disabled { opacity: .5; cursor: not-allowed; }

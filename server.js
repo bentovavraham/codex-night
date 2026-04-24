@@ -24,6 +24,8 @@ const customerRoutes = require('./routes/customers');
 const changeOrderRoutes = require('./routes/changeOrders');
 const alertRoutes = require('./routes/alerts');
 const byTradeRoutes = require('./routes/byTrade');
+const phaseRoutes = require('./routes/phases');
+const phaseBudgetRoutes = require('./routes/phaseBudget');
 
 const app = express();
 app.disable('x-powered-by');
@@ -72,6 +74,9 @@ app.use('/api/customers', customerRoutes);
 app.use('/api', changeOrderRoutes);
 app.use('/api', alertRoutes);
 app.use('/api', byTradeRoutes);
+app.use('/api/projects', phaseRoutes);          // /projects/:projectId/phases
+app.use('/api', phaseRoutes);                   // /phases/:phaseId and /phases/:phaseId (DELETE/PATCH)
+app.use('/api', phaseBudgetRoutes);             // /phases/:phaseId/budget, /budget-lines/:id, /qb-accounts
 
 // --- Static SPA ---
 // Disable caching for JS components so edits are picked up without hard refresh
