@@ -4,6 +4,7 @@
   "description": "Active Acquisitions Project Financial Manager",
   "main": "server.js",
   "scripts": {
+    "dev": "concurrently -n api,ui -c cyan,magenta \"node server.js\" \"npm run dev --prefix client\"",
     "start": "node server.js",
     "migrate": "node db/migrate.js",
     "seed": "node db/seed.js"
@@ -20,5 +21,8 @@
     "express-session": "^1.18.0",
     "multer": "^2.0.0",
     "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
