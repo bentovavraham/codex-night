@@ -261,6 +261,22 @@
 .ro { background: var(--bg); color: var(--text-2); }
 .dataRow:hover .ro { background: transparent; }
 
+/* detail columns — hidden until toggled */
+.detailHidden { display: none; }
+
+/* editable cell indicator */
+.editableCell {
+  border-bottom: 1px dashed rgba(196, 82, 42, 0.28) !important;
+}
+.editableCell:hover { background: var(--bg-2); cursor: text; }
+
+/* active toolbar button */
+.tbBtnActive {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
+}
+
 /* editing state */
 .editing {
   padding: 0 !important;

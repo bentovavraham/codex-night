@@ -102,7 +102,7 @@ function EditCell({ value, rowId, field, numeric, isActive, onActivate, onCommit
   }
 
   return (
-    <td className={`${styles.cell} ${className ?? ''} ${!display ? styles.cellEmpty : ''}`} onDoubleClick={open}>
+    <td className={`${styles.cell} ${styles.editableCell} ${className ?? ''} ${!display ? styles.cellEmpty : ''}`} onDoubleClick={open}>
       {display || null}
     </td>
   );
@@ -132,6 +132,7 @@ export default function BudgetGrid() {
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [active, setActive] = useState<{ rowId: number; field: string }>({ rowId: -1, field: '' });
+  const [showDetails, setShowDetails] = useState(false);
 
   const { data: rows = [], isLoading, error } = useQuery<BudgetRow[]>({
     queryKey: ['budget', phaseIdNum],
@@ -219,6 +220,8 @@ export default function BudgetGrid() {
     );
   }
 
+  const dc = showDetails ? '' : styles.detailHidden; // detail col visibility
+
   // Section/sub-group summary cells (cols 4–12: amount through rem%)
   const TotalsCells = ({ t }: { t: Totals }) => {
     const amtDue = t.billed - t.paid;
@@ -242,6 +245,12 @@ export default function BudgetGrid() {
         <div className={styles.toolActions}>
           <button className={styles.tbBtn}>+ Add Line</button>
           <button className={styles.tbBtn}>Export CSV</button>
+          <button
+            className={`${styles.tbBtn} ${showDetails ? styles.tbBtnActive : ''}`}
+            onClick={() => setShowDetails(v => !v)}
+          >
+            {showDetails ? 'Hide Details' : 'Details'}
+          </button>
         </div>
       </div>
 
@@ -271,7 +280,10 @@ export default function BudgetGrid() {
               <th className={styles.th} />
               <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={4}>Invoices</th>
               <th className={`${styles.thGroup}`} colSpan={4}>Balance</th>
-              <th className={styles.th} colSpan={4} />
+              <th className={`${styles.th} ${dc}`} />
+              <th className={`${styles.th} ${dc}`} />
+              <th className={`${styles.th} ${dc}`} />
+              <th className={`${styles.th} ${dc}`} />
             </tr>
             <tr className={styles.thead}>
               <th className={styles.th} />
@@ -286,10 +298,10 @@ export default function BudgetGrid() {
               <th className={`${styles.th} ${styles.thRight}`}>Paid to Date</th>
               <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget</th>
               <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
-              <th className={`${styles.th} ${styles.thLeft}`}>Calc Method</th>
-              <th className={`${styles.th} ${styles.thLeft}`}>Consultant</th>
-              <th className={`${styles.th} ${styles.thLeft}`}>QB Codes</th>
-              <th className={`${styles.th} ${styles.thLeft}`}>Notes</th>
+              <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Calc Method</th>
+              <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Consultant</th>
+              <th className={`${styles.th} ${styles.thLeft} ${dc}`}>QB Codes</th>
+              <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Notes</th>
             </tr>
           </thead>
           <tbody>
@@ -303,7 +315,10 @@ export default function BudgetGrid() {
                   <td className={styles.secGutter}><span className={styles.chevron}>{secOpen ? '▼' : '▶'}</span></td>
                   <td className={styles.secLabel} colSpan={2}>{sec.label}</td>
                   <TotalsCells t={st} />
-                  <td className={styles.secCell} colSpan={4} />
+                  <td className={`${styles.secCell} ${dc}`} />
+                  <td className={`${styles.secCell} ${dc}`} />
+                  <td className={`${styles.secCell} ${dc}`} />
+                  <td className={`${styles.secCell} ${dc}`} />
                 </tr>,
 
                 ...(secOpen ? Array.from(subMap.entries()).flatMap(([sgKey, sgRows]) => {
@@ -317,7 +332,10 @@ export default function BudgetGrid() {
                         <td className={styles.sgGutter}><span className={styles.chevron}>{sgOpen ? '▼' : '▶'}</span></td>
                         <td className={styles.sgLabel} colSpan={2}>{sgKey}</td>
                         <TotalsCells t={sgt} />
-                        <td className={styles.sgn} colSpan={4} />
+                        <td className={`${styles.sgn} ${dc}`} />
+                        <td className={`${styles.sgn} ${dc}`} />
+                        <td className={`${styles.sgn} ${dc}`} />
+                        <td className={`${styles.sgn} ${dc}`} />
                       </tr>
                     ] : []),
 
@@ -353,16 +371,16 @@ export default function BudgetGrid() {
                           </td>
                           <EditCell value={row.calculation_method} rowId={row.id} field="calculation_method"
                             isActive={isA('calculation_method')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                            onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdCalc} />
+                            onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdCalc} ${dc}`} />
                           <EditCell value={row.consultant} rowId={row.id} field="consultant"
                             isActive={isA('consultant')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                            onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdText} />
-                          <td className={`${styles.cell} ${styles.tdQb} ${styles.ro}`} title={row.qb_codes_used || undefined}>
+                            onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdText} ${dc}`} />
+                          <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`} title={row.qb_codes_used || undefined}>
                             {row.qb_codes_used || ''}
                           </td>
                           <EditCell value={row.notes} rowId={row.id} field="notes"
                             isActive={isA('notes')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                            onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdNotes} />
+                            onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdNotes} ${dc}`} />
                         </tr>
                       );
                     }) : []),
@@ -388,7 +406,10 @@ export default function BudgetGrid() {
                 {usd.format(grand.rem_budget)}
               </td>
               <td className={`${styles.totalCell} ${styles.tdPct}`}>{remPct(grand.billed, grand.budgeted)}</td>
-              <td className={styles.totalCell} colSpan={4} />
+              <td className={`${styles.totalCell} ${dc}`} />
+              <td className={`${styles.totalCell} ${dc}`} />
+              <td className={`${styles.totalCell} ${dc}`} />
+              <td className={`${styles.totalCell} ${dc}`} />
             </tr>
           </tfoot>
         </table>
