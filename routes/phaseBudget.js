@@ -74,6 +74,16 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             AND inv.status NOT IN ('voided','draft')
         ), 0) AS expense_charges,
 
+        -- Fixed invoice charges
+        COALESCE((
+          SELECT SUM(inv.amount)
+          FROM invoices inv
+          JOIN contracts c ON c.id = inv.contract_id
+          WHERE c.phase_budget_line_id = pbl.id
+            AND inv.invoice_type = 'fixed'
+            AND inv.status NOT IN ('voided','draft')
+        ), 0) AS fixed_charges,
+
         -- Billed to date (all non-voided invoice types)
         COALESCE((
           SELECT SUM(inv.amount)
@@ -121,10 +131,12 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
       const co_value          = parseFloat(r.co_value)          || 0;
       const co_count          = parseInt(r.co_count)            || 0;
       const total_commitment  = committed + co_value;
+      const fixed_charges     = parseFloat(r.fixed_charges)     || 0;
       const tm_charges        = parseFloat(r.tm_charges)        || 0;
       const expense_charges   = parseFloat(r.expense_charges)   || 0;
       const billed            = parseFloat(r.billed)            || 0;
       const paid              = parseFloat(r.paid)              || 0;
+      const amount_due        = billed - paid;
       const remaining_budget  = budgeted - billed;
       const remaining_commit  = budgeted - total_commitment;
       const pct_billed        = budgeted > 0 ? billed / budgeted : null;
@@ -136,10 +148,12 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         co_count,
         co_value,
         total_commitment,
+        fixed_charges,
         tm_charges,
         expense_charges,
         billed,
         paid,
+        amount_due,
         remaining_budget,
         remaining_commit,
         pct_billed,

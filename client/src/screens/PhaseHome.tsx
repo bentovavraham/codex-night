@@ -5,6 +5,7 @@ import styles from './PhaseHome.module.css';
 
 const TABS = [
   { to: 'budget',         label: 'Budget' },
+  { to: 'commitments',    label: 'Commitments' },
   { to: 'contracts',      label: 'Contracts' },
   { to: 'invoices',       label: 'Invoices' },
   { to: 'change-orders',  label: 'Change Orders' },

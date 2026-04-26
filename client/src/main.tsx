@@ -10,6 +10,7 @@ import ProjectList from './screens/ProjectList';
 import ProjectDetail from './screens/ProjectDetail';
 import PhaseHome from './screens/PhaseHome';
 import BudgetGrid from './screens/BudgetGrid';
+import CommitmentsGrid from './screens/CommitmentsGrid';
 import PlaceholderTab from './screens/PlaceholderTab';
 
 const qc = new QueryClient({
@@ -28,6 +29,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="projects/:projectId/phases/:phaseId" element={<PhaseHome />}>
               <Route index element={<Navigate to="budget" replace />} />
               <Route path="budget"        element={<BudgetGrid />} />
+              <Route path="commitments"   element={<CommitmentsGrid />} />
               <Route path="contracts"     element={<PlaceholderTab label="Contracts" />} />
               <Route path="invoices"      element={<PlaceholderTab label="Invoices" />} />
               <Route path="change-orders" element={<PlaceholderTab label="Change Orders" />} />
