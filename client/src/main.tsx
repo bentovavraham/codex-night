@@ -12,6 +12,7 @@ import PhaseHome from './screens/PhaseHome';
 import BudgetGrid from './screens/BudgetGrid';
 import CommitmentsGrid from './screens/CommitmentsGrid';
 import PlaceholderTab from './screens/PlaceholderTab';
+import InvoicesTab from './screens/InvoicesTab';
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -31,7 +32,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="budget"        element={<BudgetGrid />} />
               <Route path="commitments"   element={<CommitmentsGrid />} />
               <Route path="contracts"     element={<PlaceholderTab label="Contracts" />} />
-              <Route path="invoices"      element={<PlaceholderTab label="Invoices" />} />
+              <Route path="invoices"      element={<InvoicesTab />} />
               <Route path="change-orders" element={<PlaceholderTab label="Change Orders" />} />
               <Route path="alerts"        element={<PlaceholderTab label="Alerts" />} />
               <Route path="history"       element={<PlaceholderTab label="History" />} />

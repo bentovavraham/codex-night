@@ -1,0 +1,103 @@
+/* CommitmentsGrid — contract drilldown rows */
+
+/* Budget line rows that have contracts get a pointer cursor */
+.lineClickable { cursor: pointer; }
+.lineClickable:hover { background: var(--bg-2); }
+
+/* ── Contract rows ───────────────────────────────────────────────────────── */
+
+.contractRow {
+  background: #faf7f3;
+  border-bottom: 1px solid var(--border);
+}
+.contractRow:hover { background: #f3ede5; }
+
+.contractGutter {
+  padding: 0 0 0 28px;
+  width: 24px;
+}
+
+.vendorCell {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-1);
+  padding-left: 8px !important;
+}
+
+.refCell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.refNum {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.contractNum {
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--text-1) !important;
+  background: transparent !important;
+}
+
+/* ── Status badges ───────────────────────────────────────────────────────── */
+
+.statusBadge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  white-space: nowrap;
+}
+
+.status_draft     { background: #e8e4de; color: #6b5d50; }
+.status_pending   { background: #fef3cd; color: #856404; }
+.status_approved  { background: #d1f0d8; color: #1a6630; }
+.status_active    { background: #d1f0d8; color: #1a6630; }
+.status_rejected  { background: #fde0dc; color: #922b21; }
+.status_voided    { background: #eeeeee; color: #888; }
+
+/* ── CO sub-rows ─────────────────────────────────────────────────────────── */
+
+.coRow {
+  background: #f5f2ee;
+  border-bottom: 1px solid var(--border);
+}
+.coRow:hover { background: #ede8e2; }
+
+.coGutter {
+  padding: 0 0 0 44px;
+  width: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.coDesc {
+  font-size: 11px;
+  color: var(--text-2) !important;
+  padding-left: 8px !important;
+}
+
+.coLabel {
+  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-right: 4px;
+}
+
+.coNum {
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--amber) !important;
+  background: transparent !important;
+}

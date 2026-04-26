@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { BudgetRow } from './BudgetGrid';
 import styles from './BudgetGrid.module.css';
+import cgStyles from './CommitmentsGrid.module.css';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,11 @@ const SECTIONS = [
   { key: 'construction',      label: 'Estimated Extraordinary Construction Costs' },
 ] as const;
 
+const STATUS_LABEL: Record<string, string> = {
+  draft: 'Draft', pending: 'Pending', approved: 'Approved',
+  rejected: 'Rejected', voided: 'Voided', active: 'Active',
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Totals = { budgeted: number; committed: number; co_value: number; total_commitment: number; remaining_commit: number; };
@@ -36,11 +42,37 @@ const addRow = (t: Totals, r: BudgetRow): Totals => ({
   remaining_commit:  t.remaining_commit  + r.remaining_commit,
 });
 
+interface PhaseContract {
+  id: number;
+  phase_budget_line_id: number;
+  vendor_name: string;
+  reference_number: string | null;
+  total_value: number;
+  status: string;
+  contract_date: string | null;
+  co_count: number;
+  co_value: number;
+  total_commitment: number;
+  invoiced_fixed: number;
+  invoiced_tm: number;
+  invoiced_expense: number;
+  total_invoiced: number;
+  remaining_commitment: number;
+  change_orders: Array<{
+    id: number;
+    co_number: string | null;
+    description: string;
+    amount: number;
+    status: string;
+  }>;
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function CommitmentsGrid() {
   const { projectId, phaseId } = useParams<{ projectId: string; phaseId: string }>();
   const phaseIdNum = Number(phaseId);
+
   const { data: project } = useQuery({
     queryKey: ['project', Number(projectId)],
     queryFn: () => api.getProject(Number(projectId)),
@@ -49,7 +81,12 @@ export default function CommitmentsGrid() {
   const gla_sf = (project as any)?.gla_sf ? Number((project as any).gla_sf) : null;
   const gla_ac = (project as any)?.gla_ac ? Number((project as any).gla_ac) : null;
 
+  // collapsed: sec:key, sg:key, line:id
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // expanded contract drilldown: line:id
+  const [contractsOpen, setContractsOpen] = useState<Set<number>>(new Set());
+  // collapsed CO list under a contract: contract:id
+  const [cosCollapsed, setCosCollapsed] = useState<Set<number>>(new Set());
 
   const { data: rows = [], isLoading, error } = useQuery<BudgetRow[]>({
     queryKey: ['budget', phaseIdNum],
@@ -57,8 +94,30 @@ export default function CommitmentsGrid() {
     enabled: !!phaseIdNum,
   });
 
+  const { data: contracts = [] } = useQuery<PhaseContract[]>({
+    queryKey: ['phaseContracts', phaseIdNum],
+    queryFn: () => api.listContracts(phaseIdNum),
+    enabled: !!phaseIdNum,
+  });
+
+  // Map budget_line_id → contracts[]
+  const contractsByLine = useMemo(() => {
+    const m = new Map<number, PhaseContract[]>();
+    for (const c of contracts) {
+      if (!m.has(c.phase_budget_line_id)) m.set(c.phase_budget_line_id, []);
+      m.get(c.phase_budget_line_id)!.push(c);
+    }
+    return m;
+  }, [contracts]);
+
   function toggle(key: string) {
     setCollapsed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  }
+  function toggleLine(id: number) {
+    setContractsOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  function toggleCo(id: number) {
+    setCosCollapsed(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
   const tree = useMemo(() => {
@@ -125,11 +184,11 @@ export default function CommitmentsGrid() {
         <table className={styles.table}>
           <colgroup>
             <col style={{ width: 24 }} />    {/* gutter */}
-            <col style={{ width: 230 }} />   {/* task */}
-            <col style={{ width: 110 }} />   {/* discipline */}
-            <col style={{ width: 96 }} />    {/* budget amount */}
+            <col style={{ width: 230 }} />   {/* task / vendor */}
+            <col style={{ width: 110 }} />   {/* discipline / ref# / status */}
+            <col style={{ width: 96 }} />    {/* budget */}
             <col style={{ width: 96 }} />    {/* init. contract */}
-            <col style={{ width: 88 }} />    {/* cos */}
+            <col style={{ width: 88 }} />    {/* COs */}
             <col style={{ width: 96 }} />    {/* total commitment */}
             <col style={{ width: 96 }} />    {/* rem $ */}
             <col style={{ width: 52 }} />    {/* rem % */}
@@ -145,8 +204,8 @@ export default function CommitmentsGrid() {
             </tr>
             <tr className={styles.thead}>
               <th className={styles.th} />
-              <th className={`${styles.th} ${styles.thLeft}`}>Task</th>
-              <th className={`${styles.th} ${styles.thLeft}`}>Discipline</th>
+              <th className={`${styles.th} ${styles.thLeft}`}>Task / Vendor</th>
+              <th className={`${styles.th} ${styles.thLeft}`}>Discipline / Ref #</th>
               <th className={`${styles.th} ${styles.thRight}`}>Budget</th>
               <th className={`${styles.th} ${styles.thRight}`}>Init. Contract</th>
               <th className={`${styles.th} ${styles.thRight}`}>COs</th>
@@ -184,33 +243,116 @@ export default function CommitmentsGrid() {
                       </tr>
                     ] : []),
 
-                    ...(sgOpen ? sgRows.map((row: BudgetRow) => (
-                      <tr key={row.id} className={styles.dataRow}>
-                        <td className={styles.rowGutter} />
-                        <td className={`${styles.cell} ${styles.tdTask}`}>{row.task_name}</td>
-                        <td className={`${styles.cell} ${styles.tdDisc}`}>{row.discipline}</td>
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
-                          {row.budgeted_amount > 0 ? usd.format(row.budgeted_amount) : '—'}
-                        </td>
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.committed)}</td>
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
-                          {row.co_count > 0
-                            ? <span title={`${row.co_count} CO${row.co_count > 1 ? 's' : ''}`}>{money(row.co_value)}</span>
-                            : ''}
-                        </td>
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
-                          {money(row.total_commitment)}
-                        </td>
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.remaining_commit < 0 ? styles.danger : ''}`}>
-                          {row.budgeted_amount > 0 ? usd.format(row.remaining_commit) : '—'}
-                        </td>
-                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>
-                          {row.budgeted_amount > 0 ? remPct(row.total_commitment, row.budgeted_amount) : '—'}
-                        </td>
-                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.total_commitment, gla_sf)}</td>
-                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.total_commitment, gla_ac)}</td>
-                      </tr>
-                    )) : []),
+                    ...(sgOpen ? sgRows.flatMap((row: BudgetRow) => {
+                      const lineContracts = contractsByLine.get(row.id) ?? [];
+                      const hasContracts  = lineContracts.length > 0;
+                      const lineOpen      = contractsOpen.has(row.id);
+
+                      return [
+                        // ── Budget line row ────────────────────────────────
+                        <tr
+                          key={row.id}
+                          className={`${styles.dataRow} ${hasContracts ? cgStyles.lineClickable : ''}`}
+                          onClick={hasContracts ? () => toggleLine(row.id) : undefined}
+                        >
+                          <td className={styles.rowGutter}>
+                            {hasContracts && (
+                              <span className={styles.chevron}>{lineOpen ? '▼' : '▶'}</span>
+                            )}
+                          </td>
+                          <td className={`${styles.cell} ${styles.tdTask}`}>{row.task_name}</td>
+                          <td className={`${styles.cell} ${styles.tdDisc}`}>{row.discipline}</td>
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
+                            {row.budgeted_amount > 0 ? usd.format(row.budgeted_amount) : '—'}
+                          </td>
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.committed)}</td>
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
+                            {row.co_count > 0
+                              ? <span title={`${row.co_count} CO${row.co_count > 1 ? 's' : ''}`}>{money(row.co_value)}</span>
+                              : ''}
+                          </td>
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
+                            {money(row.total_commitment)}
+                          </td>
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.remaining_commit < 0 ? styles.danger : ''}`}>
+                            {row.budgeted_amount > 0 ? usd.format(row.remaining_commit) : '—'}
+                          </td>
+                          <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>
+                            {row.budgeted_amount > 0 ? remPct(row.total_commitment, row.budgeted_amount) : '—'}
+                          </td>
+                          <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.total_commitment, gla_sf)}</td>
+                          <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.total_commitment, gla_ac)}</td>
+                        </tr>,
+
+                        // ── Contract rows (drilldown) ──────────────────────
+                        ...(lineOpen ? lineContracts.flatMap(c => {
+                          const hasCos   = c.change_orders.length > 0;
+                          const cosOpen  = !cosCollapsed.has(c.id);
+
+                          return [
+                            <tr key={`contract:${c.id}`} className={cgStyles.contractRow}
+                                onClick={hasCos ? () => toggleCo(c.id) : undefined}
+                                style={{ cursor: hasCos ? 'pointer' : 'default' }}>
+                              <td className={cgStyles.contractGutter}>
+                                {hasCos && <span className={styles.chevron}>{cosOpen ? '▼' : '▶'}</span>}
+                              </td>
+                              <td className={`${styles.cell} ${cgStyles.vendorCell}`}>
+                                {c.vendor_name}
+                              </td>
+                              <td className={`${styles.cell} ${cgStyles.refCell}`}>
+                                <span className={`${cgStyles.statusBadge} ${cgStyles[`status_${c.status}`]}`}>
+                                  {STATUS_LABEL[c.status] ?? c.status}
+                                </span>
+                                {c.reference_number && (
+                                  <span className={cgStyles.refNum}>{c.reference_number}</span>
+                                )}
+                              </td>
+                              <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />
+                              <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`}>
+                                {usd.format(c.total_value)}
+                              </td>
+                              <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`}>
+                                {c.co_value > 0 ? money(c.co_value) : ''}
+                              </td>
+                              <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`}>
+                                {usd.format(c.total_commitment)}
+                              </td>
+                              <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum} ${c.remaining_commitment < 0 ? styles.danger : ''}`}>
+                                {c.total_invoiced > 0 ? usd.format(c.remaining_commitment) : '—'}
+                              </td>
+                              <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`} />
+                              <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`} />
+                              <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`} />
+                            </tr>,
+
+                            // ── CO sub-rows ────────────────────────────────
+                            ...(hasCos && cosOpen ? c.change_orders.map(co => (
+                              <tr key={`co:${co.id}`} className={cgStyles.coRow}>
+                                <td className={cgStyles.coGutter} />
+                                <td className={`${styles.cell} ${cgStyles.coDesc}`} colSpan={2}>
+                                  <span className={cgStyles.coLabel}>
+                                    CO{co.co_number ? ` ${co.co_number}` : ''}
+                                  </span>
+                                  {' '}{co.description}
+                                </td>
+                                <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />
+                                <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />
+                                <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.coNum}`}>
+                                  {usd.format(co.amount)}
+                                </td>
+                                <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.coNum}`}>
+                                  {usd.format(co.amount)}
+                                </td>
+                                <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />
+                                <td className={`${styles.cell} ${styles.tdPct}  ${styles.ro}`} />
+                                <td className={`${styles.cell} ${styles.tdPct}  ${styles.ro}`} />
+                                <td className={`${styles.cell} ${styles.tdPct}  ${styles.ro}`} />
+                              </tr>
+                            )) : []),
+                          ];
+                        }) : []),
+                      ];
+                    }) : []),
                   ];
                 }) : []),
               ];

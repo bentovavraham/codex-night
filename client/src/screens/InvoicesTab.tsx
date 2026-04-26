@@ -1,0 +1,686 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+
+import { api } from '../api/client';
+import styles from './InvoicesTab.module.css';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface QbAccount { id: number; account_number: string; full_name: string; short_name: string; }
+
+interface LineItem {
+  billing_type: 'fixed' | 'tm' | 'expense';
+  description: string;
+  person: string;
+  line_date: string;
+  hours: string;
+  rate: string;
+  amount: string;
+  qb_account_id: number | null;
+  // AI suggestion metadata
+  suggested_qb_account_id: number | null;
+  qb_suggestion_confidence: string | null;
+}
+
+interface InvoiceForm {
+  invoice_number: string;
+  vendor_name: string;
+  vendor_id: number | null;
+  vendor_is_new: boolean;
+  invoice_date: string;
+  services_thru_date: string;
+  amount: string;
+  description: string;
+  contract_id: number | null;
+  line_items: LineItem[];
+  reviewed: boolean;
+}
+
+const EMPTY_FORM: InvoiceForm = {
+  invoice_number: '', vendor_name: '', vendor_id: null, vendor_is_new: false,
+  invoice_date: '', services_thru_date: '', amount: '',
+  description: '', contract_id: null, line_items: [], reviewed: false,
+};
+
+type Stage = 'drop' | 'extracting' | 'review';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'Pending', pm_approved: 'PM ✓', partner_approved: 'Partner ✓',
+  approved: 'Approved', pushed: 'Pushed', paid: 'Paid', rejected: 'Rejected', on_hold: 'On Hold',
+};
+const STATUS_CSS: Record<string, string> = {
+  pending: 'sPending', pm_approved: 'sPm', partner_approved: 'sPartner',
+  approved: 'sApproved', pushed: 'sPushed', paid: 'sPaid',
+  rejected: 'sRejected', on_hold: 'sHold',
+};
+
+function ConfDot({ level }: { level?: string | null }) {
+  const bg = level === 'high' ? '#22c55e' : level === 'medium' ? '#f59e0b' : '#ef4444';
+  if (!level) return null;
+  return <span className={styles.confDot} style={{ background: bg }} title={`AI confidence: ${level}`} />;
+}
+
+// ─── QB Code autocomplete ─────────────────────────────────────────────────────
+
+function QbPicker({
+  accounts, value, suggestedId, suggestionConfidence, onChange,
+}: {
+  accounts: QbAccount[];
+  value: number | null;
+  suggestedId: number | null;
+  suggestionConfidence: string | null;
+  onChange: (id: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const selected = accounts.find(a => a.id === value) ?? null;
+  const suggested = accounts.find(a => a.id === suggestedId) ?? null;
+
+  // Show suggestion if nothing manually selected yet
+  const display = selected ?? suggested;
+  const isAiSuggested = !selected && !!suggested;
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return accounts; // show ALL accounts — fully scannable
+    const q = query.toLowerCase();
+    return accounts.filter(a =>
+      a.account_number.toLowerCase().includes(q) ||
+      a.full_name.toLowerCase().includes(q) ||
+      a.short_name.toLowerCase().includes(q)
+    );
+  }, [accounts, query]);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [open]);
+
+  function openDropdown() {
+    setQuery('');
+    setOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 30);
+  }
+
+  function pick(a: QbAccount) {
+    onChange(a.id);
+    setOpen(false);
+    setQuery('');
+  }
+
+  function clear(e: React.MouseEvent) {
+    e.stopPropagation();
+    onChange(null);
+  }
+
+  return (
+    <div className={styles.qbPicker} ref={ref}>
+      <div
+        className={`${styles.qbDisplay} ${isAiSuggested ? styles.qbAi : ''} ${!display ? styles.qbEmpty : ''}`}
+        onClick={openDropdown}
+        title={display?.full_name}
+      >
+        {display ? (
+          <>
+            <span className={styles.qbNum}>{display.account_number}</span>
+            <span className={styles.qbName}>{display.full_name}</span>
+            {isAiSuggested && <ConfDot level={suggestionConfidence} />}
+            <button className={styles.qbClear} onClick={clear} title="Clear">✕</button>
+          </>
+        ) : (
+          <span className={styles.qbPlaceholder}>Select account…</span>
+        )}
+      </div>
+
+      {open && (
+        <div className={styles.qbDropdown}>
+          <input
+            ref={inputRef}
+            className={styles.qbSearch}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search by number or name…"
+          />
+          <div className={styles.qbList}>
+            {filtered.map(a => (
+              <div
+                key={a.id}
+                className={`${styles.qbOption} ${a.id === (value ?? suggestedId) ? styles.qbOptionSelected : ''}`}
+                onMouseDown={() => pick(a)}
+              >
+                <span className={styles.qbOptNum}>{a.account_number}</span>
+                <span className={styles.qbOptName}>{a.full_name}</span>
+              </div>
+            ))}
+            {filtered.length === 0 && <div className={styles.qbNoMatch}>No match</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Invoice list ─────────────────────────────────────────────────────────────
+
+function InvoiceList({ invoices, onUpload }: { invoices: any[]; onUpload: () => void }) {
+  return (
+    <div className={styles.listWrap}>
+      <div className={styles.toolbar}>
+        <span className={styles.toolLabel}>Invoices</span>
+        <button className={styles.uploadBtn} onClick={onUpload}>+ Upload Invoice</button>
+      </div>
+      {invoices.length === 0 ? (
+        <div className={styles.emptyState}>
+          <p>No invoices yet.</p>
+          <button className={styles.uploadBtnLg} onClick={onUpload}>Upload Invoice PDF</button>
+        </div>
+      ) : (
+        <div className={styles.scrollArea}>
+          <table className={styles.listTable}>
+            <thead>
+              <tr className={styles.listThead}>
+                <th className={`${styles.lth} ${styles.left}`}>Invoice #</th>
+                <th className={`${styles.lth} ${styles.left}`}>Vendor</th>
+                <th className={`${styles.lth} ${styles.left}`}>Contract</th>
+                <th className={`${styles.lth} ${styles.right}`}>Date</th>
+                <th className={`${styles.lth} ${styles.right}`}>Amount</th>
+                <th className={`${styles.lth} ${styles.center}`}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv: any) => (
+                <tr key={inv.id} className={styles.listRow}>
+                  <td className={`${styles.ltd} ${styles.mono}`}>{inv.invoice_number}</td>
+                  <td className={styles.ltd}>{inv.vendor_name}</td>
+                  <td className={`${styles.ltd} ${styles.dim}`}>
+                    {inv.contract_vendor ? `${inv.contract_vendor}${inv.contract_ref ? ` · ${inv.contract_ref}` : ''}` : '—'}
+                  </td>
+                  <td className={`${styles.ltd} ${styles.mono} ${styles.right}`}>
+                    {inv.invoice_date ? String(inv.invoice_date).slice(0, 10) : '—'}
+                  </td>
+                  <td className={`${styles.ltd} ${styles.mono} ${styles.right}`}>{usd.format(Number(inv.amount))}</td>
+                  <td className={`${styles.ltd} ${styles.center}`}>
+                    <span className={`${styles.badge} ${styles[STATUS_CSS[inv.status] ?? 'sPending']}`}>
+                      {STATUS_LABEL[inv.status] ?? inv.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Upload + review panel ────────────────────────────────────────────────────
+
+function UploadPanel({
+  contracts, qbAccounts, projectId, onClose, onSaved,
+}: {
+  contracts: any[];
+  qbAccounts: QbAccount[];
+  projectId: number;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [stage, setStage] = useState<Stage>('drop');
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [fileRef, setFileRef] = useState<string | null>(null);
+  const [extracted, setExtracted] = useState<any>(null);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [form, setForm] = useState<InvoiceForm>(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+
+  const handleFile = useCallback(async (file: File) => {
+    const url = URL.createObjectURL(file);
+    setPdfUrl(url);
+    setStage('extracting');
+    setExtractError(null);
+    try {
+      const result = await api.extractInvoice(file);
+      setFileRef(result.file_reference ?? null);
+      if (result.extracted) {
+        const e = result.extracted;
+        setExtracted(e);
+        const items: LineItem[] = (e.line_items ?? []).map((li: any) => ({
+          billing_type:             li.billing_type ?? 'fixed',
+          description:              li.description  ?? '',
+          person:                   li.person       ?? '',
+          line_date:                li.line_date    ?? '',
+          hours:                    li.hours  != null ? String(li.hours)  : '',
+          rate:                     li.rate   != null ? String(li.rate)   : '',
+          amount:                   li.amount != null ? String(li.amount) : '',
+          qb_account_id:            null,
+          suggested_qb_account_id:  li.suggested_qb_account_id  ?? null,
+          qb_suggestion_confidence: li.qb_suggestion_confidence ?? null,
+        }));
+        setForm({
+          invoice_number:     e.invoice_number     ?? '',
+          vendor_name:        e.vendor_name        ?? '',
+          vendor_id:          e.vendor_match?.id   ?? null,
+          vendor_is_new:      e.vendor_is_new      ?? false,
+          invoice_date:       e.invoice_date       ?? '',
+          services_thru_date: e.services_thru_date ?? '',
+          amount:             e.amount != null ? String(e.amount) : '',
+          description:        e.summary ?? '',
+          contract_id:        null,
+          line_items:         items,
+          reviewed:           false,
+        });
+      }
+      if (result.extract_error) setExtractError(result.extract_error);
+    } catch (err: any) {
+      setExtractError(err.message ?? 'Extraction failed');
+    } finally {
+      setStage('review');
+    }
+  }, []);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file?.type === 'application/pdf') handleFile(file);
+  }, [handleFile]);
+
+  function setF<K extends keyof InvoiceForm>(key: K, val: InvoiceForm[K]) {
+    setForm(f => ({ ...f, [key]: val }));
+  }
+
+  function setLine(idx: number, patch: Partial<LineItem>) {
+    setForm(f => {
+      const items = [...f.line_items];
+      items[idx] = { ...items[idx], ...patch };
+      return { ...f, line_items: items };
+    });
+  }
+
+  function addLine() {
+    setForm(f => ({
+      ...f,
+      line_items: [...f.line_items, {
+        billing_type: 'fixed', description: '', person: '', line_date: '',
+        hours: '', rate: '', amount: '',
+        qb_account_id: null, suggested_qb_account_id: null, qb_suggestion_confidence: null,
+      }],
+    }));
+  }
+
+  function clearLines() {
+    setForm(f => ({ ...f, line_items: [] }));
+  }
+
+  function removeLine(idx: number) {
+    setForm(f => ({ ...f, line_items: f.line_items.filter((_, i) => i !== idx) }));
+  }
+
+  // Derived total from line items (if lines exist)
+  const lineTotal = form.line_items.reduce((s, li) => s + (Number(li.amount) || 0), 0);
+
+  async function handleSave() {
+    setSaveError(null);
+    const amt = Number(form.amount);
+    if (!form.invoice_number.trim()) return setSaveError('Invoice number is required.');
+    if (!form.vendor_name.trim())    return setSaveError('Vendor name is required.');
+    if (!amt || amt <= 0)            return setSaveError('Amount must be greater than 0.');
+    if (!form.reviewed)              return setSaveError('Please check the review confirmation.');
+
+    setSaving(true);
+    try {
+      // Derive invoice type from line items
+      const types = new Set(form.line_items.map(li => li.billing_type));
+      const invoiceType = types.has('tm') ? 'tm' : types.has('expense') ? 'expense' : 'fixed';
+
+      const payload: any = {
+        invoice_number:     form.invoice_number.trim(),
+        vendor_name:        form.vendor_name.trim(),
+        amount:             amt,
+        invoice_date:       form.invoice_date       || null,
+        description:        form.description        || null,
+        file_reference:     fileRef                 || null,
+        invoice_type:       invoiceType,
+        project_id:         projectId,
+        invoice_line_items: form.line_items
+          .filter(li => Number(li.amount) > 0)
+          .map((li, i) => ({
+            billing_type:  li.billing_type,
+            description:   li.description  || null,
+            person:        li.person       || null,
+            line_date:     li.line_date    || null,
+            hours:         li.hours  ? Number(li.hours)  : null,
+            rate:          li.rate   ? Number(li.rate)   : null,
+            amount:        Number(li.amount),
+            qb_account_id: li.qb_account_id ?? li.suggested_qb_account_id ?? null,
+            sort_order:    i,
+          })),
+      };
+      if (form.contract_id) payload.contract_id = form.contract_id;
+      await api.createInvoice(payload);
+      onSaved();
+    } catch (err: any) {
+      setSaveError(err.message ?? 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const conf = extracted?.confidence ?? {};
+  const canSave = form.reviewed && !!form.invoice_number && !!form.vendor_name && Number(form.amount) > 0;
+
+  return (
+    <div className={styles.uploadLayout}>
+
+      {/* ── Left: PDF pane ──────────────────────────────── */}
+      <div className={styles.pdfPane}>
+        {stage === 'drop' ? (
+          <div
+            className={`${styles.dropZone} ${dragOver ? styles.dragOver : ''}`}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            onClick={() => fileInput.current?.click()}
+          >
+            <input ref={fileInput} type="file" accept="application/pdf" style={{ display: 'none' }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+            <div className={styles.dropIcon}>📄</div>
+            <p className={styles.dropText}>Drop invoice PDF here</p>
+            <p className={styles.dropSub}>or click to browse</p>
+          </div>
+        ) : pdfUrl ? (
+          <iframe src={pdfUrl} className={styles.pdfFrame} title="Invoice PDF" />
+        ) : null}
+      </div>
+
+      {/* ── Right: form pane ────────────────────────────── */}
+      <div className={styles.formPane}>
+
+        {/* Header bar */}
+        <div className={styles.formBar}>
+          <span className={styles.formBarTitle}>
+            {stage === 'extracting' ? 'Reading invoice…' : stage === 'drop' ? 'New Invoice' : `Invoice${form.invoice_number ? ` #${form.invoice_number}` : ''}`}
+          </span>
+          <button className={styles.closeBtn} onClick={onClose}>✕</button>
+        </div>
+
+        {stage === 'extracting' && (
+          <div className={styles.extractingWrap}>
+            <div className={styles.spinner} />
+            <p>Claude is reading your invoice…</p>
+            <p className={styles.extractingSub}>Extracting line items and suggesting QB codes</p>
+          </div>
+        )}
+
+        {stage === 'review' && (
+          <div className={styles.formScroll}>
+
+            {/* Extraction warning */}
+            {extractError && (
+              <div className={styles.warnBanner}>
+                ⚠ AI extraction had issues — please fill fields manually.
+                <span className={styles.warnDetail}> {extractError}</span>
+              </div>
+            )}
+
+            {/* ── QB-style header fields ── */}
+            <div className={styles.headerFields}>
+              {/* Payee */}
+              <div className={styles.hfGroup}>
+                <label className={styles.hfLabel}>
+                  Payee <ConfDot level={conf.vendor_name} />
+                </label>
+                <input className={styles.hfInput} value={form.vendor_name}
+                  onChange={e => setF('vendor_name', e.target.value)} placeholder="Who did you pay?" />
+                {form.vendor_is_new && (
+                  <div className={styles.vendorNewWarn}>⚠ New vendor — will be created in QB on push</div>
+                )}
+                {extracted?.vendor_match && !extracted.vendor_match.exact && (
+                  <div className={styles.vendorMatchNote}>
+                    Matched to QB vendor: <strong>{extracted.vendor_match.name}</strong>
+                  </div>
+                )}
+              </div>
+
+              {/* Contract link */}
+              <div className={styles.hfGroup}>
+                <label className={styles.hfLabel}>Contract</label>
+                <select className={styles.hfSelect} value={form.contract_id ?? ''}
+                  onChange={e => setF('contract_id', e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">— No contract (standalone) —</option>
+                  {contracts.map((c: any) => (
+                    <option key={c.id} value={c.id}>
+                      {c.vendor_name}{c.reference_number ? ` · ${c.reference_number}` : ''} (${Number(c.total_value).toLocaleString()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Date + Ref row */}
+              <div className={styles.hfRow}>
+                <div className={styles.hfGroup}>
+                  <label className={styles.hfLabel}>
+                    Invoice Date <ConfDot level={conf.invoice_date} />
+                  </label>
+                  <input className={styles.hfInput} type="date" value={form.invoice_date}
+                    onChange={e => setF('invoice_date', e.target.value)} />
+                </div>
+                <div className={styles.hfGroup}>
+                  <label className={styles.hfLabel}>Ref / Invoice #
+                    <ConfDot level={conf.invoice_number} />
+                  </label>
+                  <input className={styles.hfInput} value={form.invoice_number}
+                    onChange={e => setF('invoice_number', e.target.value)} placeholder="e.g. 203010a-4" />
+                </div>
+                {form.services_thru_date && (
+                  <div className={styles.hfGroup}>
+                    <label className={styles.hfLabel}>Services Through</label>
+                    <input className={styles.hfInput} type="date" value={form.services_thru_date}
+                      onChange={e => setF('services_thru_date', e.target.value)} />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Category details (QB-style line items) ── */}
+            <div className={styles.catSection}>
+              <div className={styles.catTitle}>Category details</div>
+              <table className={styles.catTable}>
+                <thead>
+                  <tr className={styles.catThead}>
+                    <th className={styles.colHash}>#</th>
+                    <th className={styles.colCat}>CATEGORY</th>
+                    <th className={styles.colType}>TYPE</th>
+                    <th className={styles.colDesc}>DESCRIPTION</th>
+                    <th className={`${styles.colAmt} ${styles.right}`}>AMOUNT</th>
+                    <th className={styles.colDel} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {form.line_items.map((li, i) => (
+                    <tr key={i} className={styles.catRow}>
+                      <td className={styles.colHash}>{i + 1}</td>
+                      <td className={styles.colCat}>
+                        <QbPicker
+                          accounts={qbAccounts}
+                          value={li.qb_account_id}
+                          suggestedId={li.suggested_qb_account_id}
+                          suggestionConfidence={li.qb_suggestion_confidence}
+                          onChange={id => setLine(i, { qb_account_id: id })}
+                        />
+                      </td>
+                      <td className={styles.colType}>
+                        <select
+                          className={styles.typeSelect}
+                          value={li.billing_type}
+                          onChange={e => setLine(i, { billing_type: e.target.value as LineItem['billing_type'] })}
+                        >
+                          <option value="fixed">Fixed</option>
+                          <option value="tm">T&amp;M</option>
+                          <option value="expense">Expense</option>
+                        </select>
+                      </td>
+                      <td className={styles.colDesc}>
+                        <input
+                          className={styles.descInput}
+                          value={li.description}
+                          onChange={e => setLine(i, { description: e.target.value })}
+                          placeholder="Description"
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addLine(); } }}
+                        />
+                        {li.billing_type === 'tm' && (
+                          <div className={styles.tmSub}>
+                            <input className={styles.tmField} value={li.person}
+                              onChange={e => setLine(i, { person: e.target.value })}
+                              placeholder="Person" style={{ width: 90 }} />
+                            <input className={styles.tmField} type="date" value={li.line_date}
+                              onChange={e => setLine(i, { line_date: e.target.value })} style={{ width: 110 }} />
+                            <input className={styles.tmField} value={li.hours}
+                              onChange={e => setLine(i, { hours: e.target.value })}
+                              placeholder="hrs" style={{ width: 44 }} />
+                            <span className={styles.tmSep}>×</span>
+                            <input className={styles.tmField} value={li.rate}
+                              onChange={e => setLine(i, { rate: e.target.value })}
+                              placeholder="rate" style={{ width: 54 }} />
+                          </div>
+                        )}
+                      </td>
+                      <td className={`${styles.colAmt} ${styles.right}`}>
+                        <input
+                          className={`${styles.amtInput} ${styles.mono}`}
+                          value={li.amount}
+                          onChange={e => setLine(i, { amount: e.target.value })}
+                          placeholder="0.00"
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addLine(); } }}
+                        />
+                      </td>
+                      <td className={styles.colDel}>
+                        <button className={styles.delBtn} onClick={() => removeLine(i)} title="Remove">✕</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className={styles.catFooter}>
+                <div className={styles.catFooterLeft}>
+                  <button className={styles.addLineBtn} onClick={addLine}>Add lines</button>
+                  {form.line_items.length > 0 && (
+                    <button className={styles.clearLinesBtn} onClick={clearLines}>Clear all lines</button>
+                  )}
+                </div>
+                {form.line_items.length > 0 && lineTotal > 0 && (
+                  <div className={styles.lineTotal}>
+                    <span>Total</span>
+                    <span className={styles.mono}>{usd.format(lineTotal)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Total (header amount) ── */}
+            <div className={styles.totalSection}>
+              <label className={styles.hfLabel}>
+                Total Amount <ConfDot level={conf.amount} />
+              </label>
+              <input
+                className={`${styles.hfInput} ${styles.mono} ${styles.totalInput}`}
+                value={form.amount}
+                onChange={e => setF('amount', e.target.value)}
+                placeholder="0.00"
+              />
+              {form.line_items.length > 0 && lineTotal > 0 && Math.abs(lineTotal - Number(form.amount)) > 0.02 && (
+                <div className={styles.totalMismatch}>
+                  ⚠ Line items total {usd.format(lineTotal)} — doesn't match invoice total
+                </div>
+              )}
+            </div>
+
+            {/* ── Review checkbox ── */}
+            <label className={styles.reviewCheck}>
+              <input type="checkbox" checked={form.reviewed}
+                onChange={e => setF('reviewed', e.target.checked)} />
+              <span>I have reviewed this invoice and confirm all details are correct</span>
+            </label>
+
+            {saveError && <div className={styles.saveError}>{saveError}</div>}
+
+            <div className={styles.formActions}>
+              <button className={styles.cancelBtn} onClick={onClose}>Cancel</button>
+              <button className={styles.saveBtn} onClick={handleSave} disabled={saving || !canSave}>
+                {saving ? 'Saving…' : 'Save & Close'}
+              </button>
+            </div>
+
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main tab ─────────────────────────────────────────────────────────────────
+
+export default function InvoicesTab() {
+  const { projectId, phaseId } = useParams<{ projectId: string; phaseId: string }>();
+  const phaseIdNum   = Number(phaseId);
+  const projectIdNum = Number(projectId);
+  const qc = useQueryClient();
+
+  const [uploadOpen, setUploadOpen] = useState(false);
+
+  const { data: invoices = [], isLoading } = useQuery<any[]>({
+    queryKey: ['invoices', phaseIdNum],
+    queryFn:  () => api.listInvoices(phaseIdNum),
+    enabled:  !!phaseIdNum,
+  });
+
+  const { data: contracts = [] } = useQuery<any[]>({
+    queryKey: ['phaseContracts', phaseIdNum],
+    queryFn:  () => api.listContracts(phaseIdNum),
+    enabled:  !!phaseIdNum,
+  });
+
+  const { data: qbAccounts = [] } = useQuery<QbAccount[]>({
+    queryKey: ['qbAccounts'],
+    queryFn:  () => api.listQbAccounts(),
+    staleTime: Infinity,
+  });
+
+  function handleSaved() {
+    qc.invalidateQueries({ queryKey: ['invoices',      phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['budget',        phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['phaseContracts', phaseIdNum] });
+    setUploadOpen(false);
+  }
+
+  if (isLoading) return <div className={styles.splash}>Loading…</div>;
+
+  if (uploadOpen) {
+    return (
+      <UploadPanel
+        contracts={contracts}
+        qbAccounts={qbAccounts}
+        projectId={projectIdNum}
+        onClose={() => setUploadOpen(false)}
+        onSaved={handleSaved}
+      />
+    );
+  }
+
+  return <InvoiceList invoices={invoices} onUpload={() => setUploadOpen(true)} />;
+}

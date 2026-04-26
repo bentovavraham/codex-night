@@ -4,7 +4,7 @@ const pool = require('../db/pool');
 const { requireAuth, hasMinRole } = require('../middleware/auth');
 const projects = require('./projects');
 const storage = require('../lib/storage');
-const { extractInvoice } = require('../lib/extract');
+const { extractInvoice, suggestInvoiceLineCodes } = require('../lib/extract');
 
 const router = express.Router();
 const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -74,6 +74,52 @@ router.post('/invoices/extract', requireAuth, pdfUpload.single('file'), async (r
         extracted = await extractInvoice(req.file.buffer, ctx);
       } else {
         extracted = pass1;
+      }
+
+      // Pass 3: suggest QB codes per line item (uses both description + vendor).
+      if (extracted && extracted.line_items && extracted.line_items.length > 0) {
+        try {
+          const qbResult = await pool.query(
+            `SELECT id, account_number, full_name FROM qb_accounts WHERE is_leaf = true ORDER BY sort_order`
+          );
+          const suggestions = await suggestInvoiceLineCodes(
+            req.file.buffer, extracted.line_items, qbResult.rows, extracted.vendor_name
+          );
+          // Merge suggestions back onto each line item.
+          const byIndex = {};
+          for (const s of suggestions) byIndex[s.line_index] = s;
+          extracted.line_items = extracted.line_items.map((li, i) => ({
+            ...li,
+            suggested_qb_account_id:  byIndex[i]?.qb_account_id  ?? null,
+            suggested_qb_number:      byIndex[i]?.account_number  ?? null,
+            qb_suggestion_confidence: byIndex[i]?.confidence      ?? null,
+            qb_suggestion_reason:     byIndex[i]?.reason          ?? null,
+          }));
+        } catch (codeErr) {
+          console.warn('QB code suggestion failed:', codeErr.message);
+        }
+      }
+
+      // Pass 4: fuzzy-match vendor name against known vendors.
+      if (extracted && extracted.vendor_name) {
+        const normalize = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const vendorNorm = normalize(extracted.vendor_name);
+        const vendorsRes = await pool.query('SELECT id, name FROM vendors ORDER BY name');
+        let bestMatch = null, bestScore = 0;
+        for (const v of vendorsRes.rows) {
+          const vn = normalize(v.name);
+          if (vn === vendorNorm) { bestMatch = v; bestScore = 1; break; }
+          // Simple longest-common-prefix score
+          let common = 0;
+          const minLen = Math.min(vn.length, vendorNorm.length);
+          for (let i = 0; i < minLen; i++) { if (vn[i] === vendorNorm[i]) common++; else break; }
+          const score = common / Math.max(vn.length, vendorNorm.length);
+          if (score > bestScore && score > 0.7) { bestScore = score; bestMatch = v; }
+        }
+        extracted.vendor_match = bestMatch
+          ? { id: bestMatch.id, name: bestMatch.name, score: bestScore, exact: bestScore === 1 }
+          : null;
+        extracted.vendor_is_new = !bestMatch;
       }
     }
     catch (err) { console.error('Invoice extraction failed:', err.message); extract_error = err.message; }
@@ -274,7 +320,7 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
         description: description || null,
       }, req.session.userId);
     }
-    // Insert G703 line items (pay-application line breakdown)
+    // Insert G703 line items (pay-application line breakdown, legacy fixed-scope)
     const lines = req.body?.lines;
     if (Array.isArray(lines) && lines.length > 0 && invoiceType === 'fixed') {
       for (const line of lines) {
@@ -283,6 +329,30 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
         await client.query(
           'INSERT INTO invoice_lines (invoice_id, qb_code_id, current_amount) VALUES ($1, $2, $3)',
           [invoiceId, Number(line.qb_code_id), lineAmt]
+        );
+      }
+    }
+
+    // Insert detailed invoice_line_items (new model: T&M hours, fixed tasks, expenses per line)
+    const invoiceLineItems = req.body?.invoice_line_items;
+    if (Array.isArray(invoiceLineItems) && invoiceLineItems.length > 0) {
+      for (let idx = 0; idx < invoiceLineItems.length; idx++) {
+        const li = invoiceLineItems[idx];
+        const liAmt = Number(li.amount);
+        if (!liAmt) continue;
+        const liType = ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : invoiceType;
+        await client.query(
+          `INSERT INTO invoice_line_items
+             (invoice_id, billing_type, description, person, line_date, hours, rate, amount, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [invoiceId, liType,
+           li.description || null,
+           li.person      || null,
+           li.line_date   || null,
+           li.hours  != null ? Number(li.hours)  : null,
+           li.rate   != null ? Number(li.rate)   : null,
+           liAmt,
+           li.sort_order != null ? Number(li.sort_order) : idx]
         );
       }
     }

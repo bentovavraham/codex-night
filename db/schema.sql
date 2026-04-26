@@ -389,3 +389,41 @@ CREATE INDEX IF NOT EXISTS idx_vendor_profiles_vendor ON vendor_profiles(LOWER(v
 
 DO $$ BEGIN ALTER TABLE projects ADD COLUMN gla_sf NUMERIC(12,0); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE projects ADD COLUMN gla_ac NUMERIC(8,3); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- ── Contract line items (tasks within a contract: Fixed / T&M / Expense) ──────
+-- Mirrors real contract scope: e.g. Task 1 Fixed $4,800 | Task 2 T&M NTE $X
+CREATE TABLE IF NOT EXISTS contract_line_items (
+    id              SERIAL PRIMARY KEY,
+    contract_id     INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    code            TEXT,
+    description     TEXT NOT NULL,
+    billing_type    VARCHAR(16) NOT NULL DEFAULT 'fixed'
+                        CHECK (billing_type IN ('fixed','tm','expense')),
+    budgeted_amount NUMERIC(14,2),          -- NULL = open T&M (no NTE set)
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cli_contract ON contract_line_items(contract_id);
+
+-- ── Invoice line items (rich T&M detail per invoice) ─────────────────────────
+-- Replaces invoice_qb_lines for new invoices; old table kept for compat.
+-- Each line has its own billing_type + QB code so aggregation into
+-- fixed_charges / tm_charges / expense_charges is per line, not per invoice.
+CREATE TABLE IF NOT EXISTS invoice_line_items (
+    id                    SERIAL PRIMARY KEY,
+    invoice_id            INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    contract_line_item_id INTEGER REFERENCES contract_line_items(id) ON DELETE SET NULL,
+    billing_type          VARCHAR(16) NOT NULL DEFAULT 'fixed'
+                              CHECK (billing_type IN ('fixed','tm','expense')),
+    description           TEXT,
+    line_date             DATE,
+    person                TEXT,
+    hours                 NUMERIC(8,2),
+    rate                  NUMERIC(10,2),
+    amount                NUMERIC(14,2) NOT NULL,
+    qb_account_id         INTEGER REFERENCES qb_accounts(id) ON DELETE SET NULL,
+    sort_order            INTEGER NOT NULL DEFAULT 0,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ili_invoice      ON invoice_line_items(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_ili_contract_line ON invoice_line_items(contract_line_item_id);

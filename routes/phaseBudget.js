@@ -252,6 +252,156 @@ router.delete('/budget-lines/:lineId', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/phases/:phaseId/contracts
+// Returns all contracts in a phase, keyed by phase_budget_line_id, with COs nested.
+router.get('/phases/:phaseId/contracts', requireAuth, async (req, res, next) => {
+  try {
+    const { phaseId } = req.params;
+
+    const phaseCheck = await pool.query('SELECT id FROM phases WHERE id = $1', [phaseId]);
+    if (!phaseCheck.rows.length) return res.status(404).json({ error: 'Phase not found' });
+
+    // All contracts for this phase (via their budget line)
+    const contractsResult = await pool.query(`
+      SELECT
+        c.id,
+        c.phase_budget_line_id,
+        c.vendor_name,
+        c.reference_number,
+        c.total_value,
+        c.status,
+        c.contract_date,
+        c.created_at,
+
+        -- Approved COs
+        COALESCE((
+          SELECT SUM(co.amount)
+          FROM change_orders co
+          WHERE co.contract_id = c.id AND co.status = 'approved'
+        ), 0) AS co_value,
+
+        COALESCE((
+          SELECT COUNT(co.id)
+          FROM change_orders co
+          WHERE co.contract_id = c.id AND co.status = 'approved'
+        ), 0) AS co_count,
+
+        -- Fixed invoiced (against contract commitment)
+        COALESCE((
+          SELECT SUM(inv.amount)
+          FROM invoices inv
+          WHERE inv.contract_id = c.id
+            AND inv.invoice_type = 'fixed'
+            AND inv.status NOT IN ('voided','draft')
+        ), 0) AS invoiced_fixed,
+
+        -- T&M invoiced
+        COALESCE((
+          SELECT SUM(inv.amount)
+          FROM invoices inv
+          WHERE inv.contract_id = c.id
+            AND inv.invoice_type = 'tm'
+            AND inv.status NOT IN ('voided','draft')
+        ), 0) AS invoiced_tm,
+
+        -- Expense invoiced
+        COALESCE((
+          SELECT SUM(inv.amount)
+          FROM invoices inv
+          WHERE inv.contract_id = c.id
+            AND inv.invoice_type = 'expense'
+            AND inv.status NOT IN ('voided','draft')
+        ), 0) AS invoiced_expense
+
+      FROM contracts c
+      JOIN phase_budget_lines pbl ON pbl.id = c.phase_budget_line_id
+      WHERE pbl.phase_id = $1
+        AND c.status NOT IN ('voided')
+      ORDER BY c.contract_date ASC NULLS LAST, c.created_at ASC
+    `, [phaseId]);
+
+    // All change orders for those contracts
+    const contractIds = contractsResult.rows.map(r => r.id);
+    let cosByContract = {};
+    if (contractIds.length > 0) {
+      const cosResult = await pool.query(
+        `SELECT id, contract_id, co_number, description, amount, status
+         FROM change_orders
+         WHERE contract_id = ANY($1)
+         ORDER BY created_at ASC`,
+        [contractIds]
+      );
+      for (const co of cosResult.rows) {
+        if (!cosByContract[co.contract_id]) cosByContract[co.contract_id] = [];
+        cosByContract[co.contract_id].push(co);
+      }
+    }
+
+    const contracts = contractsResult.rows.map(r => {
+      const total_value      = parseFloat(r.total_value)      || 0;
+      const co_value         = parseFloat(r.co_value)         || 0;
+      const co_count         = parseInt(r.co_count)           || 0;
+      const invoiced_fixed   = parseFloat(r.invoiced_fixed)   || 0;
+      const invoiced_tm      = parseFloat(r.invoiced_tm)      || 0;
+      const invoiced_expense = parseFloat(r.invoiced_expense) || 0;
+      const total_commitment = total_value + co_value;
+      const total_invoiced   = invoiced_fixed + invoiced_tm + invoiced_expense;
+      return {
+        id:                    r.id,
+        phase_budget_line_id:  r.phase_budget_line_id,
+        vendor_name:           r.vendor_name,
+        reference_number:      r.reference_number,
+        total_value,
+        status:                r.status,
+        contract_date:         r.contract_date,
+        co_count,
+        co_value,
+        total_commitment,
+        invoiced_fixed,
+        invoiced_tm,
+        invoiced_expense,
+        total_invoiced,
+        remaining_commitment:  total_commitment - invoiced_fixed,
+        change_orders:         cosByContract[r.id] || [],
+      };
+    });
+
+    res.json(contracts);
+  } catch (err) { next(err); }
+});
+
+// GET /api/phases/:phaseId/invoices
+// All invoices for this phase (via contracts.phase_budget_line_id).
+router.get('/phases/:phaseId/invoices', requireAuth, async (req, res, next) => {
+  try {
+    const { phaseId } = req.params;
+    const phaseCheck = await pool.query('SELECT id FROM phases WHERE id = $1', [phaseId]);
+    if (!phaseCheck.rows.length) return res.status(404).json({ error: 'Phase not found' });
+
+    const result = await pool.query(`
+      SELECT
+        i.id, i.invoice_number, i.vendor_name, i.amount, i.invoice_date,
+        i.status, i.invoice_type, i.description, i.file_reference,
+        i.created_at, i.paid_date,
+        i.pm_approved_at, i.partner_approved_at, i.approved_at,
+        i.rejection_note,
+        c.id           AS contract_id,
+        c.vendor_name  AS contract_vendor,
+        c.reference_number AS contract_ref,
+        pbl.id         AS budget_line_id,
+        pbl.task_name  AS budget_line_name
+      FROM invoices i
+      JOIN contracts c   ON c.id  = i.contract_id
+      JOIN phase_budget_lines pbl ON pbl.id = c.phase_budget_line_id
+      WHERE pbl.phase_id = $1
+        AND i.status != 'voided'
+      ORDER BY i.invoice_date DESC NULLS LAST, i.created_at DESC
+    `, [phaseId]);
+
+    res.json(result.rows);
+  } catch (err) { next(err); }
+});
+
 // GET /api/qb-accounts
 router.get('/qb-accounts', requireAuth, async (req, res, next) => {
   try {
