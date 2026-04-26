@@ -386,3 +386,6 @@ CREATE TABLE IF NOT EXISTS vendor_profiles (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_vendor_profiles_vendor ON vendor_profiles(LOWER(vendor_name));
+
+DO $$ BEGIN ALTER TABLE projects ADD COLUMN gla_sf NUMERIC(12,0); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE projects ADD COLUMN gla_ac NUMERIC(8,3); EXCEPTION WHEN duplicate_column THEN NULL; END $$;

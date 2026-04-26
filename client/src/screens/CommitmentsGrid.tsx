@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+
 import { api } from '../api/client';
 import type { BudgetRow } from './BudgetGrid';
 import styles from './BudgetGrid.module.css';
@@ -12,6 +13,10 @@ const money  = (n: number) => n === 0 ? '' : usd.format(n);
 const moneyD = (n: number) => n === 0 ? '—' : usd.format(n);
 const remPct = (committed: number, budget: number): string =>
   budget > 0 ? `${Math.round(((budget - committed) / budget) * 100)}%` : '—';
+const perSF = (amount: number, sf: number | null): string =>
+  sf && sf > 0 && amount > 0 ? `$${(amount / sf).toFixed(2)}` : '—';
+const perAC = (amount: number, ac: number | null): string =>
+  ac && ac > 0 && amount > 0 ? `$${Math.round(amount / ac).toLocaleString()}` : '—';
 
 const SECTIONS = [
   { key: 'professional_fees', label: 'Professional Fees' },
@@ -34,8 +39,15 @@ const addRow = (t: Totals, r: BudgetRow): Totals => ({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function CommitmentsGrid() {
-  const { phaseId } = useParams<{ phaseId: string }>();
+  const { projectId, phaseId } = useParams<{ projectId: string; phaseId: string }>();
   const phaseIdNum = Number(phaseId);
+  const { data: project } = useQuery({
+    queryKey: ['project', Number(projectId)],
+    queryFn: () => api.getProject(Number(projectId)),
+    enabled: !!projectId,
+  });
+  const gla_sf = (project as any)?.gla_sf ? Number((project as any).gla_sf) : null;
+  const gla_ac = (project as any)?.gla_ac ? Number((project as any).gla_ac) : null;
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -99,6 +111,8 @@ export default function CommitmentsGrid() {
       {moneyD(t.remaining_commit)}
     </td>
     <td className={styles.sn}>{remPct(t.total_commitment, t.budgeted)}</td>
+    <td className={styles.sn}>{perSF(t.total_commitment, gla_sf)}</td>
+    <td className={styles.sn}>{perAC(t.total_commitment, gla_ac)}</td>
   </>;
 
   return (
@@ -119,12 +133,15 @@ export default function CommitmentsGrid() {
             <col style={{ width: 96 }} />    {/* total commitment */}
             <col style={{ width: 96 }} />    {/* rem $ */}
             <col style={{ width: 52 }} />    {/* rem % */}
+            <col style={{ width: 72 }} />    {/* $/SF */}
+            <col style={{ width: 72 }} />    {/* $/AC */}
           </colgroup>
           <thead>
             <tr className={styles.theadGroup}>
               <th className={styles.th} colSpan={3} />
               <th className={styles.th} />
               <th className={`${styles.thGroup}`} colSpan={5}>Contract Commitment</th>
+              <th className={styles.th} colSpan={2} />
             </tr>
             <tr className={styles.thead}>
               <th className={styles.th} />
@@ -136,6 +153,8 @@ export default function CommitmentsGrid() {
               <th className={`${styles.th} ${styles.thRight}`}>Total Commitment</th>
               <th className={`${styles.th} ${styles.thRight}`}>Rem. $</th>
               <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
+              <th className={`${styles.th} ${styles.thRight}`}>$/SF</th>
+              <th className={`${styles.th} ${styles.thRight}`}>$/AC</th>
             </tr>
           </thead>
           <tbody>
@@ -188,6 +207,8 @@ export default function CommitmentsGrid() {
                         <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>
                           {row.budgeted_amount > 0 ? remPct(row.total_commitment, row.budgeted_amount) : '—'}
                         </td>
+                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.total_commitment, gla_sf)}</td>
+                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.total_commitment, gla_ac)}</td>
                       </tr>
                     )) : []),
                   ];
@@ -209,6 +230,8 @@ export default function CommitmentsGrid() {
                 {usd.format(grand.remaining_commit)}
               </td>
               <td className={`${styles.totalCell} ${styles.tdPct}`}>{remPct(grand.total_commitment, grand.budgeted)}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{perSF(grand.total_commitment, gla_sf)}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{perAC(grand.total_commitment, gla_ac)}</td>
             </tr>
           </tfoot>
         </table>

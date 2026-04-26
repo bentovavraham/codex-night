@@ -42,6 +42,10 @@ const money  = (n: number) => n === 0 ? '' : usd.format(n);
 const moneyD = (n: number) => n === 0 ? '—' : usd.format(n);
 const remPct = (spent: number, budget: number): string =>
   budget > 0 ? `${Math.round(((budget - spent) / budget) * 100)}%` : '—';
+const perSF = (amount: number, sf: number | null): string =>
+  sf && sf > 0 && amount > 0 ? `$${(amount / sf).toFixed(2)}` : '—';
+const perAC = (amount: number, ac: number | null): string =>
+  ac && ac > 0 && amount > 0 ? `$${Math.round(amount / ac).toLocaleString()}` : '—';
 
 function warnClass(billed: number, budget: number) {
   if (budget <= 0 || billed <= 0) return '';
@@ -126,8 +130,15 @@ const addRow = (t: Totals, r: BudgetRow): Totals => ({
 });
 
 export default function BudgetGrid() {
-  const { phaseId } = useParams<{ phaseId: string }>();
+  const { projectId, phaseId } = useParams<{ projectId: string; phaseId: string }>();
   const phaseIdNum = Number(phaseId);
+  const { data: project } = useQuery({
+    queryKey: ['project', Number(projectId)],
+    queryFn: () => api.getProject(Number(projectId)),
+    enabled: !!projectId,
+  });
+  const gla_sf = (project as any)?.gla_sf ? Number((project as any).gla_sf) : null;
+  const gla_ac = (project as any)?.gla_ac ? Number((project as any).gla_ac) : null;
   const qc = useQueryClient();
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -222,7 +233,7 @@ export default function BudgetGrid() {
 
   const dc = showDetails ? '' : styles.detailHidden; // detail col visibility
 
-  // Section/sub-group summary cells (cols 4–12: amount through rem%)
+  // Section/sub-group summary cells
   const TotalsCells = ({ t }: { t: Totals }) => {
     const amtDue = t.billed - t.paid;
     return <>
@@ -235,6 +246,8 @@ export default function BudgetGrid() {
       <td className={styles.sn}>{money(t.paid)}</td>
       <td className={`${styles.sn} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
       <td className={styles.sn}>{remPct(t.billed, t.budgeted)}</td>
+      <td className={styles.sn}>{perSF(t.billed, gla_sf)}</td>
+      <td className={styles.sn}>{perAC(t.billed, gla_ac)}</td>
     </>;
   };
 
@@ -269,6 +282,8 @@ export default function BudgetGrid() {
             <col style={{ width: 88 }} />    {/* paid to date */}
             <col style={{ width: 96 }} />    {/* remaining budget */}
             <col style={{ width: 52 }} />    {/* rem % */}
+            <col style={{ width: 72 }} />    {/* $/SF */}
+            <col style={{ width: 72 }} />    {/* $/AC */}
             <col style={{ width: 140 }} />   {/* calc method */}
             <col style={{ width: 110 }} />   {/* consultant */}
             <col style={{ width: 120 }} />   {/* qb codes */}
@@ -280,6 +295,7 @@ export default function BudgetGrid() {
               <th className={styles.th} />
               <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={4}>Invoices</th>
               <th className={`${styles.thGroup}`} colSpan={4}>Balance</th>
+              <th className={styles.th} colSpan={2} />
               <th className={`${styles.th} ${dc}`} />
               <th className={`${styles.th} ${dc}`} />
               <th className={`${styles.th} ${dc}`} />
@@ -298,6 +314,8 @@ export default function BudgetGrid() {
               <th className={`${styles.th} ${styles.thRight}`}>Paid to Date</th>
               <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget</th>
               <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
+              <th className={`${styles.th} ${styles.thRight}`}>$/SF</th>
+              <th className={`${styles.th} ${styles.thRight}`}>$/AC</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Calc Method</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Consultant</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>QB Codes</th>
@@ -369,6 +387,8 @@ export default function BudgetGrid() {
                           <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnClass(row.billed, row.budgeted_amount)}`}>
                             {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}
                           </td>
+                          <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.billed, gla_sf)}</td>
+                          <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
                           <EditCell value={row.calculation_method} rowId={row.id} field="calculation_method"
                             isActive={isA('calculation_method')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
                             onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdCalc} ${dc}`} />
@@ -406,6 +426,8 @@ export default function BudgetGrid() {
                 {usd.format(grand.rem_budget)}
               </td>
               <td className={`${styles.totalCell} ${styles.tdPct}`}>{remPct(grand.billed, grand.budgeted)}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{perSF(grand.billed, gla_sf)}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{perAC(grand.billed, gla_ac)}</td>
               <td className={`${styles.totalCell} ${dc}`} />
               <td className={`${styles.totalCell} ${dc}`} />
               <td className={`${styles.totalCell} ${dc}`} />
