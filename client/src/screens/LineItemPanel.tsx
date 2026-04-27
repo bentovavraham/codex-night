@@ -44,10 +44,11 @@ interface Props {
 export function LineItemPanel({ row, onClose }: Props) {
   const [pdfRef, setPdfRef] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['lineActivity', row.id],
     queryFn: () => api.getLineActivity(row.id),
     staleTime: 30_000,
+    retry: false,
   });
 
   const contracts: any[] = data?.contracts ?? [];
@@ -102,6 +103,11 @@ export function LineItemPanel({ row, onClose }: Props) {
         {/* Body */}
         {isLoading ? (
           <div className={styles.loading}><div className={styles.spinner} />Loading…</div>
+        ) : isError ? (
+          <div className={styles.loading} style={{ flexDirection: 'column', gap: 4 }}>
+            <span style={{ color: 'var(--status-rejected)' }}>Failed to load activity</span>
+            <span style={{ fontSize: 11, color: 'var(--text-4)' }}>{(error as any)?.message}</span>
+          </div>
         ) : (
           <div className={styles.body}>
 
