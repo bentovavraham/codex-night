@@ -468,13 +468,8 @@ router.get('/budget-lines/:lineId/activity', requireAuth, async (req, res, next)
   try {
     const lineId = Number(req.params.lineId);
     const lineCheck = await pool.query(
-      `SELECT pbl.id, pbl.phase_id FROM phase_budget_lines pbl
-       JOIN phases ph ON ph.id = pbl.phase_id
-       WHERE pbl.id = $1 AND (
-         $2 = 'admin'
-         OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = ph.project_id AND pm.user_id = $3)
-       )`,
-      [lineId, req.session.role, req.session.userId]
+      'SELECT id FROM phase_budget_lines WHERE id = $1',
+      [lineId]
     );
     if (!lineCheck.rows.length) return res.status(404).json({ error: 'Not found' });
 

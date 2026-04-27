@@ -61,10 +61,11 @@ export function ContractPanel({ contractId, onClose, onEdit }: Props) {
   const [confirmDeleteInvId, setConfirmDeleteInvId] = useState<number | null>(null);
   const qc = useQueryClient();
 
-  const { data: c, isLoading } = useQuery({
+  const { data: c, isLoading, isError, error } = useQuery({
     queryKey: ['contractDetail', contractId],
     queryFn: () => api.getContract(contractId),
     staleTime: 30_000,
+    retry: false,
   });
 
   const deleteContract = useMutation({
@@ -132,7 +133,12 @@ export function ContractPanel({ contractId, onClose, onEdit }: Props) {
           </div>
         </div>
 
-        {isLoading || !c ? (
+        {isError ? (
+          <div className={styles.loading} style={{ flexDirection: 'column', gap: 4 }}>
+            <span style={{ color: 'var(--status-rejected)' }}>Failed to load contract</span>
+            <span style={{ fontSize: 11, color: 'var(--text-4)' }}>{(error as any)?.message}</span>
+          </div>
+        ) : isLoading || !c ? (
           <div className={styles.loading}><div className={styles.spinner} /><span>Loading…</span></div>
         ) : (
           <div className={styles.body}>
