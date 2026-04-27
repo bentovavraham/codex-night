@@ -53,9 +53,7 @@ const perAC = (amount: number, ac: number | null): string =>
 
 function warnClass(billed: number, budget: number) {
   if (budget <= 0 || billed <= 0) return '';
-  const r = billed / budget;
-  if (r >= 1.0) return styles.danger;
-  if (r >= 0.75) return styles.warn;
+  if (billed / budget >= 1.0) return styles.danger;
   return '';
 }
 
@@ -266,7 +264,7 @@ export default function BudgetGrid() {
       <td className={styles.secSubNum}>{money(t.tm)}</td>
       <td className={styles.secSubNum}>{money(t.expenses)}</td>
       <td className={styles.secSubNum}>{moneyD(t.billed)}</td>
-      <td className={`${styles.secSubNum} ${amtDue > 0 ? styles.warn : ''}`}>{money(amtDue)}</td>
+      <td className={styles.secSubNum}>{money(amtDue)}</td>
       <td className={styles.secSubNum}>{money(t.paid)}</td>
       <td className={`${styles.secSubNum} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
       <td className={styles.secSubNum}>{remPct(t.billed, t.budgeted)}</td>
@@ -284,7 +282,7 @@ export default function BudgetGrid() {
       <td className={styles.sgSubNum}>{money(t.tm)}</td>
       <td className={styles.sgSubNum}>{money(t.expenses)}</td>
       <td className={styles.sgSubNum}>{moneyD(t.billed)}</td>
-      <td className={`${styles.sgSubNum} ${amtDue > 0 ? styles.warn : ''}`}>{money(amtDue)}</td>
+      <td className={styles.sgSubNum}>{money(amtDue)}</td>
       <td className={styles.sgSubNum}>{money(t.paid)}</td>
       <td className={`${styles.sgSubNum} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
       <td className={styles.sgSubNum}>{remPct(t.billed, t.budgeted)}</td>
