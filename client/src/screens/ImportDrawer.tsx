@@ -42,7 +42,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function TypeChip({ type, onClick }: { type: string | null; onClick: () => void }) {
+function TypeChip({ type, onClick }: { type: string | null; onClick: (e: React.MouseEvent) => void }) {
   return (
     <button
       className={`${styles.typeChip} ${type === 'contract' ? styles.typeContract : type === 'invoice' ? styles.typeInvoice : styles.typeUnknown}`}
@@ -85,7 +85,7 @@ function ReviewForm({ item, budgetLines, onConfirm, onDiscard, onBack, saving }:
   const [invoiceNumber, setInvoiceNumber] = useState<string>(ext.invoice_number || '');
   const [amount, setAmount] = useState<string>(ext.amount ? String(ext.amount) : '');
   const [invoiceDate, setInvoiceDate] = useState<string>(ext.invoice_date || '');
-  const [invoiceType, setInvoiceType] = useState<string>('fixed');
+  const [invoiceType] = useState<string>('fixed');
   const [invoiceStatus, setInvoiceStatus] = useState<string>('pending');
 
   const handleConfirm = async () => {
