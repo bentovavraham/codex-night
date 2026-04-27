@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../api/client';
 import styles from './InvoicesTab.module.css';
@@ -239,9 +239,20 @@ function BudgetLinePicker({ lines, value, onChange }: {
 
 // ─── Invoice list ─────────────────────────────────────────────────────────────
 
-function InvoiceList({ invoices, onUpload }: { invoices: any[]; onUpload: () => void }) {
+function InvoiceList({ invoices, onUpload, phaseId }: { invoices: any[]; onUpload: () => void; phaseId: number }) {
   const [pdfRef, setPdfRef] = useState<string | null>(null);
   const [panelContractId, setPanelContractId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const qc = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.deleteInvoice(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['invoices', phaseId] });
+      qc.invalidateQueries({ queryKey: ['budget',   phaseId] });
+      setConfirmDeleteId(null);
+    },
+  });
 
   return (
     <div className={styles.listWrap}>
@@ -310,6 +321,17 @@ function InvoiceList({ invoices, onUpload }: { invoices: any[]; onUpload: () => 
                     {inv.file_reference && (
                       <button className={styles.pdfBtn} onClick={() => setPdfRef(inv.file_reference)} title="View PDF">
                         PDF
+                      </button>
+                    )}
+                    {confirmDeleteId === inv.id ? (
+                      <button className={styles.confirmDeleteBtn}
+                        onClick={() => deleteMutation.mutate(inv.id)}
+                        disabled={deleteMutation.isPending}>
+                        Confirm?
+                      </button>
+                    ) : (
+                      <button className={styles.deleteBtn} onClick={() => setConfirmDeleteId(inv.id)} title="Delete invoice">
+                        ✕
                       </button>
                     )}
                   </td>
@@ -808,5 +830,5 @@ export default function InvoicesTab() {
     );
   }
 
-  return <InvoiceList invoices={invoices} onUpload={() => setUploadOpen(true)} />;
+  return <InvoiceList invoices={invoices} onUpload={() => setUploadOpen(true)} phaseId={phaseIdNum} />;
 }

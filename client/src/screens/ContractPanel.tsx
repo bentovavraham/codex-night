@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './ContractPanel.module.css';
 
@@ -56,11 +56,33 @@ interface Props {
 
 export function ContractPanel({ contractId, onClose }: Props) {
   const [pdfRef, setPdfRef] = useState<string | null>(null);
+  const [confirmDeleteContract, setConfirmDeleteContract] = useState(false);
+  const [confirmDeleteInvId, setConfirmDeleteInvId] = useState<number | null>(null);
+  const qc = useQueryClient();
 
   const { data: c, isLoading } = useQuery({
     queryKey: ['contractDetail', contractId],
     queryFn: () => api.getContract(contractId),
     staleTime: 30_000,
+  });
+
+  const deleteContract = useMutation({
+    mutationFn: () => api.deleteContract(contractId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['phaseContracts'] });
+      qc.invalidateQueries({ queryKey: ['budget'] });
+      onClose();
+    },
+  });
+
+  const deleteInvoice = useMutation({
+    mutationFn: (id: number) => api.deleteInvoice(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contractDetail', contractId] });
+      qc.invalidateQueries({ queryKey: ['invoices'] });
+      qc.invalidateQueries({ queryKey: ['budget'] });
+      setConfirmDeleteInvId(null);
+    },
   });
 
   const totalInvoiced = c ? (Number(c.invoiced_amount) + Number(c.tm_invoiced_amount) + Number(c.expense_invoiced_amount)) : 0;
@@ -86,7 +108,22 @@ export function ContractPanel({ contractId, onClose }: Props) {
               </>
             )}
           </div>
-          <button className={styles.closeBtn} onClick={onClose}>✕</button>
+          <div className={styles.panelBarActions}>
+            {confirmDeleteContract ? (
+              <button className={styles.confirmDeleteBtn}
+                onClick={() => deleteContract.mutate()}
+                disabled={deleteContract.isPending}>
+                Confirm delete?
+              </button>
+            ) : (
+              <button className={styles.deletePanelBtn}
+                onClick={() => setConfirmDeleteContract(true)}
+                title="Delete this contract">
+                Delete
+              </button>
+            )}
+            <button className={styles.closeBtn} onClick={onClose}>✕</button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -207,6 +244,17 @@ export function ContractPanel({ contractId, onClose }: Props) {
                           <button className={styles.invPdfBtn} onClick={() => setPdfRef(inv.file_reference)} title="View PDF">
                             PDF
                           </button>
+                        )}
+                        {confirmDeleteInvId === inv.id ? (
+                          <button className={styles.confirmDeleteBtn}
+                            onClick={() => deleteInvoice.mutate(inv.id)}
+                            disabled={deleteInvoice.isPending}>
+                            Confirm?
+                          </button>
+                        ) : (
+                          <button className={styles.invDeleteBtn}
+                            onClick={() => setConfirmDeleteInvId(inv.id)}
+                            title="Delete invoice">✕</button>
                         )}
                       </div>
                       {inv.description && (

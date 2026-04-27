@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './ContractsTab.module.css';
 
@@ -193,9 +193,21 @@ function BudgetLinePicker({ lines, value, onChange }: {
 
 // ─── Contract list ────────────────────────────────────────────────────────────
 
-function ContractList({ contracts, onUpload }: { contracts: any[]; onUpload: () => void }) {
+function ContractList({ contracts, phaseId, onUpload }: { contracts: any[]; phaseId: number; onUpload: () => void }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const qc = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.deleteContract(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['phaseContracts', phaseId] });
+      qc.invalidateQueries({ queryKey: ['budget',         phaseId] });
+      setConfirmDeleteId(null);
+    },
+  });
+
   return (
-    <div className={styles.listWrap}>
+    <div className={styles.listWrap} onClick={() => setConfirmDeleteId(null)}>
       <div className={styles.toolbar}>
         <span className={styles.toolLabel}>Contracts</span>
         <button className={styles.uploadBtn} onClick={onUpload}>+ Upload Contract</button>
@@ -211,16 +223,17 @@ function ContractList({ contracts, onUpload }: { contracts: any[]; onUpload: () 
             <thead>
               <tr className={styles.listThead}>
                 <th className={`${styles.lth} ${styles.left}`}>Vendor</th>
-                <th className={`${styles.lth} ${styles.left}`}>Budget Line</th>
+                <th className={`${styles.lth} ${styles.left}`}>Task</th>
                 <th className={`${styles.lth} ${styles.left}`}>Ref #</th>
                 <th className={`${styles.lth} ${styles.right}`}>Date</th>
                 <th className={`${styles.lth} ${styles.right}`}>Fixed Value</th>
                 <th className={`${styles.lth} ${styles.center}`}>Status</th>
+                <th className={styles.lth} />
               </tr>
             </thead>
             <tbody>
               {contracts.map((c: any) => (
-                <tr key={c.id} className={styles.listRow}>
+                <tr key={c.id} className={styles.listRow} onClick={e => e.stopPropagation()}>
                   <td className={styles.ltd}>{c.vendor_name}</td>
                   <td className={`${styles.ltd} ${styles.dim}`}>{c.budget_line_name ?? '—'}</td>
                   <td className={`${styles.ltd} ${styles.mono}`}>{c.reference_number || '—'}</td>
@@ -234,6 +247,19 @@ function ContractList({ contracts, onUpload }: { contracts: any[]; onUpload: () 
                     <span className={`${styles.badge} ${styles[STATUS_CSS[c.status] ?? 'sDraft']}`}>
                       {STATUS_LABEL[c.status] ?? c.status}
                     </span>
+                  </td>
+                  <td className={styles.ltd}>
+                    {confirmDeleteId === c.id ? (
+                      <button className={styles.confirmDeleteBtn}
+                        onClick={() => deleteMutation.mutate(c.id)}
+                        disabled={deleteMutation.isPending}>
+                        Confirm?
+                      </button>
+                    ) : (
+                      <button className={styles.deleteBtn} onClick={() => setConfirmDeleteId(c.id)} title="Delete contract">
+                        ✕
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -629,5 +655,5 @@ export default function ContractsTab() {
     );
   }
 
-  return <ContractList contracts={contracts} onUpload={() => setUploadOpen(true)} />;
+  return <ContractList contracts={contracts} phaseId={phaseIdNum} onUpload={() => setUploadOpen(true)} />;
 }

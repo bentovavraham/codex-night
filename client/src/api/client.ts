@@ -47,18 +47,20 @@ export const api = {
   // Contracts
   listContracts:   (phaseId: number)  => request<any[]>('GET',  `/api/phases/${phaseId}/contracts`),
   listBudgetLines: (phaseId: number)  => request<any[]>('GET',  `/api/phases/${phaseId}/budget-lines`),
-  createContract:(data: any)          => request<any>('POST', '/api/contracts', data),
-  getContract:  (id: number)          => request<any>('GET',  `/api/contracts/${id}`),
+  createContract:(data: any)          => request<any>('POST',   '/api/contracts', data),
+  getContract:  (id: number)          => request<any>('GET',    `/api/contracts/${id}`),
   updateContract:(id: number, data: any) => request<any>('PUT', `/api/contracts/${id}`, data),
+  deleteContract:(id: number)         => request<any>('DELETE', `/api/contracts/${id}`),
 
   // Invoices
   listInvoices: (phaseId: number, filters?: any) => {
     const qs = filters ? '?' + new URLSearchParams(Object.entries(filters).filter(([,v]) => v) as any).toString() : '';
     return request<any[]>('GET', `/api/phases/${phaseId}/invoices${qs}`);
   },
-  createInvoice:(data: any)           => request<any>('POST', '/api/invoices', data),
-  getInvoice:   (id: number)          => request<any>('GET',  `/api/invoices/${id}`),
-  updateInvoice:(id: number, data: any) => request<any>('PUT', `/api/invoices/${id}`, data),
+  createInvoice:(data: any)           => request<any>('POST',   '/api/invoices', data),
+  getInvoice:   (id: number)          => request<any>('GET',    `/api/invoices/${id}`),
+  updateInvoice:(id: number, data: any) => request<any>('PUT',  `/api/invoices/${id}`, data),
+  deleteInvoice:(id: number)          => request<any>('DELETE', `/api/invoices/${id}`),
   approveInvoice:(id: number)         => request<any>('POST', `/api/invoices/${id}/approve`),
   rejectInvoice:(id: number, note: string) => request<any>('POST', `/api/invoices/${id}/reject`, { note }),
 

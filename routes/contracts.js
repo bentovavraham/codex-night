@@ -667,4 +667,17 @@ router.get('/contracts/:id/invoices', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// DELETE /api/contracts/:id — permanently remove a contract and all its line items / logs.
+router.delete('/contracts/:id', requireAuth, async (req, res, next) => {
+  try {
+    const contractId = Number(req.params.id);
+    const access = await userCanAccessContract(req.session.userId, contractId);
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Not found' : 'Forbidden' });
+    // Null-out contract_id on any invoices so they're not orphaned (preserve invoices)
+    await pool.query('UPDATE invoices SET contract_id = NULL WHERE contract_id = $1', [contractId]);
+    await pool.query('DELETE FROM contracts WHERE id = $1', [contractId]);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

@@ -740,4 +740,17 @@ router.get('/contracts/:id/g703', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// DELETE /api/invoices/:id — permanently remove an invoice and its line items.
+router.delete('/invoices/:id', requireAuth, async (req, res, next) => {
+  try {
+    const invId = Number(req.params.id);
+    const inv = await getInvoiceWithProject(invId);
+    if (!inv) return res.status(404).json({ error: 'Not found' });
+    if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
+      return res.status(403).json({ error: 'Forbidden' });
+    await pool.query('DELETE FROM invoices WHERE id = $1', [invId]);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
