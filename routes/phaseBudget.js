@@ -54,63 +54,79 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             AND co.status = 'approved'
         ), 0) AS co_value,
 
-        -- T&M invoice charges
+        -- T&M invoice charges (via contract OR direct budget line link)
         COALESCE((
-          SELECT SUM(inv.amount)
-          FROM invoices inv
-          JOIN contracts c ON c.id = inv.contract_id
-          WHERE c.phase_budget_line_id = pbl.id
-            AND inv.invoice_type = 'tm'
-            AND inv.status NOT IN ('voided','draft')
+          SELECT SUM(inv.amount) FROM invoices inv
+          WHERE inv.invoice_type = 'tm'
+            AND inv.status NOT IN ('voided','draft','rejected')
+            AND (
+              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
+              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+            )
         ), 0) AS tm_charges,
 
         -- Expense invoice charges
         COALESCE((
-          SELECT SUM(inv.amount)
-          FROM invoices inv
-          JOIN contracts c ON c.id = inv.contract_id
-          WHERE c.phase_budget_line_id = pbl.id
-            AND inv.invoice_type = 'expense'
-            AND inv.status NOT IN ('voided','draft')
+          SELECT SUM(inv.amount) FROM invoices inv
+          WHERE inv.invoice_type = 'expense'
+            AND inv.status NOT IN ('voided','draft','rejected')
+            AND (
+              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
+              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+            )
         ), 0) AS expense_charges,
 
         -- Fixed invoice charges
         COALESCE((
-          SELECT SUM(inv.amount)
-          FROM invoices inv
-          JOIN contracts c ON c.id = inv.contract_id
-          WHERE c.phase_budget_line_id = pbl.id
-            AND inv.invoice_type = 'fixed'
-            AND inv.status NOT IN ('voided','draft')
+          SELECT SUM(inv.amount) FROM invoices inv
+          WHERE inv.invoice_type = 'fixed'
+            AND inv.status NOT IN ('voided','draft','rejected')
+            AND (
+              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
+              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+            )
         ), 0) AS fixed_charges,
 
-        -- Billed to date (all non-voided invoice types)
+        -- Billed to date (all types, both paths)
         COALESCE((
-          SELECT SUM(inv.amount)
-          FROM invoices inv
-          JOIN contracts c ON c.id = inv.contract_id
-          WHERE c.phase_budget_line_id = pbl.id
-            AND inv.status NOT IN ('voided','draft')
+          SELECT SUM(inv.amount) FROM invoices inv
+          WHERE inv.status NOT IN ('voided','draft','rejected')
+            AND (
+              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
+              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+            )
         ), 0) AS billed,
 
         -- Paid to date
         COALESCE((
-          SELECT SUM(inv.amount)
-          FROM invoices inv
-          JOIN contracts c ON c.id = inv.contract_id
-          WHERE c.phase_budget_line_id = pbl.id
-            AND inv.status = 'paid'
+          SELECT SUM(inv.amount) FROM invoices inv
+          WHERE inv.status = 'paid'
+            AND (
+              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
+              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+            )
         ), 0) AS paid,
 
-        -- QB codes used (rolled up from invoice_qb_lines, distinct account numbers)
+        -- QB codes used (from invoice_line_items, both paths)
         COALESCE((
           SELECT string_agg(DISTINCT qa.account_number, ', ' ORDER BY qa.account_number)
-          FROM invoice_qb_lines iql
-          JOIN invoices inv ON inv.id = iql.invoice_id
-          JOIN contracts c  ON c.id  = inv.contract_id
-          JOIN qb_accounts qa ON qa.id = iql.qb_account_id
-          WHERE c.phase_budget_line_id = pbl.id
-        ), '') AS qb_codes_used
+          FROM invoice_line_items ili
+          JOIN invoices inv ON inv.id = ili.invoice_id
+          JOIN qb_accounts qa ON qa.id = ili.qb_account_id
+          WHERE inv.status NOT IN ('voided','draft','rejected')
+            AND (
+              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
+              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+            )
+        ), '') AS qb_codes_used,
+
+        -- Flag: any direct invoices (no contract) against this line
+        EXISTS (
+          SELECT 1 FROM invoices inv
+          WHERE inv.phase_budget_line_id = pbl.id
+            AND inv.contract_id IS NULL
+            AND inv.status NOT IN ('voided','draft','rejected')
+        ) AS has_direct_invoices
 
       FROM phase_budget_lines pbl
       WHERE pbl.phase_id = $1
@@ -157,6 +173,7 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         remaining_budget,
         remaining_commit,
         pct_billed,
+        has_direct_invoices: r.has_direct_invoices === true || r.has_direct_invoices === 't',
       };
     });
 
@@ -235,11 +252,30 @@ router.patch('/budget-lines/:lineId', requireAuth, async (req, res, next) => {
     }
     if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
     values.push(lineId);
+
+    // Fetch old values for audit log before update
+    const before = await pool.query('SELECT * FROM phase_budget_lines WHERE id = $1', [lineId]);
+    if (!before.rows.length) return res.status(404).json({ error: 'Line not found' });
+    const old = before.rows[0];
+
     const result = await pool.query(
       `UPDATE phase_budget_lines SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING *`,
       values
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Line not found' });
+
+    // Log each changed field
+    const loggable = ['task_name','discipline','budgeted_amount','consultant','notes'];
+    for (const f of loggable) {
+      if (req.body[f] !== undefined && String(req.body[f]) !== String(old[f] ?? '')) {
+        pool.query(
+          `INSERT INTO phase_budget_line_logs (line_id, changed_by, field, old_value, new_value)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [lineId, req.session.userId, f, old[f] ?? null, req.body[f] ?? null]
+        ).catch(() => {});
+      }
+    }
+
     res.json(result.rows[0]);
   } catch (err) { next(err); }
 });
@@ -272,6 +308,7 @@ router.get('/phases/:phaseId/contracts', requireAuth, async (req, res, next) => 
         c.status,
         c.contract_date,
         c.created_at,
+        pbl.task_name AS budget_line_name,
 
         -- Approved COs
         COALESCE((
@@ -354,6 +391,7 @@ router.get('/phases/:phaseId/contracts', requireAuth, async (req, res, next) => 
         total_value,
         status:                r.status,
         contract_date:         r.contract_date,
+        budget_line_name:      r.budget_line_name ?? null,
         co_count,
         co_value,
         total_commitment,
@@ -370,8 +408,24 @@ router.get('/phases/:phaseId/contracts', requireAuth, async (req, res, next) => 
   } catch (err) { next(err); }
 });
 
+// GET /api/phases/:phaseId/budget-lines — lightweight list for pickers
+router.get('/phases/:phaseId/budget-lines', requireAuth, async (req, res, next) => {
+  try {
+    const { phaseId } = req.params;
+    const phaseCheck = await pool.query('SELECT id FROM phases WHERE id = $1', [phaseId]);
+    if (!phaseCheck.rows.length) return res.status(404).json({ error: 'Phase not found' });
+    const result = await pool.query(
+      `SELECT id, task_name, discipline, section, sub_group, budgeted_amount, sort_order
+       FROM phase_budget_lines WHERE phase_id = $1
+       ORDER BY CASE section WHEN 'professional_fees' THEN 1 WHEN 'application_fees' THEN 2 WHEN 'construction' THEN 3 ELSE 4 END, sort_order, id`,
+      [phaseId]
+    );
+    res.json(result.rows);
+  } catch (err) { next(err); }
+});
+
 // GET /api/phases/:phaseId/invoices
-// All invoices for this phase (via contracts.phase_budget_line_id).
+// All invoices for this phase — via contract → budget line OR direct budget line link.
 router.get('/phases/:phaseId/invoices', requireAuth, async (req, res, next) => {
   try {
     const { phaseId } = req.params;
@@ -385,16 +439,20 @@ router.get('/phases/:phaseId/invoices', requireAuth, async (req, res, next) => {
         i.created_at, i.paid_date,
         i.pm_approved_at, i.partner_approved_at, i.approved_at,
         i.rejection_note,
-        c.id           AS contract_id,
-        c.vendor_name  AS contract_vendor,
+        c.id               AS contract_id,
+        c.vendor_name      AS contract_vendor,
         c.reference_number AS contract_ref,
-        pbl.id         AS budget_line_id,
-        pbl.task_name  AS budget_line_name
+        COALESCE(pbl_direct.id,  pbl_contract.id)         AS budget_line_id,
+        COALESCE(pbl_direct.task_name, pbl_contract.task_name) AS budget_line_name
       FROM invoices i
-      JOIN contracts c   ON c.id  = i.contract_id
-      JOIN phase_budget_lines pbl ON pbl.id = c.phase_budget_line_id
-      WHERE pbl.phase_id = $1
-        AND i.status != 'voided'
+      LEFT JOIN contracts c          ON c.id  = i.contract_id
+      LEFT JOIN phase_budget_lines pbl_contract ON pbl_contract.id = c.phase_budget_line_id
+      LEFT JOIN phase_budget_lines pbl_direct   ON pbl_direct.id  = i.phase_budget_line_id
+      WHERE i.status != 'voided'
+        AND (
+          pbl_contract.phase_id = $1
+          OR pbl_direct.phase_id = $1
+        )
       ORDER BY i.invoice_date DESC NULLS LAST, i.created_at DESC
     `, [phaseId]);
 

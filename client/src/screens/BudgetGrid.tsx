@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './BudgetGrid.module.css';
+import cgStyles from './CommitmentsGrid.module.css';
+import { ContractPanel } from './ContractPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +35,7 @@ export interface BudgetRow {
   remaining_commit: number;
   pct_billed: number | null;
   qb_codes_used: string;
+  has_direct_invoices: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -144,12 +147,29 @@ export default function BudgetGrid() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [active, setActive] = useState<{ rowId: number; field: string }>({ rowId: -1, field: '' });
   const [showDetails, setShowDetails] = useState(false);
+  const [contractsOpen, setContractsOpen] = useState<Set<number>>(new Set());
+  const [panelContractId, setPanelContractId] = useState<number | null>(null);
 
   const { data: rows = [], isLoading, error } = useQuery<BudgetRow[]>({
     queryKey: ['budget', phaseIdNum],
     queryFn: () => api.getBudget(phaseIdNum),
     enabled: !!phaseIdNum,
   });
+
+  const { data: contracts = [] } = useQuery<any[]>({
+    queryKey: ['phaseContracts', phaseIdNum],
+    queryFn: () => api.listContracts(phaseIdNum),
+    enabled: !!phaseIdNum,
+  });
+
+  const contractsByLine = useMemo(() => {
+    const m = new Map<number, any[]>();
+    for (const c of contracts) {
+      if (!m.has(c.phase_budget_line_id)) m.set(c.phase_budget_line_id, []);
+      m.get(c.phase_budget_line_id)!.push(c);
+    }
+    return m;
+  }, [contracts]);
 
   const initMutation = useMutation({
     mutationFn: () => api.initBudget(phaseIdNum, 'default'),
@@ -186,6 +206,9 @@ export default function BudgetGrid() {
 
   function toggle(key: string) {
     setCollapsed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  }
+  function toggleLine(id: number) {
+    setContractsOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
   const tree = useMemo(() => {
@@ -253,6 +276,9 @@ export default function BudgetGrid() {
 
   return (
     <div className={styles.wrapper}>
+      {panelContractId && (
+        <ContractPanel contractId={panelContractId} onClose={() => setPanelContractId(null)} />
+      )}
       <div className={styles.toolbar}>
         <span className={styles.toolLabel}>Budget</span>
         <div className={styles.toolActions}>
@@ -357,11 +383,17 @@ export default function BudgetGrid() {
                       </tr>
                     ] : []),
 
-                    ...(sgOpen ? sgRows.map((row: BudgetRow) => {
+                    ...(sgOpen ? sgRows.flatMap((row: BudgetRow) => {
                       const isA = (f: string) => active.rowId === row.id && active.field === f;
-                      return (
-                        <tr key={row.id} className={styles.dataRow}>
-                          <td className={styles.rowGutter} />
+                      const lineContracts = contractsByLine.get(row.id) ?? [];
+                      const hasContracts  = lineContracts.length > 0;
+                      const lineOpen      = contractsOpen.has(row.id);
+                      return [
+                        <tr key={row.id} className={`${styles.dataRow} ${hasContracts ? cgStyles.lineClickable : ''}`}
+                            onClick={hasContracts ? (e) => { if ((e.target as HTMLElement).closest('input,select,button')) return; toggleLine(row.id); } : undefined}>
+                          <td className={styles.rowGutter}>
+                            {hasContracts && <span className={styles.chevron}>{lineOpen ? '▼' : '▶'}</span>}
+                          </td>
                           <EditCell value={row.task_name} rowId={row.id} field="task_name"
                             isActive={isA('task_name')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
                             onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdTask} />
@@ -397,12 +429,41 @@ export default function BudgetGrid() {
                             onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdText} ${dc}`} />
                           <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`} title={row.qb_codes_used || undefined}>
                             {row.qb_codes_used || ''}
+                            {row.has_direct_invoices && (
+                              <span className={styles.directBadge} title="Has direct invoices (no contract)">Direct</span>
+                            )}
                           </td>
                           <EditCell value={row.notes} rowId={row.id} field="notes"
                             isActive={isA('notes')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
                             onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdNotes} ${dc}`} />
-                        </tr>
-                      );
+                        </tr>,
+
+                        // ── Contract drill-down rows ───────────────────────
+                        ...(lineOpen ? lineContracts.map((c: any) => (
+                          <tr key={`c:${c.id}`} className={cgStyles.contractRow}
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => setPanelContractId(c.id)}>
+                            <td className={cgStyles.contractGutter} />
+                            <td className={`${styles.cell} ${cgStyles.vendorCell}`} colSpan={2}>
+                              <span className={`${cgStyles.statusBadge} ${cgStyles[`status_${c.status}`]}`}>
+                                {c.status}
+                              </span>
+                              {' '}{c.vendor_name}
+                              {c.reference_number && <span className={cgStyles.refNum}> · {c.reference_number}</span>}
+                              <span className={cgStyles.openHint}>→ details</span>
+                            </td>
+                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />
+                            <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`} colSpan={3}>
+                              {c.total_value > 0 ? usd.format(c.total_value) : <span style={{color:'var(--text-4)'}}>T&amp;M</span>}
+                              {c.co_value > 0 && <span style={{color:'var(--text-3)',marginLeft:6}}>+{usd.format(c.co_value)} CO</span>}
+                            </td>
+                            <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`}>
+                              {c.total_invoiced > 0 ? usd.format(c.total_invoiced) : '—'}
+                            </td>
+                            <td colSpan={10} />
+                          </tr>
+                        )) : []),
+                      ];
                     }) : []),
                   ];
                 }) : []),

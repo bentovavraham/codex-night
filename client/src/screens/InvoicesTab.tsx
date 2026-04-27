@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../api/client';
 import styles from './InvoicesTab.module.css';
+import { ContractPanel } from './ContractPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ interface InvoiceForm {
   amount: string;
   description: string;
   contract_id: number | null;
+  phase_budget_line_id: number | null;
   line_items: LineItem[];
   reviewed: boolean;
 }
@@ -40,7 +42,7 @@ interface InvoiceForm {
 const EMPTY_FORM: InvoiceForm = {
   invoice_number: '', vendor_name: '', vendor_id: null, vendor_is_new: false,
   invoice_date: '', services_thru_date: '', amount: '',
-  description: '', contract_id: null, line_items: [], reviewed: false,
+  description: '', contract_id: null, phase_budget_line_id: null, line_items: [], reviewed: false,
 };
 
 type Stage = 'drop' | 'extracting' | 'review';
@@ -170,11 +172,95 @@ function QbPicker({
   );
 }
 
+// ─── Budget line autocomplete picker ─────────────────────────────────────────
+
+function BudgetLinePicker({ lines, value, onChange }: {
+  lines: any[];
+  value: number | null;
+  onChange: (id: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const selected = lines.find(l => l.id === value) ?? null;
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return lines;
+    const q = query.toLowerCase();
+    return lines.filter(l =>
+      l.task_name.toLowerCase().includes(q) ||
+      (l.discipline && l.discipline.toLowerCase().includes(q))
+    );
+  }, [lines, query]);
+
+  useEffect(() => {
+    function onOut(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    if (open) document.addEventListener('mousedown', onOut);
+    return () => document.removeEventListener('mousedown', onOut);
+  }, [open]);
+
+  function openDropdown() { setQuery(''); setOpen(true); setTimeout(() => inputRef.current?.focus(), 30); }
+  function pick(l: any) { onChange(l.id); setOpen(false); setQuery(''); }
+  function clear(e: React.MouseEvent) { e.stopPropagation(); onChange(null); }
+
+  const label = selected ? `${selected.task_name}${selected.discipline ? ` · ${selected.discipline}` : ''}` : null;
+
+  return (
+    <div className={styles.qbPicker} ref={ref}>
+      <div className={`${styles.qbDisplay} ${!selected ? styles.qbEmpty : ''}`} onClick={openDropdown}>
+        {selected ? (
+          <>
+            <span className={styles.qbName}>{label}</span>
+            <button className={styles.qbClear} onClick={clear} title="Clear">✕</button>
+          </>
+        ) : <span className={styles.qbPlaceholder}>Search tasks…</span>}
+      </div>
+      {open && (
+        <div className={styles.qbDropdown}>
+          <input ref={inputRef} className={styles.qbSearch} value={query}
+            onChange={e => setQuery(e.target.value)} placeholder="Type task name or discipline…" />
+          <div className={styles.qbList}>
+            {filtered.map(l => (
+              <div key={l.id}
+                className={`${styles.qbOption} ${l.id === value ? styles.qbOptionSelected : ''}`}
+                onMouseDown={() => pick(l)}>
+                <span className={styles.qbOptName}>{l.task_name}{l.discipline ? ` · ${l.discipline}` : ''}</span>
+              </div>
+            ))}
+            {filtered.length === 0 && <div className={styles.qbNoMatch}>No match</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Invoice list ─────────────────────────────────────────────────────────────
 
 function InvoiceList({ invoices, onUpload }: { invoices: any[]; onUpload: () => void }) {
+  const [pdfRef, setPdfRef] = useState<string | null>(null);
+  const [panelContractId, setPanelContractId] = useState<number | null>(null);
+
   return (
     <div className={styles.listWrap}>
+      {panelContractId && (
+        <ContractPanel contractId={panelContractId} onClose={() => setPanelContractId(null)} />
+      )}
+      {/* PDF viewer modal */}
+      {pdfRef && (
+        <div className={styles.pdfModal} onClick={() => setPdfRef(null)}>
+          <div className={styles.pdfModalInner} onClick={e => e.stopPropagation()}>
+            <div className={styles.pdfModalBar}>
+              <span>Invoice PDF</span>
+              <button className={styles.closeBtn} onClick={() => setPdfRef(null)}>✕</button>
+            </div>
+            <iframe src={`/api/files/${encodeURIComponent(pdfRef)}`} className={styles.pdfModalFrame} title="Invoice PDF" />
+          </div>
+        </div>
+      )}
+
       <div className={styles.toolbar}>
         <span className={styles.toolLabel}>Invoices</span>
         <button className={styles.uploadBtn} onClick={onUpload}>+ Upload Invoice</button>
@@ -191,10 +277,11 @@ function InvoiceList({ invoices, onUpload }: { invoices: any[]; onUpload: () => 
               <tr className={styles.listThead}>
                 <th className={`${styles.lth} ${styles.left}`}>Invoice #</th>
                 <th className={`${styles.lth} ${styles.left}`}>Vendor</th>
-                <th className={`${styles.lth} ${styles.left}`}>Contract</th>
+                <th className={`${styles.lth} ${styles.left}`}>Task</th>
                 <th className={`${styles.lth} ${styles.right}`}>Date</th>
                 <th className={`${styles.lth} ${styles.right}`}>Amount</th>
                 <th className={`${styles.lth} ${styles.center}`}>Status</th>
+                <th className={styles.lth} />
               </tr>
             </thead>
             <tbody>
@@ -203,7 +290,7 @@ function InvoiceList({ invoices, onUpload }: { invoices: any[]; onUpload: () => 
                   <td className={`${styles.ltd} ${styles.mono}`}>{inv.invoice_number}</td>
                   <td className={styles.ltd}>{inv.vendor_name}</td>
                   <td className={`${styles.ltd} ${styles.dim}`}>
-                    {inv.contract_vendor ? `${inv.contract_vendor}${inv.contract_ref ? ` · ${inv.contract_ref}` : ''}` : '—'}
+                    {inv.budget_line_name ?? (inv.contract_vendor ? `${inv.contract_vendor}${inv.contract_ref ? ` · ${inv.contract_ref}` : ''}` : '—')}
                   </td>
                   <td className={`${styles.ltd} ${styles.mono} ${styles.right}`}>
                     {inv.invoice_date ? String(inv.invoice_date).slice(0, 10) : '—'}
@@ -213,6 +300,18 @@ function InvoiceList({ invoices, onUpload }: { invoices: any[]; onUpload: () => 
                     <span className={`${styles.badge} ${styles[STATUS_CSS[inv.status] ?? 'sPending']}`}>
                       {STATUS_LABEL[inv.status] ?? inv.status}
                     </span>
+                  </td>
+                  <td className={`${styles.ltd} ${styles.actionCell}`}>
+                    {inv.contract_id && (
+                      <button className={styles.contractBtn} onClick={() => setPanelContractId(inv.contract_id)} title="View contract">
+                        ↑ Contract
+                      </button>
+                    )}
+                    {inv.file_reference && (
+                      <button className={styles.pdfBtn} onClick={() => setPdfRef(inv.file_reference)} title="View PDF">
+                        PDF
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -227,9 +326,10 @@ function InvoiceList({ invoices, onUpload }: { invoices: any[]; onUpload: () => 
 // ─── Upload + review panel ────────────────────────────────────────────────────
 
 function UploadPanel({
-  contracts, qbAccounts, projectId, onClose, onSaved,
+  contracts, budgetLines, qbAccounts, projectId, onClose, onSaved,
 }: {
   contracts: any[];
+  budgetLines: any[];
   qbAccounts: QbAccount[];
   projectId: number;
   onClose: () => void;
@@ -272,17 +372,18 @@ function UploadPanel({
           qb_suggestion_confidence: li.qb_suggestion_confidence ?? null,
         }));
         setForm({
-          invoice_number:     e.invoice_number     ?? '',
-          vendor_name:        e.vendor_name        ?? '',
-          vendor_id:          e.vendor_match?.id   ?? null,
-          vendor_is_new:      e.vendor_is_new      ?? false,
-          invoice_date:       e.invoice_date       ?? '',
-          services_thru_date: e.services_thru_date ?? '',
-          amount:             e.amount != null ? String(e.amount) : '',
-          description:        e.summary ?? '',
-          contract_id:        null,
-          line_items:         items,
-          reviewed:           false,
+          invoice_number:      e.invoice_number     ?? '',
+          vendor_name:         e.vendor_name        ?? '',
+          vendor_id:           e.vendor_match?.id   ?? null,
+          vendor_is_new:       e.vendor_is_new      ?? false,
+          invoice_date:        e.invoice_date       ?? '',
+          services_thru_date:  e.services_thru_date ?? '',
+          amount:              e.amount != null ? String(e.amount) : '',
+          description:         e.summary ?? '',
+          contract_id:         null,
+          phase_budget_line_id: null,
+          line_items:          items,
+          reviewed:            false,
         });
       }
       if (result.extract_error) setExtractError(result.extract_error);
@@ -348,14 +449,15 @@ function UploadPanel({
       const invoiceType = types.has('tm') ? 'tm' : types.has('expense') ? 'expense' : 'fixed';
 
       const payload: any = {
-        invoice_number:     form.invoice_number.trim(),
-        vendor_name:        form.vendor_name.trim(),
-        amount:             amt,
-        invoice_date:       form.invoice_date       || null,
-        description:        form.description        || null,
-        file_reference:     fileRef                 || null,
-        invoice_type:       invoiceType,
-        project_id:         projectId,
+        invoice_number:       form.invoice_number.trim(),
+        vendor_name:          form.vendor_name.trim(),
+        amount:               amt,
+        invoice_date:         form.invoice_date       || null,
+        description:          form.description        || null,
+        file_reference:       fileRef                 || null,
+        invoice_type:         invoiceType,
+        project_id:           projectId,
+        phase_budget_line_id: form.phase_budget_line_id || null,
         invoice_line_items: form.line_items
           .filter(li => Number(li.amount) > 0)
           .map((li, i) => ({
@@ -381,7 +483,8 @@ function UploadPanel({
   }
 
   const conf = extracted?.confidence ?? {};
-  const canSave = form.reviewed && !!form.invoice_number && !!form.vendor_name && Number(form.amount) > 0;
+  const hasBudgetTarget = !!form.contract_id || !!form.phase_budget_line_id;
+  const canSave = form.reviewed && !!form.invoice_number && !!form.vendor_name && Number(form.amount) > 0 && hasBudgetTarget;
 
   return (
     <div className={styles.uploadLayout}>
@@ -458,10 +561,10 @@ function UploadPanel({
 
               {/* Contract link */}
               <div className={styles.hfGroup}>
-                <label className={styles.hfLabel}>Contract</label>
+                <label className={styles.hfLabel}>Contract <span className={styles.hfOptional}>(optional)</span></label>
                 <select className={styles.hfSelect} value={form.contract_id ?? ''}
                   onChange={e => setF('contract_id', e.target.value ? Number(e.target.value) : null)}>
-                  <option value="">— No contract (standalone) —</option>
+                  <option value="">— No contract —</option>
                   {contracts.map((c: any) => (
                     <option key={c.id} value={c.id}>
                       {c.vendor_name}{c.reference_number ? ` · ${c.reference_number}` : ''} (${Number(c.total_value).toLocaleString()})
@@ -469,6 +572,21 @@ function UploadPanel({
                   ))}
                 </select>
               </div>
+
+              {/* Budget line — required when no contract so the invoice rolls up correctly */}
+              {!form.contract_id && (
+                <div className={styles.hfGroup}>
+                  <label className={styles.hfLabel}>
+                    Task / Budget Line <span className={styles.hfRequired}>required</span>
+                  </label>
+                  <BudgetLinePicker
+                    lines={budgetLines}
+                    value={form.phase_budget_line_id}
+                    onChange={id => setF('phase_budget_line_id', id)}
+                  />
+                  <div className={styles.hfHint}>Which budget task does this invoice roll up to?</div>
+                </div>
+              )}
 
               {/* Date + Ref row */}
               <div className={styles.hfRow}>
@@ -655,6 +773,13 @@ export default function InvoicesTab() {
     enabled:  !!phaseIdNum,
   });
 
+  const { data: budgetLines = [] } = useQuery<any[]>({
+    queryKey: ['budgetLines', phaseIdNum],
+    queryFn:  () => api.listBudgetLines(phaseIdNum),
+    enabled:  !!phaseIdNum,
+    staleTime: 60_000,
+  });
+
   const { data: qbAccounts = [] } = useQuery<QbAccount[]>({
     queryKey: ['qbAccounts'],
     queryFn:  () => api.listQbAccounts(),
@@ -674,6 +799,7 @@ export default function InvoicesTab() {
     return (
       <UploadPanel
         contracts={contracts}
+        budgetLines={budgetLines}
         qbAccounts={qbAccounts}
         projectId={projectIdNum}
         onClose={() => setUploadOpen(false)}

@@ -427,3 +427,21 @@ CREATE TABLE IF NOT EXISTS invoice_line_items (
 );
 CREATE INDEX IF NOT EXISTS idx_ili_invoice      ON invoice_line_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_ili_contract_line ON invoice_line_items(contract_line_item_id);
+
+-- Direct budget line link on invoices: allows standalone invoices (no contract)
+-- to still roll up into the correct budget line row.
+DO $$ BEGIN ALTER TABLE invoices ADD COLUMN phase_budget_line_id INTEGER REFERENCES phase_budget_lines(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+CREATE INDEX IF NOT EXISTS idx_invoices_pbl ON invoices(phase_budget_line_id);
+
+-- Audit log for phase_budget_line changes (amount edits, renames, etc.)
+CREATE TABLE IF NOT EXISTS phase_budget_line_logs (
+    id             SERIAL PRIMARY KEY,
+    line_id        INTEGER NOT NULL REFERENCES phase_budget_lines(id) ON DELETE CASCADE,
+    changed_by     INTEGER REFERENCES users(id),
+    field          VARCHAR(64) NOT NULL,
+    old_value      TEXT,
+    new_value      TEXT,
+    note           TEXT,
+    changed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pbll_line ON phase_budget_line_logs(line_id);

@@ -1,0 +1,207 @@
+/* ContractPanel — right-side drawer */
+
+/* ── Overlay / drawer shell ──────────────────────────────────────────────── */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0,0,0,.3);
+}
+
+.panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 301;
+  width: 480px;
+  max-width: 92vw;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -6px 0 32px rgba(0,0,0,.18);
+}
+
+/* ── Header bar ───────────────────────────────────────────────────────────── */
+
+.panelBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: 48px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.panelTitle { display: flex; align-items: baseline; gap: 0; overflow: hidden; }
+.panelVendor { font-size: 14px; font-weight: 700; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panelRef { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+
+.closeBtn {
+  width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 4px;
+  background: transparent; color: var(--text-3); cursor: pointer; font-size: 12px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.closeBtn:hover { background: var(--bg-2); color: var(--text-1); }
+
+/* ── Body ─────────────────────────────────────────────────────────────────── */
+
+.loading {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  gap: 10px; color: var(--text-3); font-size: 13px;
+}
+.spinner {
+  width: 20px; height: 20px; border: 2px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin .6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0; }
+
+/* ── Meta grid ─────────────────────────────────────────────────────────────── */
+
+.metaGrid {
+  display: flex; flex-direction: column; gap: 0;
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+}
+.metaRow { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; }
+.metaLabel {
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-3); width: 80px; flex-shrink: 0;
+}
+.metaValue { font-size: 12.5px; color: var(--text-1); }
+.metaDim { color: var(--text-3); }
+
+.docBtn {
+  font-size: 11.5px; color: var(--accent); background: none; border: none; cursor: pointer;
+  padding: 0; font-family: inherit; text-decoration: underline;
+}
+.docBtn:hover { opacity: .75; }
+
+/* ── Description ──────────────────────────────────────────────────────────── */
+
+.descBlock {
+  padding: 10px 16px;
+  font-size: 11.5px; color: var(--text-2); line-height: 1.5;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Section wrapper ──────────────────────────────────────────────────────── */
+
+.section { display: flex; flex-direction: column; border-bottom: 1px solid var(--border); }
+
+.sectionLabel {
+  padding: 8px 16px 6px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-3); display: flex; align-items: center; gap: 8px;
+  background: var(--bg-2);
+}
+.sectionCount {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; border-radius: 9px;
+  background: var(--border); color: var(--text-2); font-size: 10px; font-weight: 700; padding: 0 4px;
+}
+.sectionTotal { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--text-1); font-family: var(--font-mono); }
+
+.empty { padding: 14px 16px; font-size: 12px; color: var(--text-4); }
+
+/* ── Tasks / scope ────────────────────────────────────────────────────────── */
+
+.taskList { display: flex; flex-direction: column; }
+
+.taskRow {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 16px; border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.taskRow:last-child { border-bottom: none; }
+
+.taskNum { font-size: 10.5px; color: var(--text-4); width: 16px; flex-shrink: 0; text-align: right; }
+.taskType {
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
+}
+.typeFix { background: #e8f4e8; color: #1a6630; }
+.typeTm  { background: #ede9fe; color: #5b21b6; }
+.typeExp { background: #fef3cd; color: #856404; }
+
+.taskDesc { flex: 1; color: var(--text-1); }
+.taskAmt { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
+.taskTm { font-size: 10px; font-weight: 700; color: #5b21b6; }
+
+.taskFooter {
+  padding: 6px 16px;
+  font-size: 11px; font-weight: 600; color: var(--text-2);
+  text-align: right;
+  background: var(--bg-2);
+}
+
+/* ── Invoice list ─────────────────────────────────────────────────────────── */
+
+.invoiceList { display: flex; flex-direction: column; }
+
+.invoiceRow {
+  display: flex; flex-direction: column;
+  padding: 8px 16px; border-bottom: 1px solid var(--border); gap: 3px;
+}
+.invoiceRow:last-child { border-bottom: none; }
+.invoiceRow:hover { background: var(--bg-2); }
+
+.invMain { display: flex; align-items: center; gap: 8px; }
+.invNum  { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-1); font-weight: 600; }
+.invDate { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); }
+.invAmt  { font-family: var(--font-mono); font-size: 12px; color: var(--text-1); margin-left: auto; }
+.invDesc { font-size: 11px; color: var(--text-3); padding-left: 0; }
+
+.invPdfBtn {
+  height: 19px; padding: 0 6px;
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  background: var(--bg-2); color: var(--text-3);
+  border: 1px solid var(--border); border-radius: 3px; cursor: pointer;
+}
+.invPdfBtn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Status badges ────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block; padding: 1px 6px; border-radius: 3px;
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  white-space: nowrap;
+}
+.sDraft     { background: #e8e8e8; color: #555; }
+.sPending   { background: #fef3cd; color: #856404; }
+.sActive    { background: #d1f0d8; color: #1a6630; }
+.sCompleted { background: #c7f0e2; color: #0d6655; }
+.sVoided    { background: #fde0dc; color: #922b21; }
+.sPm        { background: #dbeafe; color: #1e40af; }
+.sPartner   { background: #ede9fe; color: #5b21b6; }
+.sApproved  { background: #d1f0d8; color: #1a6630; }
+.sPushed    { background: #d1f0d8; color: #1a6630; }
+.sPaid      { background: #c7f0e2; color: #0d6655; }
+.sRejected  { background: #fde0dc; color: #922b21; }
+.sHold      { background: #fef3cd; color: #856404; }
+
+/* ── Nested PDF modal ──────────────────────────────────────────────────────── */
+
+.pdfOverlay {
+  position: fixed; inset: 0; z-index: 400;
+  background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center;
+}
+.pdfBox {
+  width: 78vw; height: 88vh;
+  background: var(--surface); border-radius: 6px;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 8px 40px rgba(0,0,0,.4);
+}
+.pdfBar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px; height: 44px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px; font-weight: 600; color: var(--text-1);
+}
+.pdfFrame { flex: 1; width: 100%; border: none; }

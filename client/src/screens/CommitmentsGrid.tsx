@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import type { BudgetRow } from './BudgetGrid';
 import styles from './BudgetGrid.module.css';
 import cgStyles from './CommitmentsGrid.module.css';
+import { ContractPanel } from './ContractPanel';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -87,6 +88,8 @@ export default function CommitmentsGrid() {
   const [contractsOpen, setContractsOpen] = useState<Set<number>>(new Set());
   // collapsed CO list under a contract: contract:id
   const [cosCollapsed, setCosCollapsed] = useState<Set<number>>(new Set());
+  // selected contract for detail panel
+  const [panelContractId, setPanelContractId] = useState<number | null>(null);
 
   const { data: rows = [], isLoading, error } = useQuery<BudgetRow[]>({
     queryKey: ['budget', phaseIdNum],
@@ -176,6 +179,9 @@ export default function CommitmentsGrid() {
 
   return (
     <div className={styles.wrapper}>
+      {panelContractId && (
+        <ContractPanel contractId={panelContractId} onClose={() => setPanelContractId(null)} />
+      )}
       <div className={styles.toolbar}>
         <span className={styles.toolLabel}>Commitments</span>
       </div>
@@ -291,10 +297,10 @@ export default function CommitmentsGrid() {
 
                           return [
                             <tr key={`contract:${c.id}`} className={cgStyles.contractRow}
-                                onClick={hasCos ? () => toggleCo(c.id) : undefined}
-                                style={{ cursor: hasCos ? 'pointer' : 'default' }}>
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => setPanelContractId(c.id)}>
                               <td className={cgStyles.contractGutter}>
-                                {hasCos && <span className={styles.chevron}>{cosOpen ? '▼' : '▶'}</span>}
+                                {hasCos && <span className={styles.chevron} onClick={e => { e.stopPropagation(); toggleCo(c.id); }}>{cosOpen ? '▼' : '▶'}</span>}
                               </td>
                               <td className={`${styles.cell} ${cgStyles.vendorCell}`}>
                                 {c.vendor_name}
@@ -305,6 +311,11 @@ export default function CommitmentsGrid() {
                                 </span>
                                 {c.reference_number && (
                                   <span className={cgStyles.refNum}>{c.reference_number}</span>
+                                )}
+                                {c.total_invoiced > 0 && (
+                                  <span className={cgStyles.invBadge} title={`${usd.format(c.total_invoiced)} invoiced`}>
+                                    {usd.format(c.total_invoiced)} inv.
+                                  </span>
                                 )}
                               </td>
                               <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />

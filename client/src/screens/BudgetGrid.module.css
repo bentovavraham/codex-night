@@ -378,3 +378,18 @@
 }
 .initBtn:hover    { background: #b34820; }
 .initBtn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Direct invoice indicator */
+.directBadge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  background: #fef3cd;
+  color: #856404;
+  vertical-align: middle;
+}

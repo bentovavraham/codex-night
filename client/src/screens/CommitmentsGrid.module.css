@@ -101,3 +101,16 @@
   color: var(--amber) !important;
   background: transparent !important;
 }
+
+.invBadge {
+  font-size: 10px; font-family: var(--font-mono); color: var(--text-3);
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 3px; padding: 0 5px; margin-left: 6px;
+}
+
+.openHint {
+  font-size: 10px; color: var(--text-4); margin-left: 6px;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.contractRow:hover .openHint { opacity: 1; }

@@ -192,7 +192,8 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const { contract_id, contracts: contractAllocs, project_id, invoice_number, vendor_name, amount,
-            invoice_date, description, file_reference, qb_code_id, invoice_type: invoiceTypeRaw } = req.body || {};
+            invoice_date, description, file_reference, qb_code_id, invoice_type: invoiceTypeRaw,
+            phase_budget_line_id } = req.body || {};
     if (!invoice_number || amount == null) return res.status(400).json({ error: 'invoice_number and amount required' });
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount must be > 0' });
@@ -294,11 +295,18 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
     }
 
     await client.query('BEGIN');
+    // Resolve phase_budget_line_id: explicit value, or derive from contract if only one allocation
+    let resolvedPblId = phase_budget_line_id ? Number(phase_budget_line_id) : null;
+    if (!resolvedPblId && allocs.length === 1) {
+      const pblRes = await pool.query('SELECT phase_budget_line_id FROM contracts WHERE id = $1', [allocs[0].contract_id]);
+      resolvedPblId = pblRes.rows[0]?.phase_budget_line_id || null;
+    }
+
     const result = await client.query(
-      `INSERT INTO invoices (contract_id, project_id, invoice_number, vendor_name, amount,
+      `INSERT INTO invoices (contract_id, project_id, phase_budget_line_id, invoice_number, vendor_name, amount,
           invoice_date, description, file_reference, qb_code_id, invoice_type, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [primaryContractId, resolvedProjectId, invoice_number, resolvedVendor, amt,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [primaryContractId, resolvedProjectId, resolvedPblId, invoice_number, resolvedVendor, amt,
        invoice_date || null, description || null, file_reference || null,
        qb_code_id || null, invoiceType, req.session.userId]);
     const invoiceId = result.rows[0].id;

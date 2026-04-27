@@ -4,7 +4,7 @@ const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const projects = require('./projects');
 const storage = require('../lib/storage');
-const { extractContract, suggestContractLines } = require('../lib/extract');
+const { extractContract, suggestContractLines, suggestInvoiceLineCodes } = require('../lib/extract');
 
 const router = express.Router();
 
@@ -60,20 +60,28 @@ router.post('/contracts/extract', requireAuth, pdfUpload.single('file'), async (
         }
       }
 
-      // QB line suggestions
-      if (extracted && extracted.total_value > 0) {
-        const codesResult = await pool.query(`
-          SELECT id, code, name FROM qb_codes
-          WHERE id NOT IN (SELECT DISTINCT parent_id FROM qb_codes WHERE parent_id IS NOT NULL)
-          ORDER BY code
-        `);
-        if (codesResult.rows.length > 0) {
-          const raw = await suggestContractLines(req.file.buffer, codesResult.rows, extracted.total_value);
-          const byId = {};
-          codesResult.rows.forEach(c => { byId[c.id] = c; });
-          suggested_lines = raw
-            .filter(l => byId[l.qb_code_id])
-            .map(l => ({ ...l, qb_code: byId[l.qb_code_id].code, qb_name: byId[l.qb_code_id].name }));
+      // QB code suggestion per line item using qb_accounts (leaf nodes)
+      if (extracted && extracted.line_items && extracted.line_items.length > 0) {
+        try {
+          const qbResult = await pool.query(
+            `SELECT id, account_number, full_name FROM qb_accounts WHERE is_leaf = true ORDER BY sort_order`
+          );
+          if (qbResult.rows.length > 0) {
+            const suggestions = await suggestInvoiceLineCodes(
+              req.file.buffer, extracted.line_items, qbResult.rows, extracted.vendor_name
+            );
+            const byIndex = {};
+            for (const s of suggestions) byIndex[s.line_index] = s;
+            extracted.line_items = extracted.line_items.map((li, i) => ({
+              ...li,
+              suggested_qb_account_id:  byIndex[i]?.qb_account_id  ?? null,
+              suggested_qb_number:      byIndex[i]?.account_number  ?? null,
+              qb_suggestion_confidence: byIndex[i]?.confidence      ?? null,
+              qb_suggestion_reason:     byIndex[i]?.reason          ?? null,
+            }));
+          }
+        } catch (codeErr) {
+          console.warn('QB code suggestion for contract failed:', codeErr.message);
         }
       }
     } catch (err) {
@@ -87,6 +95,71 @@ router.post('/contracts/extract', requireAuth, pdfUpload.single('file'), async (
       extracted, extract_error, suggested_lines,
     });
   } catch (err) { next(err); }
+});
+
+// POST /api/contracts — create a contract (new phase-aware flow)
+router.post('/contracts', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const {
+      project_id, phase_budget_line_id,
+      vendor_name, description, total_value, contract_date,
+      reference_number, status, file_reference,
+      contract_line_items: lineItems,
+    } = req.body || {};
+    if (!vendor_name) return res.status(400).json({ error: 'vendor_name required' });
+    if (!project_id)  return res.status(400).json({ error: 'project_id required' });
+    if (!(await projects.userCanAccess(req.session.userId, Number(project_id))))
+      return res.status(403).json({ error: 'Forbidden' });
+
+    const total = Number(total_value) || 0;
+
+    await client.query('BEGIN');
+    const result = await client.query(
+      `INSERT INTO contracts
+         (project_id, phase_budget_line_id, vendor_name, description, total_value,
+          contract_date, reference_number, status, file_reference, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'draft'),$9,$10) RETURNING *`,
+      [Number(project_id), phase_budget_line_id ? Number(phase_budget_line_id) : null,
+       vendor_name, description || null, total,
+       contract_date || null, reference_number || null,
+       status || null, file_reference || null, req.session.userId]
+    );
+    const contractId = result.rows[0].id;
+
+    if (Array.isArray(lineItems) && lineItems.length > 0) {
+      for (let i = 0; i < lineItems.length; i++) {
+        const li = lineItems[i];
+        await client.query(
+          `INSERT INTO contract_line_items
+             (contract_id, billing_type, description, budgeted_amount, sort_order)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [contractId,
+           ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed',
+           li.description || null,
+           Number(li.budgeted_amount) || 0,
+           i]
+        );
+      }
+    }
+
+    await client.query(
+      `INSERT INTO contract_logs (contract_id, action, detail, changed_by)
+       VALUES ($1,'created',$2,$3)`,
+      [contractId, `Created: ${vendor_name} for $${total}`, req.session.userId]
+    );
+    await client.query('COMMIT');
+
+    if (file_reference && vendor_name) {
+      saveExtractionExample(client, vendor_name, 'contract', {
+        vendor_name, total_value: total, contract_date: contract_date || null,
+        reference_number: reference_number || null, description: description || null,
+      }, req.session.userId).catch(() => {});
+    }
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
 });
 
 async function userCanAccessContract(userId, contractId) {
@@ -220,7 +293,7 @@ router.get('/contracts/:id', requireAuth, async (req, res, next) => {
     const access = await userCanAccessContract(req.session.userId, contractId);
     if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Not found' : 'Forbidden' });
 
-    const [contract, lines, invoices] = await Promise.all([
+    const [contract, lines, taskItems, invoices, budgetLine] = await Promise.all([
       pool.query('SELECT * FROM contracts WHERE id = $1', [contractId]),
       pool.query(
         `SELECT cl.id, cl.contract_id, cl.qb_code_id, cl.amount,
@@ -230,11 +303,32 @@ router.get('/contracts/:id', requireAuth, async (req, res, next) => {
          ORDER BY q.code ASC`, [contractId]
       ),
       pool.query(
-        `SELECT * FROM invoices WHERE contract_id = $1 ORDER BY invoice_date DESC NULLS LAST, created_at DESC`,
+        `SELECT cli.*,
+                qa.account_number AS qb_account_number,
+                qa.full_name      AS qb_account_name
+         FROM contract_line_items cli
+         LEFT JOIN qb_accounts qa ON qa.id = cli.qb_account_id
+         WHERE cli.contract_id = $1
+         ORDER BY cli.sort_order, cli.id`, [contractId]
+      ),
+      pool.query(
+        `SELECT i.*,
+                u.name AS created_by_name
+         FROM invoices i
+         LEFT JOIN users u ON u.id = i.created_by
+         WHERE i.contract_id = $1
+         ORDER BY i.invoice_date DESC NULLS LAST, i.created_at DESC`,
         [contractId]
+      ),
+      pool.query(
+        `SELECT c.phase_budget_line_id, pbl.task_name, pbl.discipline, pbl.phase_id
+         FROM contracts c
+         LEFT JOIN phase_budget_lines pbl ON pbl.id = c.phase_budget_line_id
+         WHERE c.id = $1`, [contractId]
       ),
     ]);
     const c = contract.rows[0];
+    const bl = budgetLine.rows[0] ?? {};
     const activeInvoices = invoices.rows.filter((i) => ['approved', 'pushed', 'paid'].includes(i.status));
     const invoicedAgainst = activeInvoices
       .filter((i) => i.invoice_type === 'fixed')
@@ -248,7 +342,10 @@ router.get('/contracts/:id', requireAuth, async (req, res, next) => {
     res.json({
       ...c,
       lines: lines.rows,
+      task_items: taskItems.rows,
       invoices: invoices.rows,
+      budget_line_name: bl.task_name ?? null,
+      budget_line_discipline: bl.discipline ?? null,
       invoiced_amount: invoicedAgainst,
       tm_invoiced_amount: tmInvoiced,
       expense_invoiced_amount: expenseInvoiced,
