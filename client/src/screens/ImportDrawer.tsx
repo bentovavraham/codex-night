@@ -284,15 +284,19 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const isPdf = (f: File) =>
+    f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragging(false);
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+    const files = Array.from(e.dataTransfer.files).filter(isPdf);
     if (files.length) onFiles(files);
   }, [onFiles]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter(f => f.type === 'application/pdf');
+    const files = Array.from(e.target.files || []).filter(isPdf);
     if (files.length) onFiles(files);
     e.target.value = '';
   };
@@ -300,12 +304,13 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
   return (
     <div
       className={`${styles.dropZone} ${dragging ? styles.dropZoneDragging : ''}`}
+      onDragEnter={e => { e.preventDefault(); setDragging(true); }}
       onDragOver={e => { e.preventDefault(); setDragging(true); }}
-      onDragLeave={() => setDragging(false)}
+      onDragLeave={e => { e.preventDefault(); setDragging(false); }}
       onDrop={handleDrop}
       onClick={() => inputRef.current?.click()}
     >
-      <input ref={inputRef} type="file" accept="application/pdf" multiple hidden onChange={handleChange} />
+      <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={handleChange} />
       <div className={styles.dropIcon}>↑</div>
       <div className={styles.dropText}>Drop PDFs here or click to browse</div>
       <div className={styles.dropSub}>Contracts and invoices — mixed OK</div>
@@ -422,8 +427,8 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
 
         {drawerView === 'queue' ? (
           <div className={styles.queueView}>
-            {/* Drop zone (hide if queue getting full) */}
-            {queue.length < 20 && (
+            {/* Drop zone */}
+            {true && (
               <div className={styles.dropZoneWrap}>
                 {uploading ? (
                   <div className={styles.uploadingMsg}>
