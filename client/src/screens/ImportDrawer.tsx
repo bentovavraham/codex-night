@@ -291,8 +291,11 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
     e.preventDefault();
     e.stopPropagation();
     setDragging(false);
-    const files = Array.from(e.dataTransfer.files).filter(isPdf);
-    if (files.length) onFiles(files);
+    const all = Array.from(e.dataTransfer.files);
+    console.log('Drop detected:', all.length, 'files:', all.map(f => `${f.name} (${f.type})`));
+    const files = all.filter(isPdf);
+    console.log('PDF files after filter:', files.length);
+    onFiles(files.length ? files : all); // if filter removes everything, send all anyway
   }, [onFiles]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -327,6 +330,7 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
   const [saving, setSaving] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const { data: queue = [], refetch } = useQuery<ImportItem[]>({
     queryKey: ['importQueue', phaseId],
@@ -347,11 +351,14 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
   const done = queue.filter(i => i.status === 'confirmed' || i.status === 'discarded');
 
   const handleFiles = async (files: File[]) => {
+    if (!files.length) { setUploadError('No PDF files detected in the drop.'); return; }
+    setUploadError(null);
     setUploading(true);
     try {
       await api.importFiles(phaseId, files);
       await refetch();
-    } catch (err) {
+    } catch (err: any) {
+      setUploadError(err?.message || 'Upload failed — check console for details');
       console.error('Upload failed:', err);
     } finally {
       setUploading(false);
@@ -436,6 +443,9 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
                   </div>
                 ) : (
                   <DropZone onFiles={handleFiles} />
+                )}
+                {uploadError && (
+                  <div className={styles.uploadErr}>{uploadError}</div>
                 )}
               </div>
             )}
