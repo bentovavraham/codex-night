@@ -255,20 +255,25 @@
 
 /* section number cells (used in section/sg rows) */
 .sn  { padding: 0 8px; text-align: right; font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text-2); border-bottom: 1px solid #3a3028; white-space: nowrap; height: 30px; }
-.sgn { padding: 0 8px; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--text-3); border-bottom: 1px solid var(--border); white-space: nowrap; height: 26px; }
+.sgn { padding: 0 8px; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--text-2); border-bottom: 1px solid var(--border); white-space: nowrap; height: 26px; }
 
-/* read-only computed cells */
+/* Dark section header rows need light number text */
+.secRow td.sn { color: rgba(255,255,255,0.82); border-bottom-color: #3a3028; }
+/* Sub-group rows: dark text on light background */
+.sgRow td.sn  { color: var(--text-1); border-bottom-color: var(--border); font-weight: 600; }
+
+/* read-only computed cells — slightly muted bg to distinguish from editable */
 .ro { background: var(--bg); color: var(--text-2); }
 .dataRow:hover .ro { background: transparent; }
 
 /* detail columns — hidden until toggled */
 .detailHidden { display: none; }
 
-/* editable cell indicator */
+/* editable cell indicator — pale yellow on hover (Excel/QB pattern) */
 .editableCell {
-  border-bottom: 1px dashed rgba(196, 82, 42, 0.28) !important;
+  border-bottom: 1px dashed rgba(196, 82, 42, 0.25) !important;
 }
-.editableCell:hover { background: var(--bg-2); cursor: text; }
+.editableCell:hover { background: var(--editable-bg); cursor: text; }
 
 /* active toolbar button */
 .tbBtnActive {
@@ -378,6 +383,62 @@
 }
 .initBtn:hover    { background: #b34820; }
 .initBtn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Section bottom subtotal row (dark, like header) ────────────────────── */
+
+.secSubRow { background: #222018; }
+
+.secSubLabel {
+  padding: 0 8px 0 20px;
+  height: 28px;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--amber);
+  border-top: 2px solid #3a3028;
+  white-space: nowrap;
+}
+
+.secSubNum {
+  padding: 0 8px;
+  height: 28px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.85);
+  border-top: 2px solid #3a3028;
+  white-space: nowrap;
+}
+
+/* ── Sub-group bottom subtotal row (light, like sg header) ──────────────── */
+
+.sgSubRow { background: #e4dfd8; }
+
+.sgSubLabel {
+  padding: 0 8px 0 28px;
+  height: 24px;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-2);
+  border-top: 2px solid var(--border-2);
+  white-space: nowrap;
+}
+
+.sgSubNum {
+  padding: 0 8px;
+  height: 24px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-1);
+  border-top: 2px solid var(--border-2);
+  white-space: nowrap;
+}
 
 /* Direct invoice indicator */
 .directBadge {

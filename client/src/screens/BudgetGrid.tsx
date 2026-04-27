@@ -256,7 +256,7 @@ export default function BudgetGrid() {
 
   const dc = showDetails ? '' : styles.detailHidden; // detail col visibility
 
-  // Section/sub-group summary cells
+  // Section/sub-group header summary cells (dark or light bg depending on parent row)
   const TotalsCells = ({ t }: { t: Totals }) => {
     const amtDue = t.billed - t.paid;
     return <>
@@ -271,6 +271,42 @@ export default function BudgetGrid() {
       <td className={styles.sn}>{remPct(t.billed, t.budgeted)}</td>
       <td className={styles.sn}>{perSF(t.billed, gla_sf)}</td>
       <td className={styles.sn}>{perAC(t.billed, gla_ac)}</td>
+    </>;
+  };
+
+  // Bottom subtotal cells for section rows (dark background variant)
+  const SecSubCells = ({ t }: { t: Totals }) => {
+    const amtDue = t.billed - t.paid;
+    return <>
+      <td className={styles.secSubNum}>{moneyD(t.budgeted)}</td>
+      <td className={styles.secSubNum}>{money(t.fixed)}</td>
+      <td className={styles.secSubNum}>{money(t.tm)}</td>
+      <td className={styles.secSubNum}>{money(t.expenses)}</td>
+      <td className={styles.secSubNum}>{moneyD(t.billed)}</td>
+      <td className={`${styles.secSubNum} ${amtDue > 0 ? styles.warn : ''}`}>{money(amtDue)}</td>
+      <td className={styles.secSubNum}>{money(t.paid)}</td>
+      <td className={`${styles.secSubNum} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
+      <td className={styles.secSubNum}>{remPct(t.billed, t.budgeted)}</td>
+      <td className={styles.secSubNum}>{perSF(t.billed, gla_sf)}</td>
+      <td className={styles.secSubNum}>{perAC(t.billed, gla_ac)}</td>
+    </>;
+  };
+
+  // Bottom subtotal cells for sub-group rows (light background variant)
+  const SgSubCells = ({ t }: { t: Totals }) => {
+    const amtDue = t.billed - t.paid;
+    return <>
+      <td className={styles.sgSubNum}>{moneyD(t.budgeted)}</td>
+      <td className={styles.sgSubNum}>{money(t.fixed)}</td>
+      <td className={styles.sgSubNum}>{money(t.tm)}</td>
+      <td className={styles.sgSubNum}>{money(t.expenses)}</td>
+      <td className={styles.sgSubNum}>{moneyD(t.billed)}</td>
+      <td className={`${styles.sgSubNum} ${amtDue > 0 ? styles.warn : ''}`}>{money(amtDue)}</td>
+      <td className={styles.sgSubNum}>{money(t.paid)}</td>
+      <td className={`${styles.sgSubNum} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
+      <td className={styles.sgSubNum}>{remPct(t.billed, t.budgeted)}</td>
+      <td className={styles.sgSubNum}>{perSF(t.billed, gla_sf)}</td>
+      <td className={styles.sgSubNum}>{perAC(t.billed, gla_ac)}</td>
     </>;
   };
 
@@ -365,7 +401,8 @@ export default function BudgetGrid() {
                   <td className={`${styles.secCell} ${dc}`} />
                 </tr>,
 
-                ...(secOpen ? Array.from(subMap.entries()).flatMap(([sgKey, sgRows]) => {
+                ...(secOpen ? [
+                  ...Array.from(subMap.entries()).flatMap(([sgKey, sgRows]) => {
                   const hasSg  = sgKey !== '__none__';
                   const sgOpen = !collapsed.has(`sg:${sgKey}`);
                   const sgt    = sgTotals[sgKey] ?? zero();
@@ -383,7 +420,9 @@ export default function BudgetGrid() {
                       </tr>
                     ] : []),
 
-                    ...(sgOpen ? sgRows.flatMap((row: BudgetRow) => {
+                    ...(sgOpen ? [
+                      ...sgRows.flatMap((row: BudgetRow) => {
+
                       const isA = (f: string) => active.rowId === row.id && active.field === f;
                       const lineContracts = contractsByLine.get(row.id) ?? [];
                       const hasContracts  = lineContracts.length > 0;
@@ -464,9 +503,33 @@ export default function BudgetGrid() {
                           </tr>
                         )) : []),
                       ];
-                    }) : []),
+                    }),
+                    // Sub-group bottom subtotal
+                    ...(hasSg ? [
+                      <tr key={`sg:${sgKey}:sub`} className={styles.sgSubRow}>
+                        <td />
+                        <td className={styles.sgSubLabel} colSpan={2}>Total — {sgKey}</td>
+                        <SgSubCells t={sgt} />
+                        <td className={`${styles.sgSubNum} ${dc}`} />
+                        <td className={`${styles.sgSubNum} ${dc}`} />
+                        <td className={`${styles.sgSubNum} ${dc}`} />
+                        <td className={`${styles.sgSubNum} ${dc}`} />
+                      </tr>,
+                    ] : []),
+                  ] : []),
                   ];
-                }) : []),
+                }),
+                // Section bottom subtotal
+                <tr key={`sec:${sec.key}:sub`} className={styles.secSubRow}>
+                  <td />
+                  <td className={styles.secSubLabel} colSpan={2}>Total — {sec.label}</td>
+                  <SecSubCells t={st} />
+                  <td className={`${styles.secSubNum} ${dc}`} />
+                  <td className={`${styles.secSubNum} ${dc}`} />
+                  <td className={`${styles.secSubNum} ${dc}`} />
+                  <td className={`${styles.secSubNum} ${dc}`} />
+                </tr>,
+              ] : []),
               ];
             })}
           </tbody>
