@@ -4,20 +4,12 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../db/pool');
+const fileStorage = require('../lib/storage');
 const { requireAuth } = require('../middleware/auth');
 const { classifyDocument, extractContract, extractInvoice } = require('../lib/extract');
 
-const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
-  filename: (req, file, cb) => {
-    const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    cb(null, unique + path.extname(file.originalname));
-  },
-});
-const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
+// Use memory storage — save to Postgres immediately so files survive restarts + Render deploys
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 // Budget line matching — simple keyword overlap
 function matchBudgetLine(description, vendorName, budgetLines) {
@@ -42,16 +34,19 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ error: 'No files uploaded' });
 
-    // Create queue entries immediately
+    // Save each file to Postgres and create queue entries
     const queueItems = [];
     for (const file of files) {
-      const fileRef = `uploads/${file.filename}`;
+      const saved = await fileStorage.save(file.buffer, {
+        filename: file.originalname,
+        mimeType: file.mimetype || 'application/pdf',
+      });
       const r = await pool.query(
         `INSERT INTO import_queue (phase_id, original_filename, file_reference, status, created_by)
          VALUES ($1, $2, $3, 'queued', $4) RETURNING *`,
-        [phaseId, file.originalname, fileRef, req.session.userId]
+        [phaseId, file.originalname, saved.reference, req.session.userId]
       );
-      queueItems.push(r.rows[0]);
+      queueItems.push({ ...r.rows[0], _buffer: file.buffer });
     }
 
     res.json({ items: queueItems });
@@ -90,7 +85,7 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
       const item = queueItems[idx];
       try {
         await pool.query(`UPDATE import_queue SET status='extracting', updated_at=NOW() WHERE id=$1`, [item.id]);
-        const buf = fs.readFileSync(path.join(UPLOADS_DIR, file.filename));
+        const buf = item._buffer || (await fileStorage.read(item.file_reference)).buffer;
         const { type, confidence } = await callWithRetry(() => classifyDocument(buf));
         const extracted = await callWithRetry(() =>
           type === 'contract' ? extractContract(buf) : extractInvoice(buf)
@@ -330,7 +325,7 @@ router.post('/import-queue/:id/retry', requireAuth, async (req, res, next) => {
     (async () => {
       try {
         await pool.query(`UPDATE import_queue SET status='extracting', updated_at=NOW() WHERE id=$1`, [item.id]);
-        const buf = fs.readFileSync(path.join(UPLOADS_DIR, path.basename(item.file_reference)));
+        const buf = (await fileStorage.read(item.file_reference)).buffer;
         const { type, confidence } = await callWithRetry(() => classifyDocument(buf));
         const extracted = await callWithRetry(() =>
           type === 'contract' ? extractContract(buf) : extractInvoice(buf)
