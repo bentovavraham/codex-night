@@ -62,7 +62,7 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
       [phaseId]
     )).rows;
 
-    const limit = 4;
+    const limit = 10;
     let i = 0;
     async function next_file() {
       if (i >= files.length) return;
