@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './ImportDrawer.module.css';
 
@@ -233,31 +233,37 @@ function ReviewForm({ item, budgetLines, onConfirm, onDiscard, onBack, saving }:
 
 // ── Queue Card ───────────────────────────────────────────────────────────────
 
-function QueueCard({ item, onClick, onFlipType }: {
+function QueueCard({ item, onClick, onFlipType, onRetry }: {
   item: ImportItem;
   onClick: () => void;
   onFlipType: () => void;
+  onRetry: () => void;
 }) {
   const ext = item.extracted_data || {};
-  const isClickable = item.status === 'needs_review' || item.status === 'failed';
   const vendor = ext.vendor_name || '—';
   const amount = ext.amount != null ? usd.format(Number(ext.amount))
     : ext.total_value != null ? usd.format(Number(ext.total_value))
     : null;
 
   return (
-    <div
-      className={`${styles.queueCard} ${isClickable ? styles.queueCardClickable : ''}`}
-      onClick={isClickable ? onClick : undefined}
-    >
+    <div className={styles.queueCard}>
       <div className={styles.cardRow}>
         <TypeChip
           type={item.doc_type}
           onClick={e => { (e as any).stopPropagation?.(); onFlipType(); }}
         />
-        <span className={styles.cardFilename} title={item.original_filename}>
+        <span
+          className={`${styles.cardFilename} ${item.status === 'needs_review' ? styles.cardFilenameClickable : ''}`}
+          title={item.original_filename}
+          onClick={item.status === 'needs_review' ? onClick : undefined}
+        >
           {item.original_filename}
         </span>
+        {item.status === 'failed' && (
+          <button className={styles.retryBtn} onClick={e => { e.stopPropagation(); onRetry(); }}>
+            Retry
+          </button>
+        )}
         <StatusBadge status={item.status} />
       </div>
       {(item.status === 'needs_review' || item.status === 'confirmed') && (
@@ -409,6 +415,11 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
     }
   };
 
+  const retryMutation = useMutation({
+    mutationFn: (id: number) => api.retryImportItem(id),
+    onSuccess: () => refetch(),
+  });
+
   const handleBack = () => {
     setDrawerView('queue');
     setReviewItem(null);
@@ -463,6 +474,7 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
                     item={item}
                     onClick={() => handleOpenReview(item)}
                     onFlipType={() => handleFlipType(item)}
+                    onRetry={() => retryMutation.mutate(item.id)}
                   />
                 ))}
               </div>
@@ -481,6 +493,7 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
                     item={item}
                     onClick={() => {}}
                     onFlipType={() => {}}
+                    onRetry={() => retryMutation.mutate(item.id)}
                   />
                 ))}
               </div>

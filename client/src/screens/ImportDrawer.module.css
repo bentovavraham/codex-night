@@ -128,6 +128,16 @@
   max-width: 200px;
 }
 .cardError { font-size: 10.5px; color: var(--status-rejected, #c0392b); padding-left: 2px; }
+.cardFilenameClickable { cursor: pointer; }
+.cardFilenameClickable:hover { color: var(--accent); }
+
+.retryBtn {
+  height: 18px; padding: 0 8px; font-size: 10px; font-weight: 700;
+  border: 1px solid var(--status-rejected, #c0392b); border-radius: 3px;
+  background: transparent; color: var(--status-rejected, #c0392b);
+  cursor: pointer; flex-shrink: 0; white-space: nowrap;
+}
+.retryBtn:hover { background: #fde0dc; }
 
 /* ── Type chip ── */
 .typeChip {

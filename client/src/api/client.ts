@@ -113,4 +113,5 @@ export const api = {
   updateImportItem: (id: number, data: any) => request<any>('PATCH', `/api/import-queue/${id}`, data),
   confirmImportItem: (id: number, formData: any) => request<any>('POST', `/api/import-queue/${id}/confirm`, { formData }),
   discardImportItem: (id: number) => request<any>('DELETE', `/api/import-queue/${id}`),
+  retryImportItem: (id: number) => request<any>('POST', `/api/import-queue/${id}/retry`),
 };

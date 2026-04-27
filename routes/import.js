@@ -56,13 +56,32 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
 
     res.json({ items: queueItems });
 
-    // Process in background (parallel, max 4 at a time)
+    // Process in background — 2 concurrent workers with exponential backoff on rate limits
     const budgetLines = (await pool.query(
       'SELECT id, task_name, discipline FROM phase_budget_lines WHERE phase_id = $1',
       [phaseId]
     )).rows;
 
-    const limit = 10;
+    const CONCURRENCY = 2;
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    async function callWithRetry(fn, maxRetries = 5) {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          return await fn();
+        } catch (err) {
+          const is429 = err.status === 429 || String(err.message).includes('429') || String(err.message).includes('rate limit');
+          if (is429 && attempt < maxRetries) {
+            const wait = Math.min(60000, 6000 * Math.pow(2, attempt));
+            console.log(`Rate limit hit, waiting ${wait}ms before retry ${attempt + 1}/${maxRetries}`);
+            await sleep(wait);
+          } else {
+            throw err;
+          }
+        }
+      }
+    }
+
     let i = 0;
     async function next_file() {
       if (i >= files.length) return;
@@ -72,10 +91,10 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
       try {
         await pool.query(`UPDATE import_queue SET status='extracting', updated_at=NOW() WHERE id=$1`, [item.id]);
         const buf = fs.readFileSync(path.join(UPLOADS_DIR, file.filename));
-        const { type, confidence } = await classifyDocument(buf);
-        const extracted = type === 'contract'
-          ? await extractContract(buf)
-          : await extractInvoice(buf);
+        const { type, confidence } = await callWithRetry(() => classifyDocument(buf));
+        const extracted = await callWithRetry(() =>
+          type === 'contract' ? extractContract(buf) : extractInvoice(buf)
+        );
         const desc = type === 'contract' ? extracted.description : extracted.summary;
         const vendor = extracted.vendor_name;
         const { lineId, confidence: matchConf } = matchBudgetLine(desc, vendor, budgetLines);
@@ -92,7 +111,7 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
         );
       }
     }
-    const workers = Array.from({ length: Math.min(limit, files.length) }, () => {
+    const workers = Array.from({ length: Math.min(CONCURRENCY, files.length) }, () => {
       const run = async () => { await next_file(); if (i < files.length) await run(); };
       return run();
     });
@@ -196,6 +215,54 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
     await client.query('ROLLBACK');
     next(err);
   } finally { client.release(); }
+});
+
+// POST /api/import-queue/:id/retry — re-queue a failed item
+router.post('/import-queue/:id/retry', requireAuth, async (req, res, next) => {
+  try {
+    const item = (await pool.query('SELECT * FROM import_queue WHERE id=$1', [Number(req.params.id)])).rows[0];
+    if (!item) return res.status(404).json({ error: 'Not found' });
+    if (item.status !== 'failed') return res.status(400).json({ error: 'Only failed items can be retried' });
+
+    await pool.query(`UPDATE import_queue SET status='queued', error_message=NULL, updated_at=NOW() WHERE id=$1`, [item.id]);
+    res.json({ ok: true });
+
+    const budgetLines = (await pool.query(
+      'SELECT id, task_name, discipline FROM phase_budget_lines WHERE phase_id = $1',
+      [item.phase_id]
+    )).rows;
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    async function callWithRetry(fn, maxRetries = 5) {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try { return await fn(); } catch (err) {
+          const is429 = err.status === 429 || String(err.message).includes('429') || String(err.message).includes('rate limit');
+          if (is429 && attempt < maxRetries) { await sleep(Math.min(60000, 6000 * Math.pow(2, attempt))); }
+          else { throw err; }
+        }
+      }
+    }
+
+    (async () => {
+      try {
+        await pool.query(`UPDATE import_queue SET status='extracting', updated_at=NOW() WHERE id=$1`, [item.id]);
+        const buf = fs.readFileSync(path.join(UPLOADS_DIR, path.basename(item.file_reference)));
+        const { type, confidence } = await callWithRetry(() => classifyDocument(buf));
+        const extracted = await callWithRetry(() =>
+          type === 'contract' ? extractContract(buf) : extractInvoice(buf)
+        );
+        const desc = type === 'contract' ? extracted.description : extracted.summary;
+        const { lineId, confidence: matchConf } = matchBudgetLine(desc, extracted.vendor_name, budgetLines);
+        await pool.query(
+          `UPDATE import_queue SET status='needs_review', doc_type=$1, doc_type_confidence=$2,
+           extracted_data=$3, suggested_budget_line_id=$4, match_confidence=$5, updated_at=NOW() WHERE id=$6`,
+          [type, confidence, JSON.stringify(extracted), lineId, matchConf, item.id]
+        );
+      } catch (err) {
+        await pool.query(`UPDATE import_queue SET status='failed', error_message=$1, updated_at=NOW() WHERE id=$2`, [err.message, item.id]);
+      }
+    })();
+  } catch (err) { next(err); }
 });
 
 // DELETE /api/import-queue/:id
