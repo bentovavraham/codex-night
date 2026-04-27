@@ -807,6 +807,11 @@ function UploadPanel({
               )}
             </div>
 
+          </div>
+        )}
+
+        {stage === 'review' && (
+          <div className={styles.formFooter}>
             {/* ── Review checkbox ── */}
             <label className={styles.reviewCheck}>
               <input type="checkbox" checked={form.reviewed}
@@ -822,7 +827,6 @@ function UploadPanel({
                 {saving ? 'Saving…' : editId ? 'Save Changes' : 'Save & Close'}
               </button>
             </div>
-
           </div>
         )}
       </div>

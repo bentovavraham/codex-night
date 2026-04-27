@@ -638,7 +638,11 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
               </div>
             </div>
 
-            {/* Review */}
+          </div>
+        )}
+
+        {stage === 'review' && (
+          <div className={styles.formFooter}>
             <label className={styles.reviewCheck}>
               <input type="checkbox" checked={form.reviewed}
                 onChange={e => setF('reviewed', e.target.checked)} />
@@ -653,7 +657,6 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
                 {saving ? 'Saving…' : editId ? 'Save Changes' : 'Save & Close'}
               </button>
             </div>
-
           </div>
         )}
       </div>
