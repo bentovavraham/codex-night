@@ -440,7 +440,22 @@
   white-space: nowrap;
 }
 
-/* Direct invoice indicator */
+/* ── Source / modification visual states ─────────────────────────────────── */
+
+/* Template row, amount untouched — amount cell text is muted grey */
+.amtTemplate { color: var(--text-3) !important; }
+
+/* Template row, amount edited by user — black text + terracotta left border */
+.amtModified {
+  color: var(--text-1) !important;
+  border-left: 2px solid var(--accent) !important;
+}
+
+/* User-added row — faint warm amber row tint */
+.rowUserAdded { background: #fdf6ec !important; }
+.rowUserAdded:hover { background: #faeedd !important; }
+
+/* ── Direct invoice indicator */
 .directBadge {
   display: inline-block;
   margin-left: 6px;

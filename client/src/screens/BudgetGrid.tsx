@@ -36,6 +36,8 @@ export interface BudgetRow {
   pct_billed: number | null;
   qb_codes_used: string;
   has_direct_invoices: boolean;
+  source: 'template' | 'user';
+  amount_modified: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -428,7 +430,7 @@ export default function BudgetGrid() {
                       const hasContracts  = lineContracts.length > 0;
                       const lineOpen      = contractsOpen.has(row.id);
                       return [
-                        <tr key={row.id} className={`${styles.dataRow} ${hasContracts ? cgStyles.lineClickable : ''}`}
+                        <tr key={row.id} className={`${styles.dataRow} ${hasContracts ? cgStyles.lineClickable : ''} ${row.source === 'user' ? styles.rowUserAdded : ''}`}
                             onClick={hasContracts ? (e) => { if ((e.target as HTMLElement).closest('input,select,button')) return; toggleLine(row.id); } : undefined}>
                           <td className={styles.rowGutter}>
                             {hasContracts && <span className={styles.chevron}>{lineOpen ? '▼' : '▶'}</span>}
@@ -441,7 +443,8 @@ export default function BudgetGrid() {
                             onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdDisc} />
                           <EditCell value={row.budgeted_amount} rowId={row.id} field="budgeted_amount" numeric
                             isActive={isA('budgeted_amount')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                            onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdMoney} />
+                            onCommit={handleCommit} onTabNext={handleTabNext}
+                            className={`${styles.tdMoney} ${row.source === 'template' && !row.amount_modified ? styles.amtTemplate : styles.amtModified}`} />
                           <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.fixed_charges)}</td>
                           <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.tm_charges)}</td>
                           <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.expense_charges)}</td>

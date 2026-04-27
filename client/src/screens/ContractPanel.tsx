@@ -102,7 +102,7 @@ export function ContractPanel({ contractId, onClose, onEdit }: Props) {
         {/* ── Header bar ── */}
         <div className={styles.panelBar}>
           <div className={styles.panelTitle}>
-            {isLoading ? 'Contract' : (
+            {!c || isLoading ? 'Contract' : (
               <>
                 <span className={styles.panelVendor}>{c.vendor_name}</span>
                 {c.reference_number && <span className={styles.panelRef}> · {c.reference_number}</span>}
@@ -132,7 +132,7 @@ export function ContractPanel({ contractId, onClose, onEdit }: Props) {
           </div>
         </div>
 
-        {isLoading ? (
+        {isLoading || !c ? (
           <div className={styles.loading}><div className={styles.spinner} /><span>Loading…</span></div>
         ) : (
           <div className={styles.body}>

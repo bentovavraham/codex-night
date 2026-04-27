@@ -27,6 +27,8 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         pbl.consultant,
         pbl.notes,
         pbl.sort_order,
+        pbl.source,
+        pbl.amount_modified,
 
         -- Committed: sum of active contract values against this budget line
         COALESCE((
@@ -201,8 +203,8 @@ router.post('/phases/:phaseId/budget/init', requireAuth, async (req, res, next) 
         const t = TEMPLATE[i];
         await client.query(
           `INSERT INTO phase_budget_lines
-             (phase_id, task_name, discipline, section, sub_group, budgeted_amount, sort_order)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+             (phase_id, task_name, discipline, section, sub_group, budgeted_amount, sort_order, source)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'template')`,
           [phaseId, t.task_name, t.discipline, t.section, t.sub_group || null, t.default_amount || 0, i + 1]
         );
       }
@@ -232,8 +234,8 @@ router.post('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
 
     const result = await pool.query(
       `INSERT INTO phase_budget_lines
-         (phase_id, task_name, discipline, section, sub_group, budgeted_amount, consultant, notes, sort_order)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         (phase_id, task_name, discipline, section, sub_group, budgeted_amount, consultant, notes, sort_order, source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'user')
        RETURNING *`,
       [phaseId, task_name, discipline, section, sub_group || null, budgeted_amount, consultant, notes, sortResult.rows[0].next_sort]
     );
@@ -251,6 +253,7 @@ router.patch('/budget-lines/:lineId', requireAuth, async (req, res, next) => {
       if (req.body[f] !== undefined) { updates.push(`${f} = $${i++}`); values.push(req.body[f]); }
     }
     if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
+    if (req.body.budgeted_amount !== undefined) { updates.push(`amount_modified = TRUE`); }
     values.push(lineId);
 
     // Fetch old values for audit log before update

@@ -445,3 +445,8 @@ CREATE TABLE IF NOT EXISTS phase_budget_line_logs (
     changed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_pbll_line ON phase_budget_line_logs(line_id);
+
+-- Track whether a row came from the template or was added by the user,
+-- and whether the budgeted_amount has been manually changed from the template default.
+DO $$ BEGIN ALTER TABLE phase_budget_lines ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'template'; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE phase_budget_lines ADD COLUMN amount_modified BOOLEAN NOT NULL DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
