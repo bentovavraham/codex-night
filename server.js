@@ -78,6 +78,9 @@ app.use('/api/projects', phaseRoutes);          // /projects/:projectId/phases
 app.use('/api', phaseRoutes);                   // /phases/:phaseId and /phases/:phaseId (DELETE/PATCH)
 app.use('/api', phaseBudgetRoutes);             // /phases/:phaseId/budget, /budget-lines/:id, /qb-accounts
 
+const importRoutes = require('./routes/import');
+app.use('/api', importRoutes);                  // /phases/:phaseId/import, /import-queue/:id
+
 // --- Static SPA ---
 const clientDist = path.join(__dirname, 'client', 'dist');
 const hasClientBuild = fs.existsSync(path.join(clientDist, 'index.html'));

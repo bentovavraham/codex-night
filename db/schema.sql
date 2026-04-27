@@ -450,3 +450,26 @@ CREATE INDEX IF NOT EXISTS idx_pbll_line ON phase_budget_line_logs(line_id);
 -- and whether the budgeted_amount has been manually changed from the template default.
 DO $$ BEGIN ALTER TABLE phase_budget_lines ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'template'; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE phase_budget_lines ADD COLUMN amount_modified BOOLEAN NOT NULL DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- ── Bulk import queue ──────────────────────────────────────────────────────────
+DO $$ BEGIN
+  CREATE TABLE IF NOT EXISTS import_queue (
+    id SERIAL PRIMARY KEY,
+    phase_id INTEGER NOT NULL REFERENCES phases(id) ON DELETE CASCADE,
+    original_filename VARCHAR(512) NOT NULL,
+    file_reference VARCHAR(1024),
+    doc_type VARCHAR(16),
+    doc_type_confidence VARCHAR(16),
+    extracted_data JSONB,
+    suggested_budget_line_id INTEGER REFERENCES phase_budget_lines(id) ON DELETE SET NULL,
+    match_confidence VARCHAR(16),
+    status VARCHAR(32) NOT NULL DEFAULT 'queued',
+    confirmed_contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL,
+    confirmed_invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+    error_message TEXT,
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+CREATE INDEX IF NOT EXISTS idx_import_queue_phase ON import_queue(phase_id);

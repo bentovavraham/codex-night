@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { NavLink, Outlet, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { ImportDrawer } from './ImportDrawer';
 import styles from './PhaseHome.module.css';
 
 const TABS = [
@@ -14,6 +16,8 @@ const TABS = [
 
 export default function PhaseHome() {
   const { projectId, phaseId } = useParams();
+  const [importOpen, setImportOpen] = useState(false);
+  const phaseIdNum = Number(phaseId);
 
   const { data: project } = useQuery({
     queryKey: ['project', Number(projectId)],
@@ -63,12 +67,20 @@ export default function PhaseHome() {
             {tab.label}
           </NavLink>
         ))}
+        <div className={styles.tabBarSpacer} />
+        <button className={styles.importBtn} onClick={() => setImportOpen(true)}>
+          ↑ Import
+        </button>
       </div>
 
       {/* Tab content */}
       <div className={styles.tabContent}>
         <Outlet />
       </div>
+
+      {importOpen && (
+        <ImportDrawer phaseId={phaseIdNum} onClose={() => setImportOpen(false)} />
+      )}
     </div>
   );
 }

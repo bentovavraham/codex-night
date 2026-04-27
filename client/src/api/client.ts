@@ -99,4 +99,18 @@ export const api = {
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
     return payload;
   },
+
+  // Import queue
+  importFiles: async (phaseId: number, files: File[]) => {
+    const form = new FormData();
+    files.forEach(f => form.append('files', f));
+    const res = await fetch(`/api/phases/${phaseId}/import`, { method: 'POST', credentials: 'same-origin', body: form });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    return payload;
+  },
+  getImportQueue: (phaseId: number) => request<any[]>('GET', `/api/phases/${phaseId}/import-queue`),
+  updateImportItem: (id: number, data: any) => request<any>('PATCH', `/api/import-queue/${id}`, data),
+  confirmImportItem: (id: number, formData: any) => request<any>('POST', `/api/import-queue/${id}/confirm`, { formData }),
+  discardImportItem: (id: number) => request<any>('DELETE', `/api/import-queue/${id}`),
 };
