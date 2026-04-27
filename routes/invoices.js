@@ -404,7 +404,15 @@ router.get('/invoices/:id', requireAuth, async (req, res, next) => {
        ORDER BY qc.code`,
       [inv.id, inv.contract_id || 0, inv.invoice_date, inv.id]
     );
-    res.json({ ...inv, contract_allocations: allocs.rows, lines: lines.rows });
+    const lineItems = await pool.query(
+      `SELECT ili.*, qa.account_number AS qb_account_number, qa.full_name AS qb_account_name
+       FROM invoice_line_items ili
+       LEFT JOIN qb_accounts qa ON qa.id = ili.qb_account_id
+       WHERE ili.invoice_id = $1
+       ORDER BY ili.sort_order, ili.id`,
+      [inv.id]
+    );
+    res.json({ ...inv, contract_allocations: allocs.rows, lines: lines.rows, invoice_line_items: lineItems.rows });
   } catch (err) { next(err); }
 });
 
@@ -432,8 +440,16 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
     if (!inv) return res.status(404).json({ error: 'Not found' });
     if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
-    // Warn but allow edits — users can revert status if needed.
-    const { invoice_number, vendor_name, amount, invoice_date, description, status, file_reference } = req.body || {};
+
+    const {
+      invoice_number, vendor_name, amount, invoice_date, description,
+      status, file_reference, phase_budget_line_id, contract_id,
+      invoice_type: invoiceTypeRaw, invoice_line_items: lineItems,
+    } = req.body || {};
+
+    const invoiceType = ['fixed', 'tm', 'expense'].includes(invoiceTypeRaw)
+      ? invoiceTypeRaw : (inv.invoice_type || 'fixed');
+
     const changes = [];
     if (invoice_number && invoice_number !== inv.invoice_number) changes.push(`number: ${inv.invoice_number} → ${invoice_number}`);
     if (amount != null && Number(amount) !== Number(inv.amount)) changes.push(`amount: $${Number(inv.amount).toFixed(2)} → $${Number(amount).toFixed(2)}`);
@@ -442,13 +458,55 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE invoices SET
-         invoice_number = COALESCE($2, invoice_number), vendor_name = COALESCE($3, vendor_name),
-         amount = COALESCE($4, amount), invoice_date = COALESCE($5, invoice_date),
-         description = COALESCE($6, description), status = COALESCE($7, status),
-         file_reference = COALESCE($8, file_reference), updated_at = NOW()
+         invoice_number       = COALESCE($2, invoice_number),
+         vendor_name          = COALESCE($3, vendor_name),
+         amount               = COALESCE($4, amount),
+         invoice_date         = $5,
+         description          = $6,
+         status               = COALESCE($7, status),
+         file_reference       = COALESCE($8, file_reference),
+         phase_budget_line_id = $9,
+         contract_id          = $10,
+         invoice_type         = $11,
+         updated_at           = NOW()
        WHERE id = $1 RETURNING *`,
-      [invId, invoice_number ?? null, vendor_name ?? null, amount ?? null,
-       invoice_date ?? null, description ?? null, status ?? null, file_reference ?? null]);
+      [invId,
+       invoice_number ?? null,
+       vendor_name ?? null,
+       amount != null ? Number(amount) : null,
+       invoice_date ?? null,
+       description ?? null,
+       status ?? null,
+       file_reference ?? null,
+       phase_budget_line_id != null ? Number(phase_budget_line_id) : null,
+       contract_id != null ? Number(contract_id) : null,
+       invoiceType]);
+
+    // Replace line items when provided (full replace)
+    if (Array.isArray(lineItems)) {
+      await client.query('DELETE FROM invoice_line_items WHERE invoice_id = $1', [invId]);
+      for (let idx = 0; idx < lineItems.length; idx++) {
+        const li = lineItems[idx];
+        const liAmt = Number(li.amount);
+        if (!liAmt) continue;
+        const liType = ['fixed', 'tm', 'expense'].includes(li.billing_type) ? li.billing_type : invoiceType;
+        await client.query(
+          `INSERT INTO invoice_line_items
+             (invoice_id, billing_type, description, person, line_date, hours, rate, amount, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [invId, liType,
+           li.description || null,
+           li.person      || null,
+           li.line_date   || null,
+           li.hours  != null ? Number(li.hours)  : null,
+           li.rate   != null ? Number(li.rate)   : null,
+           liAmt,
+           li.sort_order != null ? Number(li.sort_order) : idx]
+        );
+      }
+      if (lineItems.length > 0) changes.push(`line items updated (${lineItems.length} lines)`);
+    }
+
     if (changes.length > 0) {
       await logInvoice(client, invId, 'edited', changes.join('; '), req.session.userId);
     }

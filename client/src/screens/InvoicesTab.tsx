@@ -239,7 +239,12 @@ function BudgetLinePicker({ lines, value, onChange }: {
 
 // ─── Invoice list ─────────────────────────────────────────────────────────────
 
-function InvoiceList({ invoices, onUpload, phaseId }: { invoices: any[]; onUpload: () => void; phaseId: number }) {
+function InvoiceList({ invoices, onUpload, phaseId, onEdit }: {
+  invoices: any[];
+  onUpload: () => void;
+  phaseId: number;
+  onEdit: (id: number) => void;
+}) {
   const [pdfRef, setPdfRef] = useState<string | null>(null);
   const [panelContractId, setPanelContractId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
@@ -323,6 +328,9 @@ function InvoiceList({ invoices, onUpload, phaseId }: { invoices: any[]; onUploa
                         PDF
                       </button>
                     )}
+                    <button className={styles.editBtn} onClick={() => onEdit(inv.id)} title="Edit invoice">
+                      Edit
+                    </button>
                     {confirmDeleteId === inv.id ? (
                       <button className={styles.confirmDeleteBtn}
                         onClick={() => deleteMutation.mutate(inv.id)}
@@ -348,7 +356,7 @@ function InvoiceList({ invoices, onUpload, phaseId }: { invoices: any[]; onUploa
 // ─── Upload + review panel ────────────────────────────────────────────────────
 
 function UploadPanel({
-  contracts, budgetLines, qbAccounts, projectId, onClose, onSaved,
+  contracts, budgetLines, qbAccounts, projectId, onClose, onSaved, editId,
 }: {
   contracts: any[];
   budgetLines: any[];
@@ -356,8 +364,9 @@ function UploadPanel({
   projectId: number;
   onClose: () => void;
   onSaved: () => void;
+  editId?: number;
 }) {
-  const [stage, setStage] = useState<Stage>('drop');
+  const [stage, setStage] = useState<Stage>(editId ? 'extracting' : 'drop');
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [fileRef, setFileRef] = useState<string | null>(null);
   const [extracted, setExtracted] = useState<any>(null);
@@ -368,7 +377,48 @@ function UploadPanel({
   const [dragOver, setDragOver] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+  // Only revoke blob URLs, not server URLs
+  useEffect(() => () => { if (pdfUrl?.startsWith('blob:')) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+
+  // Load existing invoice when in edit mode
+  useEffect(() => {
+    if (!editId) return;
+    api.getInvoice(editId).then(inv => {
+      if (inv.file_reference) {
+        setPdfUrl(`/api/files/${encodeURIComponent(inv.file_reference)}`);
+      }
+      setFileRef(inv.file_reference ?? null);
+      setForm({
+        invoice_number:      inv.invoice_number ?? '',
+        vendor_name:         inv.vendor_name ?? '',
+        vendor_id:           null,
+        vendor_is_new:       false,
+        invoice_date:        inv.invoice_date ? String(inv.invoice_date).slice(0, 10) : '',
+        services_thru_date:  '',
+        amount:              inv.amount != null ? String(inv.amount) : '',
+        description:         inv.description ?? '',
+        contract_id:         inv.contract_id ?? null,
+        phase_budget_line_id: inv.phase_budget_line_id ?? null,
+        line_items: (inv.invoice_line_items ?? []).map((li: any) => ({
+          billing_type:             li.billing_type ?? 'fixed',
+          description:              li.description ?? '',
+          person:                   li.person ?? '',
+          line_date:                li.line_date ? String(li.line_date).slice(0, 10) : '',
+          hours:                    li.hours != null ? String(li.hours) : '',
+          rate:                     li.rate != null ? String(li.rate) : '',
+          amount:                   li.amount != null ? String(li.amount) : '',
+          qb_account_id:            li.qb_account_id ?? null,
+          suggested_qb_account_id:  null,
+          qb_suggestion_confidence: null,
+        })),
+        reviewed: true,
+      });
+      setStage('review');
+    }).catch(err => {
+      setExtractError(err.message ?? 'Failed to load invoice');
+      setStage('review');
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFile = useCallback(async (file: File) => {
     const url = URL.createObjectURL(file);
@@ -495,7 +545,11 @@ function UploadPanel({
           })),
       };
       if (form.contract_id) payload.contract_id = form.contract_id;
-      await api.createInvoice(payload);
+      if (editId) {
+        await api.updateInvoice(editId, payload);
+      } else {
+        await api.createInvoice(payload);
+      }
       onSaved();
     } catch (err: any) {
       setSaveError(err.message ?? 'Save failed');
@@ -538,7 +592,10 @@ function UploadPanel({
         {/* Header bar */}
         <div className={styles.formBar}>
           <span className={styles.formBarTitle}>
-            {stage === 'extracting' ? 'Reading invoice…' : stage === 'drop' ? 'New Invoice' : `Invoice${form.invoice_number ? ` #${form.invoice_number}` : ''}`}
+            {stage === 'extracting'
+              ? (editId ? 'Loading invoice…' : 'Reading invoice…')
+              : stage === 'drop' ? 'New Invoice'
+              : `${editId ? 'Edit ' : ''}Invoice${form.invoice_number ? ` #${form.invoice_number}` : ''}`}
           </span>
           <button className={styles.closeBtn} onClick={onClose}>✕</button>
         </div>
@@ -546,8 +603,8 @@ function UploadPanel({
         {stage === 'extracting' && (
           <div className={styles.extractingWrap}>
             <div className={styles.spinner} />
-            <p>Claude is reading your invoice…</p>
-            <p className={styles.extractingSub}>Extracting line items and suggesting QB codes</p>
+            <p>{editId ? 'Loading invoice…' : 'Claude is reading your invoice…'}</p>
+            {!editId && <p className={styles.extractingSub}>Extracting line items and suggesting QB codes</p>}
           </div>
         )}
 
@@ -762,7 +819,7 @@ function UploadPanel({
             <div className={styles.formActions}>
               <button className={styles.cancelBtn} onClick={onClose}>Cancel</button>
               <button className={styles.saveBtn} onClick={handleSave} disabled={saving || !canSave}>
-                {saving ? 'Saving…' : 'Save & Close'}
+                {saving ? 'Saving…' : editId ? 'Save Changes' : 'Save & Close'}
               </button>
             </div>
 
@@ -782,6 +839,7 @@ export default function InvoicesTab() {
   const qc = useQueryClient();
 
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [editInvoiceId, setEditInvoiceId] = useState<number | null>(null);
 
   const { data: invoices = [], isLoading } = useQuery<any[]>({
     queryKey: ['invoices', phaseIdNum],
@@ -813,6 +871,17 @@ export default function InvoicesTab() {
     qc.invalidateQueries({ queryKey: ['budget',        phaseIdNum] });
     qc.invalidateQueries({ queryKey: ['phaseContracts', phaseIdNum] });
     setUploadOpen(false);
+    setEditInvoiceId(null);
+  }
+
+  function handleClose() {
+    setUploadOpen(false);
+    setEditInvoiceId(null);
+  }
+
+  function handleEdit(id: number) {
+    setEditInvoiceId(id);
+    setUploadOpen(true);
   }
 
   if (isLoading) return <div className={styles.splash}>Loading…</div>;
@@ -824,11 +893,12 @@ export default function InvoicesTab() {
         budgetLines={budgetLines}
         qbAccounts={qbAccounts}
         projectId={projectIdNum}
-        onClose={() => setUploadOpen(false)}
+        editId={editInvoiceId ?? undefined}
+        onClose={handleClose}
         onSaved={handleSaved}
       />
     );
   }
 
-  return <InvoiceList invoices={invoices} onUpload={() => setUploadOpen(true)} phaseId={phaseIdNum} />;
+  return <InvoiceList invoices={invoices} onUpload={() => setUploadOpen(true)} phaseId={phaseIdNum} onEdit={handleEdit} />;
 }

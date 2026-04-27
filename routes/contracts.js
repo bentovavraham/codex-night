@@ -361,32 +361,59 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
     const contractId = Number(req.params.id);
     const access = await userCanAccessContract(req.session.userId, contractId);
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
-    const old = await client.query('SELECT * FROM contracts WHERE id = $1', [contractId]);
+    const old = (await client.query('SELECT * FROM contracts WHERE id = $1', [contractId])).rows[0];
     const {
-      vendor_name, description, total_value, earmarked_amount, contract_date,
+      vendor_name, description, total_value, contract_date,
       reference_number, status, file_reference,
+      phase_budget_line_id, contract_line_items: lineItems,
     } = req.body || {};
+
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE contracts SET
-         vendor_name      = COALESCE($2, vendor_name),
-         description      = COALESCE($3, description),
-         total_value      = COALESCE($4, total_value),
-         earmarked_amount = COALESCE($5, earmarked_amount),
-         contract_date    = COALESCE($6, contract_date),
-         reference_number = COALESCE($7, reference_number),
-         status           = COALESCE($8, status),
-         file_reference   = COALESCE($9, file_reference),
-         updated_at       = NOW()
+         vendor_name          = COALESCE($2, vendor_name),
+         description          = $3,
+         total_value          = COALESCE($4, total_value),
+         contract_date        = $5,
+         reference_number     = $6,
+         status               = COALESCE($7, status),
+         file_reference       = COALESCE($8, file_reference),
+         phase_budget_line_id = $9,
+         updated_at           = NOW()
        WHERE id = $1 RETURNING *`,
-      [contractId, vendor_name ?? null, description ?? null, total_value ?? null,
-       earmarked_amount ?? null, contract_date ?? null, reference_number ?? null,
-       status ?? null, file_reference ?? null]);
+      [contractId,
+       vendor_name ?? null,
+       description ?? null,
+       total_value != null ? Number(total_value) : null,
+       contract_date ?? null,
+       reference_number ?? null,
+       status ?? null,
+       file_reference ?? null,
+       phase_budget_line_id != null ? Number(phase_budget_line_id) : null]);
+
+    // Replace line items when provided (full replace)
+    if (Array.isArray(lineItems)) {
+      await client.query('DELETE FROM contract_line_items WHERE contract_id = $1', [contractId]);
+      for (let i = 0; i < lineItems.length; i++) {
+        const li = lineItems[i];
+        await client.query(
+          `INSERT INTO contract_line_items
+             (contract_id, billing_type, description, budgeted_amount, sort_order)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [contractId,
+           ['fixed', 'tm', 'expense'].includes(li.billing_type) ? li.billing_type : 'fixed',
+           li.description || null,
+           Number(li.budgeted_amount) || 0,
+           i]
+        );
+      }
+    }
+
     const changes = [];
-    const o = old.rows[0];
-    if (vendor_name && vendor_name !== o.vendor_name) changes.push(`vendor: ${o.vendor_name} → ${vendor_name}`);
-    if (total_value != null && Number(total_value) !== Number(o.total_value)) changes.push(`total: $${Number(o.total_value).toFixed(2)} → $${Number(total_value).toFixed(2)}`);
-    if (status && status !== o.status) changes.push(`status: ${o.status} → ${status}`);
+    if (vendor_name && vendor_name !== old.vendor_name) changes.push(`vendor: ${old.vendor_name} → ${vendor_name}`);
+    if (total_value != null && Number(total_value) !== Number(old.total_value)) changes.push(`total: $${Number(old.total_value).toFixed(2)} → $${Number(total_value).toFixed(2)}`);
+    if (status && status !== old.status) changes.push(`status: ${old.status} → ${status}`);
+    if (Array.isArray(lineItems)) changes.push(`tasks updated (${lineItems.length} lines)`);
     if (changes.length > 0) {
       await client.query(
         `INSERT INTO contract_logs (contract_id, action, detail, changed_by) VALUES ($1,'edited',$2,$3)`,

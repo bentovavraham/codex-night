@@ -195,6 +195,15 @@
 /* Confidence dot */
 .confDot { display:inline-block; width:6px; height:6px; border-radius:50%; flex-shrink:0; }
 
+.editBtn {
+  height: 20px; padding: 0 7px;
+  font-size: 10px; font-weight: 600;
+  background: var(--bg-2); color: var(--text-2);
+  border: 1px solid var(--border); border-radius: 3px; cursor: pointer;
+  white-space: nowrap;
+}
+.editBtn:hover { border-color: var(--accent); color: var(--accent); }
+
 .deleteBtn {
   width: 20px; height: 20px; border: 1px solid var(--border); border-radius: 3px;
   background: transparent; color: var(--text-4); cursor: pointer; font-size: 10px;

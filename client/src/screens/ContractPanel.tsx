@@ -52,9 +52,10 @@ function PdfModal({ fileRef, onClose }: { fileRef: string; onClose: () => void }
 interface Props {
   contractId: number;
   onClose: () => void;
+  onEdit?: () => void;
 }
 
-export function ContractPanel({ contractId, onClose }: Props) {
+export function ContractPanel({ contractId, onClose, onEdit }: Props) {
   const [pdfRef, setPdfRef] = useState<string | null>(null);
   const [confirmDeleteContract, setConfirmDeleteContract] = useState(false);
   const [confirmDeleteInvId, setConfirmDeleteInvId] = useState<number | null>(null);
@@ -109,6 +110,11 @@ export function ContractPanel({ contractId, onClose }: Props) {
             )}
           </div>
           <div className={styles.panelBarActions}>
+            {onEdit && (
+              <button className={styles.editPanelBtn} onClick={onEdit} title="Edit this contract">
+                Edit
+              </button>
+            )}
             {confirmDeleteContract ? (
               <button className={styles.confirmDeleteBtn}
                 onClick={() => deleteContract.mutate()}

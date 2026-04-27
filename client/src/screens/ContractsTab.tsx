@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './ContractsTab.module.css';
+import { ContractPanel } from './ContractPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -193,7 +194,13 @@ function BudgetLinePicker({ lines, value, onChange }: {
 
 // ─── Contract list ────────────────────────────────────────────────────────────
 
-function ContractList({ contracts, phaseId, onUpload }: { contracts: any[]; phaseId: number; onUpload: () => void }) {
+function ContractList({ contracts, phaseId, onUpload, onEdit, onView }: {
+  contracts: any[];
+  phaseId: number;
+  onUpload: () => void;
+  onEdit: (id: number) => void;
+  onView: (id: number) => void;
+}) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const qc = useQueryClient();
 
@@ -233,7 +240,9 @@ function ContractList({ contracts, phaseId, onUpload }: { contracts: any[]; phas
             </thead>
             <tbody>
               {contracts.map((c: any) => (
-                <tr key={c.id} className={styles.listRow} onClick={e => e.stopPropagation()}>
+                <tr key={c.id} className={styles.listRow}
+                  style={{ cursor: 'pointer' }}
+                  onClick={e => { e.stopPropagation(); onView(c.id); }}>
                   <td className={styles.ltd}>{c.vendor_name}</td>
                   <td className={`${styles.ltd} ${styles.dim}`}>{c.budget_line_name ?? '—'}</td>
                   <td className={`${styles.ltd} ${styles.mono}`}>{c.reference_number || '—'}</td>
@@ -248,18 +257,23 @@ function ContractList({ contracts, phaseId, onUpload }: { contracts: any[]; phas
                       {STATUS_LABEL[c.status] ?? c.status}
                     </span>
                   </td>
-                  <td className={styles.ltd}>
-                    {confirmDeleteId === c.id ? (
-                      <button className={styles.confirmDeleteBtn}
-                        onClick={() => deleteMutation.mutate(c.id)}
-                        disabled={deleteMutation.isPending}>
-                        Confirm?
+                  <td className={styles.ltd} onClick={e => e.stopPropagation()}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <button className={styles.editBtn} onClick={() => onEdit(c.id)} title="Edit contract">
+                        Edit
                       </button>
-                    ) : (
-                      <button className={styles.deleteBtn} onClick={() => setConfirmDeleteId(c.id)} title="Delete contract">
-                        ✕
-                      </button>
-                    )}
+                      {confirmDeleteId === c.id ? (
+                        <button className={styles.confirmDeleteBtn}
+                          onClick={() => deleteMutation.mutate(c.id)}
+                          disabled={deleteMutation.isPending}>
+                          Confirm?
+                        </button>
+                      ) : (
+                        <button className={styles.deleteBtn} onClick={() => setConfirmDeleteId(c.id)} title="Delete contract">
+                          ✕
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -273,14 +287,15 @@ function ContractList({ contracts, phaseId, onUpload }: { contracts: any[]; phas
 
 // ─── Upload + review panel ────────────────────────────────────────────────────
 
-function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved }: {
+function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, editId }: {
   budgetLines: any[];
   qbAccounts: QbAccount[];
   projectId: number;
   onClose: () => void;
   onSaved: () => void;
+  editId?: number;
 }) {
-  const [stage,        setStage]        = useState<Stage>('drop');
+  const [stage,        setStage]        = useState<Stage>(editId ? 'extracting' : 'drop');
   const [pdfUrl,       setPdfUrl]       = useState<string | null>(null);
   const [fileRef,      setFileRef]      = useState<string | null>(null);
   const [extracted,    setExtracted]    = useState<any>(null);
@@ -291,7 +306,40 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved }: {
   const [dragOver,     setDragOver]     = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+  // Only revoke blob URLs, not server URLs
+  useEffect(() => () => { if (pdfUrl?.startsWith('blob:')) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+
+  // Load existing contract when in edit mode
+  useEffect(() => {
+    if (!editId) return;
+    api.getContract(editId).then(c => {
+      if (c.file_reference) {
+        setPdfUrl(`/api/files/${encodeURIComponent(c.file_reference)}`);
+      }
+      setFileRef(c.file_reference ?? null);
+      setForm({
+        vendor_name:          c.vendor_name ?? '',
+        reference_number:     c.reference_number ?? '',
+        contract_date:        c.contract_date ? String(c.contract_date).slice(0, 10) : '',
+        description:          c.description ?? '',
+        phase_budget_line_id: c.phase_budget_line_id ?? null,
+        status:               c.status ?? 'draft',
+        line_items: (c.task_items ?? []).map((li: any) => ({
+          billing_type:             li.billing_type ?? 'fixed',
+          description:              li.description ?? '',
+          budgeted_amount:          li.budgeted_amount != null ? String(li.budgeted_amount) : '',
+          qb_account_id:            li.qb_account_id ?? null,
+          suggested_qb_account_id:  null,
+          qb_suggestion_confidence: null,
+        })),
+        reviewed: true,
+      });
+      setStage('review');
+    }).catch(err => {
+      setExtractError(err.message ?? 'Failed to load contract');
+      setStage('review');
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFile = useCallback(async (file: File) => {
     const url = URL.createObjectURL(file);
@@ -374,7 +422,7 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved }: {
 
     setSaving(true);
     try {
-      await api.createContract({
+      const payload = {
         project_id:           projectId,
         phase_budget_line_id: form.phase_budget_line_id,
         vendor_name:          form.vendor_name.trim(),
@@ -393,7 +441,12 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved }: {
             qb_account_id:   li.qb_account_id ?? li.suggested_qb_account_id ?? null,
             sort_order:      i,
           })),
-      });
+      };
+      if (editId) {
+        await api.updateContract(editId, payload);
+      } else {
+        await api.createContract(payload);
+      }
       onSaved();
     } catch (err: any) {
       setSaveError(err.message ?? 'Save failed');
@@ -433,9 +486,10 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved }: {
       <div className={styles.formPane}>
         <div className={styles.formBar}>
           <span className={styles.formBarTitle}>
-            {stage === 'extracting' ? 'Reading contract…'
+            {stage === 'extracting'
+              ? (editId ? 'Loading contract…' : 'Reading contract…')
               : stage === 'drop' ? 'New Contract'
-              : `Contract${form.vendor_name ? ` · ${form.vendor_name}` : ''}`}
+              : `${editId ? 'Edit ' : ''}Contract${form.vendor_name ? ` · ${form.vendor_name}` : ''}`}
           </span>
           <button className={styles.closeBtn} onClick={onClose}>✕</button>
         </div>
@@ -443,8 +497,8 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved }: {
         {stage === 'extracting' && (
           <div className={styles.extractingWrap}>
             <div className={styles.spinner} />
-            <p>Claude is reading your contract…</p>
-            <p className={styles.extractingSub}>Extracting tasks and suggesting QB codes</p>
+            <p>{editId ? 'Loading contract…' : 'Claude is reading your contract…'}</p>
+            {!editId && <p className={styles.extractingSub}>Extracting tasks and suggesting QB codes</p>}
           </div>
         )}
 
@@ -596,7 +650,7 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved }: {
             <div className={styles.formActions}>
               <button className={styles.cancelBtn} onClick={onClose}>Cancel</button>
               <button className={styles.saveBtn} onClick={handleSave} disabled={saving || !canSave}>
-                {saving ? 'Saving…' : 'Save & Close'}
+                {saving ? 'Saving…' : editId ? 'Save Changes' : 'Save & Close'}
               </button>
             </div>
 
@@ -614,7 +668,9 @@ export default function ContractsTab() {
   const phaseIdNum   = Number(phaseId);
   const projectIdNum = Number(projectId);
   const qc = useQueryClient();
-  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadOpen,      setUploadOpen]      = useState(false);
+  const [editContractId,  setEditContractId]  = useState<number | null>(null);
+  const [panelContractId, setPanelContractId] = useState<number | null>(null);
 
   const { data: contracts = [], isLoading } = useQuery<any[]>({
     queryKey: ['phaseContracts', phaseIdNum],
@@ -638,7 +694,20 @@ export default function ContractsTab() {
   function handleSaved() {
     qc.invalidateQueries({ queryKey: ['phaseContracts', phaseIdNum] });
     qc.invalidateQueries({ queryKey: ['budget',         phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['contractDetail', editContractId] });
     setUploadOpen(false);
+    setEditContractId(null);
+  }
+
+  function handleClose() {
+    setUploadOpen(false);
+    setEditContractId(null);
+  }
+
+  function handleEdit(id: number) {
+    setPanelContractId(null);
+    setEditContractId(id);
+    setUploadOpen(true);
   }
 
   if (isLoading) return <div className={styles.splash}>Loading…</div>;
@@ -649,11 +718,29 @@ export default function ContractsTab() {
         budgetLines={budgetLines}
         qbAccounts={qbAccounts}
         projectId={projectIdNum}
-        onClose={() => setUploadOpen(false)}
+        editId={editContractId ?? undefined}
+        onClose={handleClose}
         onSaved={handleSaved}
       />
     );
   }
 
-  return <ContractList contracts={contracts} phaseId={phaseIdNum} onUpload={() => setUploadOpen(true)} />;
+  return (
+    <>
+      {panelContractId && (
+        <ContractPanel
+          contractId={panelContractId}
+          onClose={() => setPanelContractId(null)}
+          onEdit={() => handleEdit(panelContractId)}
+        />
+      )}
+      <ContractList
+        contracts={contracts}
+        phaseId={phaseIdNum}
+        onUpload={() => setUploadOpen(true)}
+        onEdit={handleEdit}
+        onView={(id) => setPanelContractId(id)}
+      />
+    </>
+  );
 }
