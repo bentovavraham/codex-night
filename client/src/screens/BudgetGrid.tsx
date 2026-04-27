@@ -444,7 +444,7 @@ export default function BudgetGrid() {
                           <EditCell value={row.budgeted_amount} rowId={row.id} field="budgeted_amount" numeric
                             isActive={isA('budgeted_amount')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
                             onCommit={handleCommit} onTabNext={handleTabNext}
-                            className={`${styles.tdMoney} ${row.source === 'template' && !row.amount_modified ? styles.amtTemplate : styles.amtModified}`} />
+                            className={`${styles.tdMoney} ${(row.source ?? 'template') === 'template' && !row.amount_modified ? styles.amtTemplate : styles.amtModified}`} />
                           <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.fixed_charges)}</td>
                           <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.tm_charges)}</td>
                           <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.expense_charges)}</td>
