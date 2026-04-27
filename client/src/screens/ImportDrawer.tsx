@@ -1,9 +1,10 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './ImportDrawer.module.css';
 
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const usd2 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 
 interface ImportItem {
   id: number;
@@ -26,12 +27,8 @@ interface Props {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  queued: 'Queued',
-  extracting: 'Extracting…',
-  needs_review: 'Needs Review',
-  confirmed: 'Confirmed',
-  failed: 'Failed',
-  discarded: 'Discarded',
+  queued: 'Queued', extracting: 'Extracting…', needs_review: 'Needs Review',
+  confirmed: 'Confirmed', failed: 'Failed', discarded: 'Discarded',
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -42,190 +39,437 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function TypeChip({ type, onClick }: { type: string | null; onClick: (e: React.MouseEvent) => void }) {
+function TypeChip({ type, onClick }: { type: string | null; onClick?: (e: React.MouseEvent) => void }) {
   return (
     <button
       className={`${styles.typeChip} ${type === 'contract' ? styles.typeContract : type === 'invoice' ? styles.typeInvoice : styles.typeUnknown}`}
       onClick={onClick}
-      title="Click to flip type"
+      title={onClick ? 'Click to flip type' : undefined}
+      style={onClick ? undefined : { cursor: 'default' }}
     >
       {type ? type.toUpperCase() : '?'}
     </button>
   );
 }
 
-// ── Review Form ─────────────────────────────────────────────────────────────
+// ── Budget Line Picker ────────────────────────────────────────────────────────
 
-interface ReviewFormProps {
+function BudgetLinePicker({ lines, value, onChange }: {
+  lines: any[]; value: number | null; onChange: (id: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selected = lines.find(l => l.id === value) ?? null;
+  const filtered = useMemo(() => {
+    if (!query.trim()) return lines;
+    const q = query.toLowerCase();
+    return lines.filter(l => l.task_name.toLowerCase().includes(q) || (l.discipline || '').toLowerCase().includes(q));
+  }, [lines, query]);
+
+  useEffect(() => {
+    function onOut(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    if (open) document.addEventListener('mousedown', onOut);
+    return () => document.removeEventListener('mousedown', onOut);
+  }, [open]);
+
+  return (
+    <div className={styles.blPicker} ref={ref}>
+      <div className={`${styles.blDisplay} ${!selected ? styles.blEmpty : ''}`}
+        onClick={() => { setQuery(''); setOpen(true); setTimeout(() => inputRef.current?.focus(), 30); }}>
+        {selected
+          ? <><span className={styles.blName}>{selected.task_name}{selected.discipline ? ` · ${selected.discipline}` : ''}</span>
+              <button className={styles.blClear} onClick={e => { e.stopPropagation(); onChange(null); }}>✕</button></>
+          : <span className={styles.blPlaceholder}>Search tasks…</span>}
+      </div>
+      {open && (
+        <div className={styles.blDropdown}>
+          <input ref={inputRef} className={styles.blSearch} value={query}
+            onChange={e => setQuery(e.target.value)} placeholder="Type task name or discipline…" />
+          <div className={styles.blList}>
+            {filtered.map(l => (
+              <div key={l.id}
+                className={`${styles.blOption} ${l.id === value ? styles.blOptionSelected : ''}`}
+                onMouseDown={() => { onChange(l.id); setOpen(false); setQuery(''); }}>
+                {l.task_name}{l.discipline ? ` · ${l.discipline}` : ''}
+              </div>
+            ))}
+            {filtered.length === 0 && <div className={styles.blNoMatch}>No match</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Duplicate Warning Banner ──────────────────────────────────────────────────
+
+function DupBanner({ matches, acknowledged, onAck }: {
+  matches: any[]; acknowledged: boolean; onAck: () => void;
+}) {
+  if (!matches.length) return null;
+  const exact = matches.filter(m => m.match_type === 'exact');
+  const fuzzy = matches.filter(m => m.match_type === 'fuzzy');
+
+  return (
+    <div className={`${styles.dupBanner} ${exact.length ? styles.dupBannerExact : styles.dupBannerFuzzy}`}>
+      <div className={styles.dupTitle}>
+        {exact.length ? '⚠ Possible Duplicate Detected' : '~ Similar Record Found'}
+      </div>
+      <div className={styles.dupList}>
+        {matches.map((m, i) => (
+          <div key={i} className={styles.dupRow}>
+            <span className={`${styles.dupTag} ${m.match_type === 'exact' ? styles.dupTagExact : styles.dupTagFuzzy}`}>
+              {m.match_type === 'exact' ? 'EXACT' : 'SIMILAR'}
+            </span>
+            <span className={styles.dupDetail}>
+              {m.vendor_name} — {m.invoice_number || m.reference_number || '—'} — {usd2.format(Number(m.amount))}
+              {(m.invoice_date || m.contract_date) && ` — ${String(m.invoice_date || m.contract_date).slice(0, 10)}`}
+            </span>
+            <span className={`${styles.dupStatus}`}>{m.status}</span>
+            <span className={styles.dupReason}>{m.reason}</span>
+          </div>
+        ))}
+      </div>
+      {!acknowledged ? (
+        <label className={styles.dupAck}>
+          <input type="checkbox" onChange={e => { if (e.target.checked) onAck(); }} />
+          <span>I reviewed the above and confirm this is not a duplicate</span>
+        </label>
+      ) : (
+        <div className={styles.dupAcked}>✓ Duplicate check acknowledged</div>
+      )}
+    </div>
+  );
+}
+
+// ── Full-Screen Review Overlay ────────────────────────────────────────────────
+
+interface LineItem {
+  billing_type: 'fixed' | 'tm' | 'expense';
+  description: string;
+  budgeted_amount: string;
+}
+
+function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving }: {
   item: ImportItem;
   budgetLines: any[];
   onConfirm: (formData: any) => Promise<void>;
   onDiscard: () => Promise<void>;
   onBack: () => void;
   saving: boolean;
-}
-
-function ReviewForm({ item, budgetLines, onConfirm, onDiscard, onBack, saving }: ReviewFormProps) {
+}) {
   const ext = item.extracted_data || {};
   const isContract = item.doc_type === 'contract';
 
-  const [vendor, setVendor] = useState<string>(ext.vendor_name || '');
-  const [description, setDescription] = useState<string>(ext.description || ext.summary || '');
-  const [budgetLineId, setBudgetLineId] = useState<string>(
-    item.suggested_budget_line_id ? String(item.suggested_budget_line_id) : ''
+  // Common fields
+  const [vendor, setVendor] = useState(ext.vendor_name || '');
+  const [description, setDescription] = useState(ext.description || ext.summary || '');
+  const [budgetLineId, setBudgetLineId] = useState<number | null>(item.suggested_budget_line_id ?? null);
+  const [reviewed, setReviewed] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Contract fields
+  const [totalValue, setTotalValue] = useState(ext.total_value ? String(ext.total_value) : '');
+  const [contractDate, setContractDate] = useState(ext.contract_date || '');
+  const [referenceNumber, setReferenceNumber] = useState(ext.reference_number || '');
+  const [contractStatus, setContractStatus] = useState('active');
+  const [lineItems, setLineItems] = useState<LineItem[]>(() =>
+    (ext.line_items || []).map((li: any) => ({
+      billing_type: li.billing_type || 'fixed',
+      description: li.description || '',
+      budgeted_amount: li.budgeted_amount != null ? String(li.budgeted_amount) : '',
+    }))
   );
 
-  // Contract-specific
-  const [totalValue, setTotalValue] = useState<string>(ext.total_value ? String(ext.total_value) : '');
-  const [contractDate, setContractDate] = useState<string>(ext.contract_date || '');
-  const [referenceNumber, setReferenceNumber] = useState<string>(ext.reference_number || '');
-  const [contractStatus, setContractStatus] = useState<string>('active');
+  // Invoice fields
+  const [invoiceNumber, setInvoiceNumber] = useState(ext.invoice_number || '');
+  const [amount, setAmount] = useState(ext.amount ? String(ext.amount) : '');
+  const [invoiceDate, setInvoiceDate] = useState(ext.invoice_date || '');
+  const [invoiceType, setInvoiceType] = useState('fixed');
+  const [invoiceStatus, setInvoiceStatus] = useState('pending');
 
-  // Invoice-specific
-  const [invoiceNumber, setInvoiceNumber] = useState<string>(ext.invoice_number || '');
-  const [amount, setAmount] = useState<string>(ext.amount ? String(ext.amount) : '');
-  const [invoiceDate, setInvoiceDate] = useState<string>(ext.invoice_date || '');
-  const [invoiceType] = useState<string>('fixed');
-  const [invoiceStatus, setInvoiceStatus] = useState<string>('pending');
+  // Duplicate check
+  const [dupMatches, setDupMatches] = useState<any[]>([]);
+  const [dupAcked, setDupAcked] = useState(false);
+  const [dupLoading, setDupLoading] = useState(true);
 
-  const handleConfirm = async () => {
-    const base = {
-      vendor_name: vendor,
-      description,
-      phase_budget_line_id: budgetLineId ? Number(budgetLineId) : null,
-    };
-    if (isContract) {
-      await onConfirm({
-        ...base,
-        total_value: totalValue,
-        contract_date: contractDate || null,
-        reference_number: referenceNumber,
-        status: contractStatus,
-        line_items: ext.line_items || [],
-      });
-    } else {
-      await onConfirm({
-        ...base,
-        invoice_number: invoiceNumber,
-        amount,
-        invoice_date: invoiceDate || null,
-        invoice_type: invoiceType,
-        status: invoiceStatus,
-      });
-    }
-  };
+  useEffect(() => {
+    setDupLoading(true);
+    api.checkImportDuplicates(item.id)
+      .then(r => { setDupMatches(r.matches); })
+      .catch(() => { setDupMatches([]); })
+      .finally(() => setDupLoading(false));
+  }, [item.id]);
+
+  const pdfSrc = item.file_reference
+    ? `/api/files/${encodeURIComponent(item.file_reference)}`
+    : null;
+
+  const fixedTotal = lineItems
+    .filter(li => li.billing_type === 'fixed')
+    .reduce((s, li) => s + (Number(li.budgeted_amount) || 0), 0);
+  const hasTm = lineItems.some(li => li.billing_type === 'tm');
+
+  const dupBlocked = dupMatches.length > 0 && !dupAcked;
+  const canConfirm = reviewed && !!vendor.trim() && !dupBlocked && !saving;
+
+  function addLine() {
+    setLineItems(li => [...li, { billing_type: 'fixed', description: '', budgeted_amount: '' }]);
+  }
+  function removeLine(idx: number) {
+    setLineItems(li => li.filter((_, i) => i !== idx));
+  }
+  function setLine(idx: number, patch: Partial<LineItem>) {
+    setLineItems(li => { const n = [...li]; n[idx] = { ...n[idx], ...patch }; return n; });
+  }
+
+  async function handleConfirm() {
+    setSaveError(null);
+    if (!vendor.trim()) return setSaveError('Vendor name is required.');
+    if (!budgetLineId) return setSaveError('Budget line is required.');
+    if (!reviewed) return setSaveError('Please confirm you have reviewed the details.');
+    if (dupBlocked) return setSaveError('Please acknowledge the duplicate warning.');
+
+    const base = { vendor_name: vendor.trim(), description, phase_budget_line_id: budgetLineId };
+    const formData = isContract
+      ? { ...base, total_value: Number(totalValue) || 0, contract_date: contractDate || null,
+          reference_number: referenceNumber || null, status: contractStatus,
+          line_items: lineItems.filter(li => li.description.trim()).map(li => ({
+            billing_type: li.billing_type, description: li.description,
+            budgeted_amount: Number(li.budgeted_amount) || 0,
+          })) }
+      : { ...base, invoice_number: invoiceNumber, amount: Number(amount) || 0,
+          invoice_date: invoiceDate || null, invoice_type: invoiceType, status: invoiceStatus };
+    await onConfirm(formData);
+  }
 
   return (
-    <div className={styles.reviewForm}>
-      <div className={styles.reviewHeader}>
-        <button className={styles.backBtn} onClick={onBack}>← Queue</button>
-        <div className={styles.reviewTitle}>
-          <span className={`${styles.typeChip} ${isContract ? styles.typeContract : styles.typeInvoice}`}>
-            {isContract ? 'CONTRACT' : 'INVOICE'}
-          </span>
-          <span className={styles.reviewFilename}>{item.original_filename}</span>
-        </div>
+    <div className={styles.reviewOverlay}>
+      {/* Left: PDF */}
+      <div className={styles.reviewPdfPane}>
+        {pdfSrc
+          ? <iframe src={pdfSrc} className={styles.reviewPdfFrame} title="Document" />
+          : <div className={styles.reviewNoPdf}>No PDF available</div>}
       </div>
 
-      <div className={styles.reviewBody}>
-        <div className={styles.fieldGroup}>
-          <label className={styles.fieldLabel}>Vendor</label>
-          <input className={styles.fieldInput} value={vendor} onChange={e => setVendor(e.target.value)} />
-        </div>
-
-        <div className={styles.fieldGroup}>
-          <label className={styles.fieldLabel}>Description</label>
-          <textarea className={styles.fieldTextarea} value={description} onChange={e => setDescription(e.target.value)} rows={3} />
-        </div>
-
-        <div className={styles.fieldGroup}>
-          <label className={styles.fieldLabel}>Budget Line</label>
-          <select className={styles.fieldSelect} value={budgetLineId} onChange={e => setBudgetLineId(e.target.value)}>
-            <option value="">— Unassigned —</option>
-            {budgetLines.map((bl: any) => (
-              <option key={bl.id} value={bl.id}>{bl.task_name}{bl.discipline ? ` · ${bl.discipline}` : ''}</option>
-            ))}
-          </select>
-        </div>
-
-        {isContract ? (
-          <>
-            <div className={styles.fieldRow}>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Total Value</label>
-                <input className={styles.fieldInput} value={totalValue} onChange={e => setTotalValue(e.target.value)} type="number" min="0" step="0.01" />
-              </div>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Contract Date</label>
-                <input className={styles.fieldInput} value={contractDate} onChange={e => setContractDate(e.target.value)} type="date" />
-              </div>
-            </div>
-            <div className={styles.fieldRow}>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Reference #</label>
-                <input className={styles.fieldInput} value={referenceNumber} onChange={e => setReferenceNumber(e.target.value)} />
-              </div>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Status</label>
-                <select className={styles.fieldSelect} value={contractStatus} onChange={e => setContractStatus(e.target.value)}>
-                  <option value="draft">Draft</option>
-                  <option value="pending">Pending</option>
-                  <option value="active">Active</option>
-                  <option value="completed">Completed</option>
-                  <option value="voided">Voided</option>
-                </select>
-              </div>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className={styles.fieldRow}>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Invoice #</label>
-                <input className={styles.fieldInput} value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} />
-              </div>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Amount</label>
-                <input className={styles.fieldInput} value={amount} onChange={e => setAmount(e.target.value)} type="number" min="0" step="0.01" />
-              </div>
-            </div>
-            <div className={styles.fieldRow}>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Invoice Date</label>
-                <input className={styles.fieldInput} value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} type="date" />
-              </div>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Status</label>
-                <select className={styles.fieldSelect} value={invoiceStatus} onChange={e => setInvoiceStatus(e.target.value)}>
-                  <option value="pending">Pending</option>
-                  <option value="pm_approved">PM Approved</option>
-                  <option value="approved">Approved</option>
-                </select>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* Line items preview */}
-        {ext.line_items && ext.line_items.length > 0 && (
-          <div className={styles.lineItemsPreview}>
-            <div className={styles.lineItemsHeader}>Line Items ({ext.line_items.length})</div>
-            {ext.line_items.map((li: any, idx: number) => (
-              <div key={idx} className={styles.lineItemRow}>
-                <span className={styles.lineItemType}>{li.billing_type}</span>
-                <span className={styles.lineItemDesc}>{li.description}</span>
-                <span className={styles.lineItemAmt}>{usd.format(Number(li.budgeted_amount ?? li.amount ?? 0))}</span>
-              </div>
-            ))}
+      {/* Right: Form */}
+      <div className={styles.reviewFormPane}>
+        {/* Bar */}
+        <div className={styles.reviewBar}>
+          <button className={styles.reviewBackBtn} onClick={onBack}>← Queue</button>
+          <div className={styles.reviewBarTitle}>
+            <TypeChip type={item.doc_type} />
+            <span className={styles.reviewBarFile} title={item.original_filename}>{item.original_filename}</span>
           </div>
-        )}
-      </div>
+          <button className={styles.reviewCloseBtn} onClick={onBack}>✕</button>
+        </div>
 
-      <div className={styles.reviewFooter}>
-        <button className={styles.discardBtn} onClick={onDiscard} disabled={saving}>Discard</button>
-        <button className={styles.confirmBtn} onClick={handleConfirm} disabled={saving}>
-          {saving ? 'Saving…' : 'Confirm & Save'}
-        </button>
+        {/* Duplicate warning */}
+        {!dupLoading && (
+          <DupBanner matches={dupMatches} acknowledged={dupAcked} onAck={() => setDupAcked(true)} />
+        )}
+        {dupLoading && <div className={styles.dupChecking}>Checking for duplicates…</div>}
+
+        {/* Scrollable form body */}
+        <div className={styles.reviewFormScroll}>
+
+          {/* Vendor */}
+          <div className={styles.rGroup}>
+            <label className={styles.rLabel}>Vendor / Payee</label>
+            <input className={styles.rInput} value={vendor} onChange={e => setVendor(e.target.value)}
+              placeholder="Who is this from?" />
+          </div>
+
+          {/* Budget line */}
+          <div className={styles.rGroup}>
+            <label className={styles.rLabel}>Task / Budget Line <span className={styles.rRequired}>required</span></label>
+            <BudgetLinePicker lines={budgetLines} value={budgetLineId} onChange={setBudgetLineId} />
+          </div>
+
+          {isContract ? (
+            <>
+              <div className={styles.rRow}>
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>Total Value</label>
+                  <input className={`${styles.rInput} ${styles.mono}`} value={totalValue}
+                    onChange={e => setTotalValue(e.target.value)} type="number" min="0" step="0.01" placeholder="0.00" />
+                </div>
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>Contract Date</label>
+                  <input className={styles.rInput} value={contractDate}
+                    onChange={e => setContractDate(e.target.value)} type="date" />
+                </div>
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>Ref / Contract #</label>
+                  <input className={styles.rInput} value={referenceNumber}
+                    onChange={e => setReferenceNumber(e.target.value)} placeholder="e.g. 24117" />
+                </div>
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>Status</label>
+                  <select className={styles.rSelect} value={contractStatus} onChange={e => setContractStatus(e.target.value)}>
+                    <option value="draft">Draft</option>
+                    <option value="pending">Pending</option>
+                    <option value="active">Active</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className={styles.rGroup}>
+                <label className={styles.rLabel}>Scope / Description</label>
+                <textarea className={styles.rTextarea} value={description}
+                  onChange={e => setDescription(e.target.value)} rows={3} placeholder="Brief description…" />
+              </div>
+
+              {/* Line items table */}
+              <div className={styles.rSection}>
+                <div className={styles.rSectionTitle}>Contract Tasks</div>
+                <table className={styles.rTable}>
+                  <thead>
+                    <tr className={styles.rThead}>
+                      <th className={styles.rColType}>TYPE</th>
+                      <th className={styles.rColDesc}>DESCRIPTION</th>
+                      <th className={`${styles.rColAmt} ${styles.right}`}>AMOUNT</th>
+                      <th className={styles.rColDel} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lineItems.map((li, i) => (
+                      <tr key={i} className={styles.rTrow}>
+                        <td className={styles.rColType}>
+                          <select className={styles.rTypeSelect} value={li.billing_type}
+                            onChange={e => setLine(i, { billing_type: e.target.value as LineItem['billing_type'] })}>
+                            <option value="fixed">Fixed</option>
+                            <option value="tm">T&amp;M</option>
+                            <option value="expense">Expense</option>
+                          </select>
+                        </td>
+                        <td className={styles.rColDesc}>
+                          <input className={styles.rDescInput} value={li.description}
+                            onChange={e => setLine(i, { description: e.target.value })}
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addLine(); } }}
+                            placeholder="Task description" />
+                        </td>
+                        <td className={`${styles.rColAmt} ${styles.right}`}>
+                          {li.billing_type === 'tm'
+                            ? <span className={styles.tmTag}>T&amp;M</span>
+                            : <input className={`${styles.rAmtInput} ${styles.mono}`}
+                                value={li.budgeted_amount}
+                                onChange={e => setLine(i, { budgeted_amount: e.target.value })}
+                                placeholder="0.00"
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addLine(); } }} />}
+                        </td>
+                        <td className={styles.rColDel}>
+                          <button className={styles.rDelBtn} onClick={() => removeLine(i)}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className={styles.rTableFooter}>
+                  <button className={styles.rAddBtn} onClick={addLine}>+ Add task</button>
+                  <div className={styles.rTableTotal}>
+                    {fixedTotal > 0 && <span className={styles.mono}>{usd2.format(fixedTotal)} fixed</span>}
+                    {hasTm && <span className={styles.tmTag}>+ T&amp;M</span>}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className={styles.rRow}>
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>Invoice #</label>
+                  <input className={styles.rInput} value={invoiceNumber}
+                    onChange={e => setInvoiceNumber(e.target.value)} placeholder="e.g. INV-2024-001" />
+                </div>
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>Amount</label>
+                  <input className={`${styles.rInput} ${styles.mono}`} value={amount}
+                    onChange={e => setAmount(e.target.value)} type="number" min="0" step="0.01" placeholder="0.00" />
+                </div>
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>Invoice Date</label>
+                  <input className={styles.rInput} value={invoiceDate}
+                    onChange={e => setInvoiceDate(e.target.value)} type="date" />
+                </div>
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>Type</label>
+                  <select className={styles.rSelect} value={invoiceType} onChange={e => setInvoiceType(e.target.value)}>
+                    <option value="fixed">Fixed</option>
+                    <option value="tm">T&amp;M</option>
+                    <option value="expense">Expense</option>
+                  </select>
+                </div>
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>Status</label>
+                  <select className={styles.rSelect} value={invoiceStatus} onChange={e => setInvoiceStatus(e.target.value)}>
+                    <option value="pending">Pending</option>
+                    <option value="pm_approved">PM Approved</option>
+                    <option value="approved">Approved</option>
+                    <option value="paid">Paid</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className={styles.rGroup}>
+                <label className={styles.rLabel}>Description</label>
+                <textarea className={styles.rTextarea} value={description}
+                  onChange={e => setDescription(e.target.value)} rows={3} placeholder="What is this invoice for?" />
+              </div>
+
+              {/* Line items — read-only preview */}
+              {ext.line_items?.length > 0 && (
+                <div className={styles.rSection}>
+                  <div className={styles.rSectionTitle}>Line Items ({ext.line_items.length})</div>
+                  <table className={styles.rTable}>
+                    <thead>
+                      <tr className={styles.rThead}>
+                        <th className={styles.rColType}>TYPE</th>
+                        <th className={styles.rColDesc}>DESCRIPTION</th>
+                        <th className={`${styles.rColAmt} ${styles.right}`}>AMOUNT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ext.line_items.map((li: any, i: number) => (
+                        <tr key={i} className={styles.rTrow}>
+                          <td className={styles.rColType}>
+                            <span className={styles.rTypeBadge}>{(li.billing_type || 'fixed').toUpperCase()}</span>
+                          </td>
+                          <td className={styles.rColDesc} style={{ color: 'var(--text-2)', fontSize: 11 }}>
+                            {li.person && <span style={{ fontWeight: 600, marginRight: 6 }}>{li.person}</span>}
+                            {li.description}
+                            {li.hours && <span style={{ color: 'var(--text-4)', marginLeft: 6 }}>{li.hours}h @ ${li.rate}/h</span>}
+                          </td>
+                          <td className={`${styles.rColAmt} ${styles.right} ${styles.mono}`} style={{ fontSize: 11 }}>
+                            {usd2.format(Number(li.amount || li.budgeted_amount || 0))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Sticky footer */}
+        <div className={styles.reviewFormFooter}>
+          <label className={styles.reviewCheck}>
+            <input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
+            <span>I have reviewed this document and confirm all details are correct</span>
+          </label>
+          {saveError && <div className={styles.reviewSaveError}>{saveError}</div>}
+          <div className={styles.reviewActions}>
+            <button className={styles.discardBtn} onClick={onDiscard} disabled={saving}>Discard</button>
+            <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!canConfirm}>
+              {saving ? 'Saving…' : 'Confirm & Save'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -233,24 +477,22 @@ function ReviewForm({ item, budgetLines, onConfirm, onDiscard, onBack, saving }:
 
 // ── Queue Card ───────────────────────────────────────────────────────────────
 
-function QueueCard({ item, onClick, onFlipType, onRetry }: {
-  item: ImportItem;
-  onClick: () => void;
-  onFlipType: () => void;
-  onRetry: () => void;
+function QueueCard({ item, onClick, onFlipType, onRetry, onDiscard }: {
+  item: ImportItem; onClick: () => void; onFlipType: () => void;
+  onRetry: () => void; onDiscard: () => void;
 }) {
   const ext = item.extracted_data || {};
   const vendor = ext.vendor_name || '—';
   const amount = ext.amount != null ? usd.format(Number(ext.amount))
-    : ext.total_value != null ? usd.format(Number(ext.total_value))
-    : null;
+    : ext.total_value != null ? usd.format(Number(ext.total_value)) : null;
 
   return (
     <div className={styles.queueCard}>
       <div className={styles.cardRow}>
         <TypeChip
           type={item.doc_type}
-          onClick={e => { (e as any).stopPropagation?.(); onFlipType(); }}
+          onClick={['needs_review', 'queued', 'extracting'].includes(item.status)
+            ? e => { e.stopPropagation(); onFlipType(); } : undefined}
         />
         <span
           className={`${styles.cardFilename} ${item.status === 'needs_review' ? styles.cardFilenameClickable : ''}`}
@@ -260,9 +502,10 @@ function QueueCard({ item, onClick, onFlipType, onRetry }: {
           {item.original_filename}
         </span>
         {item.status === 'failed' && (
-          <button className={styles.retryBtn} onClick={e => { e.stopPropagation(); onRetry(); }}>
-            Retry
-          </button>
+          <>
+            <button className={styles.retryBtn} onClick={e => { e.stopPropagation(); onRetry(); }}>Retry</button>
+            <button className={styles.discardSmallBtn} onClick={e => { e.stopPropagation(); onDiscard(); }}>Discard</button>
+          </>
         )}
         <StatusBadge status={item.status} />
       </div>
@@ -271,9 +514,7 @@ function QueueCard({ item, onClick, onFlipType, onRetry }: {
           <span className={styles.cardVendor}>{vendor}</span>
           {amount && <span className={styles.cardAmt}>{amount}</span>}
           {item.suggested_line_name && (
-            <span className={styles.cardLine} title={item.suggested_line_name}>
-              {item.suggested_line_name}
-            </span>
+            <span className={styles.cardLine} title={item.suggested_line_name}>{item.suggested_line_name}</span>
           )}
         </div>
       )}
@@ -290,25 +531,14 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const isPdf = (f: File) =>
-    f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+  const isPdf = (f: File) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
 
   const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragging(false);
+    e.preventDefault(); e.stopPropagation(); setDragging(false);
     const all = Array.from(e.dataTransfer.files);
-    console.log('Drop detected:', all.length, 'files:', all.map(f => `${f.name} (${f.type})`));
     const files = all.filter(isPdf);
-    console.log('PDF files after filter:', files.length);
-    onFiles(files.length ? files : all); // if filter removes everything, send all anyway
+    onFiles(files.length ? files : all);
   }, [onFiles]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter(isPdf);
-    if (files.length) onFiles(files);
-    e.target.value = '';
-  };
 
   return (
     <div
@@ -319,7 +549,8 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
       onDrop={handleDrop}
       onClick={() => inputRef.current?.click()}
     >
-      <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={handleChange} />
+      <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple hidden
+        onChange={e => { const files = Array.from(e.target.files || []).filter(isPdf); if (files.length) onFiles(files); e.target.value = ''; }} />
       <div className={styles.dropIcon}>↑</div>
       <div className={styles.dropText}>Drop PDFs here or click to browse</div>
       <div className={styles.dropSub}>Contracts and invoices — mixed OK</div>
@@ -331,7 +562,6 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
 
 export function ImportDrawer({ phaseId, onClose }: Props) {
   const queryClient = useQueryClient();
-  const [drawerView, setDrawerView] = useState<'queue' | 'review'>('queue');
   const [reviewItem, setReviewItem] = useState<ImportItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
@@ -355,31 +585,37 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
 
   const pending = queue.filter(i => i.status !== 'confirmed' && i.status !== 'discarded');
   const done = queue.filter(i => i.status === 'confirmed' || i.status === 'discarded');
+  const failedCount = pending.filter(i => i.status === 'failed').length;
+
+  const liveReviewItem = reviewItem ? (queue.find(i => i.id === reviewItem.id) ?? reviewItem) : null;
+
+  const retryMutation = useMutation({
+    mutationFn: (id: number) => api.retryImportItem(id),
+    onSuccess: () => refetch(),
+  });
+
+  const discardOneMutation = useMutation({
+    mutationFn: (id: number) => api.discardImportItem(id),
+    onSuccess: () => refetch(),
+  });
+
+  const clearFailedMutation = useMutation({
+    mutationFn: () => api.clearFailedImports(phaseId),
+    onSuccess: () => refetch(),
+  });
 
   const handleFiles = async (files: File[]) => {
-    if (!files.length) { setUploadError('No PDF files detected in the drop.'); return; }
-    setUploadError(null);
-    setUploading(true);
-    try {
-      await api.importFiles(phaseId, files);
-      await refetch();
-    } catch (err: any) {
-      setUploadError(err?.message || 'Upload failed — check console for details');
-      console.error('Upload failed:', err);
-    } finally {
-      setUploading(false);
-    }
+    if (!files.length) { setUploadError('No PDF files detected.'); return; }
+    setUploadError(null); setUploading(true);
+    try { await api.importFiles(phaseId, files); await refetch(); }
+    catch (err: any) { setUploadError(err?.message || 'Upload failed'); }
+    finally { setUploading(false); }
   };
 
   const handleFlipType = async (item: ImportItem) => {
     const newType = item.doc_type === 'contract' ? 'invoice' : 'contract';
     await api.updateImportItem(item.id, { doc_type: newType });
     await refetch();
-  };
-
-  const handleOpenReview = (item: ImportItem) => {
-    setReviewItem(item);
-    setDrawerView('review');
   };
 
   const handleConfirm = async (formData: any) => {
@@ -389,12 +625,12 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
       await api.confirmImportItem(reviewItem.id, formData);
       await refetch();
       queryClient.invalidateQueries({ queryKey: ['budget', phaseId] });
-      queryClient.invalidateQueries({ queryKey: ['contracts', phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['phaseContracts', phaseId] });
       queryClient.invalidateQueries({ queryKey: ['invoices', phaseId] });
-      setDrawerView('queue');
       setReviewItem(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Confirm failed:', err);
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -403,35 +639,25 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
   const handleDiscard = async () => {
     if (!reviewItem) return;
     setSaving(true);
-    try {
-      await api.discardImportItem(reviewItem.id);
-      await refetch();
-      setDrawerView('queue');
-      setReviewItem(null);
-    } catch (err) {
-      console.error('Discard failed:', err);
-    } finally {
-      setSaving(false);
-    }
+    try { await api.discardImportItem(reviewItem.id); await refetch(); setReviewItem(null); }
+    catch (err) { console.error('Discard failed:', err); }
+    finally { setSaving(false); }
   };
-
-  const retryMutation = useMutation({
-    mutationFn: (id: number) => api.retryImportItem(id),
-    onSuccess: () => refetch(),
-  });
-
-  const handleBack = () => {
-    setDrawerView('queue');
-    setReviewItem(null);
-  };
-
-  // Keep reviewItem in sync with latest queue data
-  const liveReviewItem = reviewItem
-    ? (queue.find(i => i.id === reviewItem.id) ?? reviewItem)
-    : null;
 
   return (
     <>
+      {/* Review overlay — full screen, above the drawer */}
+      {liveReviewItem && (
+        <ReviewOverlay
+          item={liveReviewItem}
+          budgetLines={budgetLines}
+          onConfirm={handleConfirm}
+          onDiscard={handleDiscard}
+          onBack={() => setReviewItem(null)}
+          saving={saving}
+        />
+      )}
+
       <div className={styles.backdrop} onClick={onClose} />
       <div className={styles.panel}>
         {/* Header */}
@@ -440,83 +666,71 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
             <div className={styles.headerTitle}>Bulk Import</div>
             <div className={styles.headerSub}>AI classifies and extracts — you review</div>
           </div>
-          <button className={styles.closeBtn} onClick={onClose}>✕</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {failedCount > 0 && (
+              <button className={styles.clearFailedBtn}
+                onClick={() => clearFailedMutation.mutate()}
+                disabled={clearFailedMutation.isPending}>
+                Clear {failedCount} failed
+              </button>
+            )}
+            <button className={styles.closeBtn} onClick={onClose}>✕</button>
+          </div>
         </div>
 
-        {drawerView === 'queue' ? (
-          <div className={styles.queueView}>
-            {/* Drop zone */}
-            {true && (
-              <div className={styles.dropZoneWrap}>
-                {uploading ? (
-                  <div className={styles.uploadingMsg}>
-                    <div className={styles.spinner} /> Uploading…
-                  </div>
-                ) : (
-                  <DropZone onFiles={handleFiles} />
-                )}
-                {uploadError && (
-                  <div className={styles.uploadErr}>{uploadError}</div>
-                )}
-              </div>
-            )}
-
-            {/* Pending section */}
-            {pending.length > 0 && (
-              <div className={styles.section}>
-                <div className={styles.sectionHead}>
-                  Pending
-                  <span className={styles.sectionCount}>{pending.length}</span>
-                </div>
-                {pending.map(item => (
-                  <QueueCard
-                    key={item.id}
-                    item={item}
-                    onClick={() => handleOpenReview(item)}
-                    onFlipType={() => handleFlipType(item)}
-                    onRetry={() => retryMutation.mutate(item.id)}
-                  />
-                ))}
-              </div>
-            )}
-
-            {/* Done section — collapsed by default */}
-            {done.length > 0 && (
-              <div className={styles.section}>
-                <button className={styles.doneToggle} onClick={() => setDoneOpen(o => !o)}>
-                  <span>{doneOpen ? '▾' : '▸'} Done</span>
-                  <span className={styles.sectionCount}>{done.length}</span>
-                </button>
-                {doneOpen && done.map(item => (
-                  <QueueCard
-                    key={item.id}
-                    item={item}
-                    onClick={() => {}}
-                    onFlipType={() => {}}
-                    onRetry={() => retryMutation.mutate(item.id)}
-                  />
-                ))}
-              </div>
-            )}
-
-            {queue.length === 0 && !uploading && (
-              <div className={styles.emptyQueue}>
-                Drop PDFs above to get started.
-              </div>
-            )}
+        <div className={styles.queueView}>
+          {/* Drop zone */}
+          <div className={styles.dropZoneWrap}>
+            {uploading
+              ? <div className={styles.uploadingMsg}><div className={styles.spinner} /> Uploading…</div>
+              : <DropZone onFiles={handleFiles} />}
+            {uploadError && <div className={styles.uploadErr}>{uploadError}</div>}
           </div>
-        ) : (
-          liveReviewItem && (
-            <ReviewForm
-              item={liveReviewItem}
-              budgetLines={budgetLines}
-              onConfirm={handleConfirm}
-              onDiscard={handleDiscard}
-              onBack={handleBack}
-              saving={saving}
-            />
-          )
-        )}
+
+          {/* Pending section */}
+          {pending.length > 0 && (
+            <div className={styles.section}>
+              <div className={styles.sectionHead}>
+                Pending
+                <span className={styles.sectionCount}>{pending.length}</span>
+              </div>
+              {pending.map(item => (
+                <QueueCard
+                  key={item.id}
+                  item={item}
+                  onClick={() => setReviewItem(item)}
+                  onFlipType={() => handleFlipType(item)}
+                  onRetry={() => retryMutation.mutate(item.id)}
+                  onDiscard={() => discardOneMutation.mutate(item.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Done section */}
+          {done.length > 0 && (
+            <div className={styles.section}>
+              <button className={styles.doneToggle} onClick={() => setDoneOpen(o => !o)}>
+                <span>{doneOpen ? '▾' : '▸'} Done</span>
+                <span className={styles.sectionCount}>{done.length}</span>
+              </button>
+              {doneOpen && done.map(item => (
+                <QueueCard
+                  key={item.id}
+                  item={item}
+                  onClick={() => {}}
+                  onFlipType={() => {}}
+                  onRetry={() => retryMutation.mutate(item.id)}
+                  onDiscard={() => discardOneMutation.mutate(item.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          {queue.length === 0 && !uploading && (
+            <div className={styles.emptyQueue}>Drop PDFs above to get started.</div>
+          )}
+        </div>
       </div>
     </>
   );

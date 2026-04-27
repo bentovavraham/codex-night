@@ -286,3 +286,252 @@
 }
 .confirmBtn:hover:not(:disabled) { opacity: 0.88; }
 .confirmBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Clear failed button ── */
+.clearFailedBtn {
+  height: 24px; padding: 0 10px; font-size: 10.5px; font-weight: 600;
+  border: 1px solid var(--status-rejected, #c0392b); border-radius: 3px;
+  background: transparent; color: var(--status-rejected, #c0392b); cursor: pointer;
+}
+.clearFailedBtn:hover:not(:disabled) { background: #fde0dc; }
+.clearFailedBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Discard small (per card) ── */
+.discardSmallBtn {
+  height: 18px; padding: 0 7px; font-size: 10px; font-weight: 600;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: transparent; color: var(--text-3); cursor: pointer; flex-shrink: 0;
+}
+.discardSmallBtn:hover { border-color: var(--status-rejected, #c0392b); color: var(--status-rejected, #c0392b); }
+
+/* ── Full-screen review overlay ── */
+.reviewOverlay {
+  position: fixed; inset: 0; z-index: 600;
+  display: flex; flex-direction: row;
+  background: var(--bg);
+}
+
+.reviewPdfPane {
+  flex: 1; min-width: 0;
+  background: #2a2420;
+  display: flex; flex-direction: column; overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+.reviewPdfFrame { flex: 1; width: 100%; border: none; }
+.reviewNoPdf {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: #7a6a5a;
+}
+
+.reviewFormPane {
+  width: 520px; flex-shrink: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg);
+}
+
+.reviewBar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 14px; height: 44px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface); flex-shrink: 0;
+}
+.reviewBackBtn {
+  height: 26px; padding: 0 10px; font-size: 11px; font-weight: 600;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: transparent; color: var(--text-2); cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.reviewBackBtn:hover { border-color: var(--accent); color: var(--accent); }
+.reviewBarTitle {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+}
+.reviewBarFile {
+  font-size: 12px; font-weight: 500; color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.reviewCloseBtn {
+  width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 4px;
+  background: transparent; color: var(--text-3); cursor: pointer; font-size: 12px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.reviewCloseBtn:hover { background: var(--bg-2); }
+
+/* ── Duplicate warning ── */
+.dupChecking {
+  padding: 8px 14px; font-size: 11px; color: var(--text-4);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.dupBanner {
+  padding: 10px 14px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.dupBannerExact { background: #fde0dc; border-left: 3px solid #c0392b; }
+.dupBannerFuzzy { background: #fef9e7; border-left: 3px solid #e8921a; }
+.dupTitle { font-size: 11.5px; font-weight: 700; color: var(--text-1); margin-bottom: 6px; }
+.dupList { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.dupRow {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 11px; color: var(--text-2);
+}
+.dupTag {
+  font-size: 9px; font-weight: 800; letter-spacing: .06em;
+  padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
+}
+.dupTagExact { background: #fde0dc; color: #922b21; border: 1px solid #f5a9a2; }
+.dupTagFuzzy { background: #fef3cd; color: #856404; border: 1px solid #e8d888; }
+.dupDetail { flex: 1; min-width: 0; }
+.dupStatus { font-size: 9.5px; color: var(--text-3); font-weight: 600; text-transform: uppercase; }
+.dupReason { font-size: 10px; color: var(--text-4); font-style: italic; }
+.dupAck {
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 11px; color: var(--text-2); cursor: pointer;
+  background: rgba(255,255,255,0.5); padding: 6px 8px; border-radius: 4px;
+}
+.dupAck input { margin-top: 1px; flex-shrink: 0; }
+.dupAcked { font-size: 11px; color: #1a6630; font-weight: 600; }
+
+/* ── Review form scroll & fields ── */
+.reviewFormScroll {
+  flex: 1; overflow-y: auto; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+
+.rGroup { display: flex; flex-direction: column; gap: 3px; }
+.rLabel {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-3);
+}
+.rRequired { font-size: 9px; color: var(--accent); font-weight: 700; text-transform: none; letter-spacing: 0; margin-left: 4px; }
+.rRow { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
+.rInput, .rSelect {
+  width: 100%; padding: 5px 7px;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg); color: var(--text-1);
+  font-size: 12px; font-family: inherit; box-sizing: border-box;
+}
+.rInput:focus, .rSelect:focus { outline: none; border-color: var(--accent); }
+.rTextarea {
+  width: 100%; padding: 6px 8px; resize: vertical;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg); color: var(--text-1);
+  font-size: 12px; font-family: inherit; box-sizing: border-box; min-height: 64px;
+}
+.rTextarea:focus { outline: none; border-color: var(--accent); }
+.mono { font-family: var(--font-mono); }
+.right { text-align: right; }
+
+/* ── Line items table ── */
+.rSection { border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.rSectionTitle {
+  padding: 6px 10px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-3); background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.rTable { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.rThead { background: var(--surface); }
+.rThead th {
+  padding: 5px 8px; font-size: 9.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-3); border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.rTrow { border-bottom: 1px solid var(--border); }
+.rTrow:last-child { border-bottom: none; }
+.rColType  { width: 80px; padding: 4px 6px; }
+.rColDesc  { padding: 4px 6px; }
+.rColAmt   { width: 90px; padding: 4px 6px; }
+.rColDel   { width: 28px; padding: 4px 4px; }
+.rTypeSelect {
+  width: 100%; font-size: 11px; padding: 2px 4px;
+  border: 1px solid var(--border); border-radius: 2px;
+  background: var(--bg); color: var(--text-1); font-family: inherit;
+}
+.rTypeSelect:focus { outline: none; border-color: var(--accent); }
+.rDescInput {
+  width: 100%; border: 1px solid transparent; border-radius: 2px;
+  background: transparent; color: var(--text-1); font-size: 11.5px; font-family: inherit;
+  padding: 2px 4px; box-sizing: border-box;
+}
+.rDescInput:focus { outline: none; border-color: var(--accent); background: var(--bg); }
+.rAmtInput {
+  width: 100%; border: 1px solid transparent; border-radius: 2px;
+  background: transparent; color: var(--text-1); font-size: 11.5px; font-family: var(--font-mono);
+  padding: 2px 4px; text-align: right; box-sizing: border-box;
+}
+.rAmtInput:focus { outline: none; border-color: var(--accent); background: var(--bg); }
+.rDelBtn {
+  width: 20px; height: 20px; border: none; background: transparent;
+  color: var(--text-4); cursor: pointer; font-size: 11px; border-radius: 2px;
+}
+.rDelBtn:hover { color: var(--status-rejected, #c0392b); background: #fde0dc; }
+.rTypeBadge {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  background: var(--bg-2, #eee); border-radius: 2px; padding: 1px 4px; color: var(--text-3);
+}
+.tmTag {
+  font-size: 9.5px; font-weight: 700; color: #1e40af;
+  background: #dbeafe; padding: 1px 5px; border-radius: 2px;
+}
+.rTableFooter {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 8px; background: var(--surface); border-top: 1px solid var(--border);
+}
+.rAddBtn {
+  font-size: 11px; font-weight: 600; color: var(--accent);
+  background: transparent; border: none; cursor: pointer; padding: 0;
+}
+.rAddBtn:hover { text-decoration: underline; }
+.rTableTotal { font-size: 11.5px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+
+/* ── Budget line picker (in overlay) ── */
+.blPicker { position: relative; width: 100%; }
+.blDisplay {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg); cursor: pointer; min-height: 28px; font-size: 12px;
+}
+.blDisplay:hover { border-color: var(--accent); }
+.blEmpty { color: var(--text-4); }
+.blName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); }
+.blPlaceholder { color: var(--text-4); font-size: 12px; }
+.blClear {
+  width: 16px; height: 16px; border: none; background: transparent;
+  color: var(--text-4); cursor: pointer; font-size: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.blClear:hover { color: var(--text-1); }
+.blDropdown {
+  position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 50;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12); overflow: hidden;
+}
+.blSearch {
+  width: 100%; padding: 7px 10px; border: none; border-bottom: 1px solid var(--border);
+  font-size: 12px; background: var(--bg); color: var(--text-1); box-sizing: border-box;
+}
+.blSearch:focus { outline: none; }
+.blList { max-height: 220px; overflow-y: auto; }
+.blOption {
+  padding: 7px 10px; font-size: 12px; color: var(--text-1); cursor: pointer;
+}
+.blOption:hover { background: var(--bg-2); }
+.blOptionSelected { background: rgba(196,82,42,0.08); font-weight: 600; }
+.blNoMatch { padding: 10px; font-size: 11px; color: var(--text-4); }
+
+/* ── Review form footer ── */
+.reviewFormFooter {
+  flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.reviewCheck {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 11.5px; color: var(--text-2); cursor: pointer;
+}
+.reviewCheck input { margin-top: 2px; flex-shrink: 0; }
+.reviewSaveError {
+  font-size: 11.5px; color: var(--status-rejected, #c0392b);
+  background: #fde0dc; padding: 6px 10px; border-radius: 3px;
+}
+.reviewActions {
+  display: flex; justify-content: flex-end; gap: 8px;
+}

@@ -120,6 +120,90 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
   } catch (err) { next(err); }
 });
 
+// POST /api/phases/:phaseId/import/clear-failed — discard all failed items
+router.post('/phases/:phaseId/import/clear-failed', requireAuth, async (req, res, next) => {
+  try {
+    const r = await pool.query(
+      `UPDATE import_queue SET status='discarded', updated_at=NOW()
+       WHERE phase_id=$1 AND status='failed' RETURNING id`,
+      [Number(req.params.phaseId)]
+    );
+    res.json({ cleared: r.rowCount });
+  } catch (err) { next(err); }
+});
+
+// GET /api/import-queue/:id/duplicates — check existing contracts/invoices for likely duplicates
+router.get('/import-queue/:id/duplicates', requireAuth, async (req, res, next) => {
+  try {
+    const item = (await pool.query('SELECT * FROM import_queue WHERE id=$1', [Number(req.params.id)])).rows[0];
+    if (!item) return res.status(404).json({ error: 'Not found' });
+    const ext = item.extracted_data || {};
+    const vendor = ((ext.vendor_name || '')).toLowerCase().trim();
+    const matches = [];
+
+    if (item.doc_type === 'invoice') {
+      const invNum = (ext.invoice_number || '').toLowerCase().trim();
+      const amount = Number(ext.amount) || 0;
+      const invDate = ext.invoice_date || null;
+
+      // Exact: same vendor + invoice number
+      if (vendor && invNum) {
+        const r = await pool.query(
+          `SELECT id, vendor_name, invoice_number, amount::numeric as amount, invoice_date, status
+           FROM invoices WHERE LOWER(TRIM(vendor_name))=$1 AND LOWER(TRIM(invoice_number))=$2`,
+          [vendor, invNum]
+        );
+        r.rows.forEach(row => matches.push({ ...row, match_type: 'exact', reason: 'Same vendor + invoice number' }));
+      }
+
+      // Fuzzy: same vendor + amount within 5% + date within 60 days
+      if (vendor && amount > 0 && invDate) {
+        const r = await pool.query(
+          `SELECT id, vendor_name, invoice_number, amount::numeric as amount, invoice_date, status
+           FROM invoices
+           WHERE LOWER(TRIM(vendor_name))=$1
+             AND ABS(amount::numeric - $2) / NULLIF($2, 0) < 0.05
+             AND invoice_date IS NOT NULL
+             AND ABS(EXTRACT(EPOCH FROM (invoice_date::date - $3::date))) < 86400*60`,
+          [vendor, amount, invDate]
+        );
+        r.rows.forEach(row => { if (!matches.find(m => m.id === row.id)) matches.push({ ...row, match_type: 'fuzzy', reason: 'Same vendor, similar amount & date' }); });
+      }
+
+    } else if (item.doc_type === 'contract') {
+      const refNum = (ext.reference_number || '').toLowerCase().trim();
+      const amount = Number(ext.total_value) || 0;
+      const cDate = ext.contract_date || null;
+
+      // Exact: same vendor + reference number
+      if (vendor && refNum) {
+        const r = await pool.query(
+          `SELECT id, vendor_name, reference_number, total_value::numeric as amount, contract_date, status
+           FROM contracts WHERE LOWER(TRIM(vendor_name))=$1 AND LOWER(TRIM(reference_number))=$2`,
+          [vendor, refNum]
+        );
+        r.rows.forEach(row => matches.push({ ...row, match_type: 'exact', reason: 'Same vendor + reference number' }));
+      }
+
+      // Fuzzy: same vendor + amount within 10% + date within 90 days
+      if (vendor && amount > 0 && cDate) {
+        const r = await pool.query(
+          `SELECT id, vendor_name, reference_number, total_value::numeric as amount, contract_date, status
+           FROM contracts
+           WHERE LOWER(TRIM(vendor_name))=$1
+             AND ABS(total_value::numeric - $2) / NULLIF($2, 0) < 0.10
+             AND contract_date IS NOT NULL
+             AND ABS(EXTRACT(EPOCH FROM (contract_date::date - $3::date))) < 86400*90`,
+          [vendor, amount, cDate]
+        );
+        r.rows.forEach(row => { if (!matches.find(m => m.id === row.id)) matches.push({ ...row, match_type: 'fuzzy', reason: 'Same vendor, similar amount & date' }); });
+      }
+    }
+
+    res.json({ matches });
+  } catch (err) { next(err); }
+});
+
 // GET /api/phases/:phaseId/import-queue
 router.get('/phases/:phaseId/import-queue', requireAuth, async (req, res, next) => {
   try {

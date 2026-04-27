@@ -114,4 +114,6 @@ export const api = {
   confirmImportItem: (id: number, formData: any) => request<any>('POST', `/api/import-queue/${id}/confirm`, { formData }),
   discardImportItem: (id: number) => request<any>('DELETE', `/api/import-queue/${id}`),
   retryImportItem: (id: number) => request<any>('POST', `/api/import-queue/${id}/retry`),
+  clearFailedImports: (phaseId: number) => request<any>('POST', `/api/phases/${phaseId}/import/clear-failed`),
+  checkImportDuplicates: (id: number) => request<{ matches: any[] }>('GET', `/api/import-queue/${id}/duplicates`),
 };
