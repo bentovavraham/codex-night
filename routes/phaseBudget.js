@@ -463,6 +463,46 @@ router.get('/phases/:phaseId/invoices', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/budget-lines/:lineId/activity — contracts + invoices for a single budget line
+router.get('/budget-lines/:lineId/activity', requireAuth, async (req, res, next) => {
+  try {
+    const lineId = Number(req.params.lineId);
+    const lineCheck = await pool.query(
+      `SELECT pbl.id, pbl.phase_id FROM phase_budget_lines pbl
+       JOIN phases ph ON ph.id = pbl.phase_id
+       JOIN project_members pm ON pm.project_id = ph.project_id AND pm.user_id = $1
+       WHERE pbl.id = $2`,
+      [req.session.userId, lineId]
+    );
+    if (!lineCheck.rows.length) return res.status(404).json({ error: 'Not found' });
+
+    const [contracts, invoices] = await Promise.all([
+      pool.query(
+        `SELECT id, vendor_name, reference_number, status, total_value,
+                contract_date, file_reference, description
+         FROM contracts
+         WHERE phase_budget_line_id = $1
+         ORDER BY contract_date ASC NULLS LAST, id ASC`,
+        [lineId]
+      ),
+      pool.query(
+        `SELECT i.id, i.invoice_number, i.invoice_date, i.amount, i.status,
+                i.file_reference, i.description, i.vendor_name, i.invoice_type,
+                c.vendor_name AS contract_vendor, c.reference_number AS contract_ref, c.id AS contract_id
+         FROM invoices i
+         LEFT JOIN contracts c ON c.id = i.contract_id
+         WHERE i.status != 'voided'
+           AND (i.phase_budget_line_id = $1
+                OR i.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = $1))
+         ORDER BY i.invoice_date DESC NULLS LAST, i.id DESC`,
+        [lineId]
+      ),
+    ]);
+
+    res.json({ contracts: contracts.rows, invoices: invoices.rows });
+  } catch (err) { next(err); }
+});
+
 // GET /api/qb-accounts
 router.get('/qb-accounts', requireAuth, async (req, res, next) => {
   try {

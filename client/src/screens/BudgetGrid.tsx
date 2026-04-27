@@ -3,8 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './BudgetGrid.module.css';
-import cgStyles from './CommitmentsGrid.module.css';
-import { ContractPanel } from './ContractPanel';
+import { LineItemPanel } from './LineItemPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -149,8 +148,7 @@ export default function BudgetGrid() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [active, setActive] = useState<{ rowId: number; field: string }>({ rowId: -1, field: '' });
   const [showDetails, setShowDetails] = useState(false);
-  const [contractsOpen, setContractsOpen] = useState<Set<number>>(new Set());
-  const [panelContractId, setPanelContractId] = useState<number | null>(null);
+  const [panelRow, setPanelRow] = useState<BudgetRow | null>(null);
 
   const { data: rows = [], isLoading, error } = useQuery<BudgetRow[]>({
     queryKey: ['budget', phaseIdNum],
@@ -158,20 +156,6 @@ export default function BudgetGrid() {
     enabled: !!phaseIdNum,
   });
 
-  const { data: contracts = [] } = useQuery<any[]>({
-    queryKey: ['phaseContracts', phaseIdNum],
-    queryFn: () => api.listContracts(phaseIdNum),
-    enabled: !!phaseIdNum,
-  });
-
-  const contractsByLine = useMemo(() => {
-    const m = new Map<number, any[]>();
-    for (const c of contracts) {
-      if (!m.has(c.phase_budget_line_id)) m.set(c.phase_budget_line_id, []);
-      m.get(c.phase_budget_line_id)!.push(c);
-    }
-    return m;
-  }, [contracts]);
 
   const initMutation = useMutation({
     mutationFn: () => api.initBudget(phaseIdNum, 'default'),
@@ -208,9 +192,6 @@ export default function BudgetGrid() {
 
   function toggle(key: string) {
     setCollapsed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
-  }
-  function toggleLine(id: number) {
-    setContractsOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
   const tree = useMemo(() => {
@@ -267,7 +248,7 @@ export default function BudgetGrid() {
       <td className={styles.sn}>{money(t.tm)}</td>
       <td className={styles.sn}>{money(t.expenses)}</td>
       <td className={styles.sn}>{moneyD(t.billed)}</td>
-      <td className={`${styles.sn} ${amtDue > 0 ? styles.warn : ''}`}>{money(amtDue)}</td>
+      <td className={styles.sn}>{money(amtDue)}</td>
       <td className={styles.sn}>{money(t.paid)}</td>
       <td className={`${styles.sn} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
       <td className={styles.sn}>{remPct(t.billed, t.budgeted)}</td>
@@ -314,8 +295,8 @@ export default function BudgetGrid() {
 
   return (
     <div className={styles.wrapper}>
-      {panelContractId && (
-        <ContractPanel contractId={panelContractId} onClose={() => setPanelContractId(null)} />
+      {panelRow && (
+        <LineItemPanel row={panelRow} onClose={() => setPanelRow(null)} />
       )}
       <div className={styles.toolbar}>
         <span className={styles.toolLabel}>Budget</span>
@@ -423,17 +404,14 @@ export default function BudgetGrid() {
                     ] : []),
 
                     ...(sgOpen ? [
-                      ...sgRows.flatMap((row: BudgetRow) => {
+                      ...sgRows.map((row: BudgetRow) => {
 
                       const isA = (f: string) => active.rowId === row.id && active.field === f;
-                      const lineContracts = contractsByLine.get(row.id) ?? [];
-                      const hasContracts  = lineContracts.length > 0;
-                      const lineOpen      = contractsOpen.has(row.id);
-                      return [
-                        <tr key={row.id} className={`${styles.dataRow} ${hasContracts ? cgStyles.lineClickable : ''} ${row.source === 'user' ? styles.rowUserAdded : ''}`}
-                            onClick={hasContracts ? (e) => { if ((e.target as HTMLElement).closest('input,select,button')) return; toggleLine(row.id); } : undefined}>
+                      return (
+                        <tr key={row.id} className={`${styles.dataRow} ${styles.lineClickable} ${row.source === 'user' ? styles.rowUserAdded : ''}`}
+                            onClick={(e) => { if ((e.target as HTMLElement).closest('input,select,button')) return; setPanelRow(row); }}>
                           <td className={styles.rowGutter}>
-                            {hasContracts && <span className={styles.chevron}>{lineOpen ? '▼' : '▶'}</span>}
+                            <span className={styles.rowArrow}>›</span>
                           </td>
                           <EditCell value={row.task_name} rowId={row.id} field="task_name"
                             isActive={isA('task_name')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
@@ -451,7 +429,7 @@ export default function BudgetGrid() {
                           <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${warnClass(row.billed, row.budgeted_amount)}`}>
                             {money(row.billed)}
                           </td>
-                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.amount_due > 0 ? styles.warn : ''}`}>
+                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
                             {money(row.amount_due)}
                           </td>
                           <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
@@ -478,34 +456,8 @@ export default function BudgetGrid() {
                           <EditCell value={row.notes} rowId={row.id} field="notes"
                             isActive={isA('notes')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
                             onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdNotes} ${dc}`} />
-                        </tr>,
-
-                        // ── Contract drill-down rows ───────────────────────
-                        ...(lineOpen ? lineContracts.map((c: any) => (
-                          <tr key={`c:${c.id}`} className={cgStyles.contractRow}
-                              style={{ cursor: 'pointer' }}
-                              onClick={() => setPanelContractId(c.id)}>
-                            <td className={cgStyles.contractGutter} />
-                            <td className={`${styles.cell} ${cgStyles.vendorCell}`} colSpan={2}>
-                              <span className={`${cgStyles.statusBadge} ${cgStyles[`status_${c.status}`]}`}>
-                                {c.status}
-                              </span>
-                              {' '}{c.vendor_name}
-                              {c.reference_number && <span className={cgStyles.refNum}> · {c.reference_number}</span>}
-                              <span className={cgStyles.openHint}>→ details</span>
-                            </td>
-                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />
-                            <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`} colSpan={3}>
-                              {c.total_value > 0 ? usd.format(c.total_value) : <span style={{color:'var(--text-4)'}}>T&amp;M</span>}
-                              {c.co_value > 0 && <span style={{color:'var(--text-3)',marginLeft:6}}>+{usd.format(c.co_value)} CO</span>}
-                            </td>
-                            <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`}>
-                              {c.total_invoiced > 0 ? usd.format(c.total_invoiced) : '—'}
-                            </td>
-                            <td colSpan={10} />
-                          </tr>
-                        )) : []),
-                      ];
+                        </tr>
+                      );
                     }),
                     // Sub-group bottom subtotal
                     ...(hasSg ? [
@@ -545,7 +497,7 @@ export default function BudgetGrid() {
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.tm)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.expenses)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.billed)}</td>
-              <td className={`${styles.totalCell} ${styles.tdMoney} ${(grand.billed - grand.paid) > 0 ? styles.warn : ''}`}>
+              <td className={`${styles.totalCell} ${styles.tdMoney}`}>
                 {moneyD(grand.billed - grand.paid)}
               </td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.paid)}</td>
