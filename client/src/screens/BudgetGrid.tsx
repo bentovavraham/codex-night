@@ -393,9 +393,10 @@ export default function BudgetGrid() {
             <tr className={styles.theadGroup}>
               <th colSpan={4} />
               <th className={styles.thGroup} colSpan={3}>Contract Commitment</th>
-              <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={4}>Invoice Burn</th>
-              <th className={styles.thGroup} colSpan={3}>Balance</th>
-              <th colSpan={3} />
+              <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={4}>Invoiced</th>
+              <th className={styles.thGroup} colSpan={2}>Payments</th>
+              <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>Remaining</th>
+              <th className={styles.thGroup} colSpan={2}>Unit Cost</th>
               <th className={`${styles.th} ${dc}`} colSpan={4} />
             </tr>
             <tr className={styles.thead}>
