@@ -208,22 +208,22 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
         -- amount attributed to this budget line
         COALESCE(
           (SELECT SUM(cli.budgeted_amount) FROM contract_line_items cli
-           WHERE cli.contract_id = c.id AND COALESCE(cli.phase_budget_line_id, c.phase_budget_line_id) = $2),
-          CASE WHEN c.phase_budget_line_id = $2 AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
+           WHERE cli.contract_id = c.id AND COALESCE(cli.phase_budget_line_id, c.phase_budget_line_id) = $1),
+          CASE WHEN c.phase_budget_line_id = $1 AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
                THEN c.total_value ELSE 0 END
         ) AS allocated_amount,
-        c.phase_budget_line_id = $2 AS is_primary
+        c.phase_budget_line_id = $1 AS is_primary
       FROM contracts c
       WHERE c.status NOT IN ('voided','draft')
         AND (
-          c.phase_budget_line_id = $2
+          c.phase_budget_line_id = $1
           OR EXISTS (
             SELECT 1 FROM contract_line_items cli
-            WHERE cli.contract_id = c.id AND cli.phase_budget_line_id = $2
+            WHERE cli.contract_id = c.id AND cli.phase_budget_line_id = $1
           )
         )
       ORDER BY c.contract_date DESC NULLS LAST, c.id
-    `, [phaseId, lineId]);
+    `, [lineId]);
 
     // Invoices against this budget line (via direct link or via contract)
     const invoicesQ = await pool.query(`
@@ -236,17 +236,17 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
       LEFT JOIN contracts c ON c.id = i.contract_id
       WHERE i.status NOT IN ('voided','draft','rejected')
         AND (
-          i.phase_budget_line_id = $2
+          i.phase_budget_line_id = $1
           OR (
             i.phase_budget_line_id IS NULL
             AND i.contract_id IN (
               SELECT id FROM contracts
-              WHERE phase_budget_line_id = $2 AND status NOT IN ('voided')
+              WHERE phase_budget_line_id = $1 AND status NOT IN ('voided')
             )
           )
         )
       ORDER BY i.invoice_date DESC NULLS LAST, i.id
-    `, [phaseId, lineId]);
+    `, [lineId]);
 
     res.json({
       contracts: contractsQ.rows,
