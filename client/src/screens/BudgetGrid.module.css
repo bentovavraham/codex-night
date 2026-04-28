@@ -264,8 +264,8 @@
 /* Sub-group rows: dark text on light background */
 .sgRow td.sn  { color: var(--text-1); border-bottom-color: var(--border); font-weight: 600; }
 
-/* read-only computed cells — slightly muted bg to distinguish from editable */
-.ro { background: var(--bg); color: var(--text-2); }
+/* read-only computed cells */
+.ro { background: var(--bg); color: var(--text-1); }
 .dataRow:hover .ro { background: transparent; }
 
 /* detail columns — hidden until toggled */
@@ -444,8 +444,8 @@
 
 /* ── Source / modification visual states ─────────────────────────────────── */
 
-/* Template row, amount untouched — amount cell text is muted grey */
-.amtTemplate { color: var(--text-3) !important; }
+/* Template row, amount untouched */
+.amtTemplate { color: var(--text-1) !important; }
 
 /* Template row, amount edited by user — black text + terracotta left border */
 .amtModified {
