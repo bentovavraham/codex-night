@@ -69,14 +69,14 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             AND co.status = 'approved'
         ), 0) AS co_value,
 
-        -- T&M invoice charges (via contract OR direct budget line link)
+        -- T&M invoice charges
         COALESCE((
           SELECT SUM(inv.amount) FROM invoices inv
           WHERE inv.invoice_type = 'tm'
             AND inv.status NOT IN ('voided','draft','rejected')
             AND (
-              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
-              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+              inv.phase_budget_line_id = pbl.id
+              OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
             )
         ), 0) AS tm_charges,
 
@@ -86,8 +86,8 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
           WHERE inv.invoice_type = 'expense'
             AND inv.status NOT IN ('voided','draft','rejected')
             AND (
-              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
-              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+              inv.phase_budget_line_id = pbl.id
+              OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
             )
         ), 0) AS expense_charges,
 
@@ -97,18 +97,18 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
           WHERE inv.invoice_type = 'fixed'
             AND inv.status NOT IN ('voided','draft','rejected')
             AND (
-              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
-              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+              inv.phase_budget_line_id = pbl.id
+              OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
             )
         ), 0) AS fixed_charges,
 
-        -- Billed to date (all types, both paths)
+        -- Billed to date (all types)
         COALESCE((
           SELECT SUM(inv.amount) FROM invoices inv
           WHERE inv.status NOT IN ('voided','draft','rejected')
             AND (
-              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
-              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+              inv.phase_budget_line_id = pbl.id
+              OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
             )
         ), 0) AS billed,
 
@@ -117,12 +117,12 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
           SELECT SUM(inv.amount) FROM invoices inv
           WHERE inv.status = 'paid'
             AND (
-              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
-              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+              inv.phase_budget_line_id = pbl.id
+              OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
             )
         ), 0) AS paid,
 
-        -- QB codes used (from invoice_line_items, both paths)
+        -- QB codes used
         COALESCE((
           SELECT string_agg(DISTINCT qa.account_number, ', ' ORDER BY qa.account_number)
           FROM invoice_line_items ili
@@ -130,16 +130,15 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
           JOIN qb_accounts qa ON qa.id = ili.qb_account_id
           WHERE inv.status NOT IN ('voided','draft','rejected')
             AND (
-              inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))
-              OR (inv.phase_budget_line_id = pbl.id AND inv.contract_id IS NULL)
+              inv.phase_budget_line_id = pbl.id
+              OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
             )
         ), '') AS qb_codes_used,
 
-        -- Flag: any direct invoices (no contract) against this line
+        -- Flag: any direct invoices against this line
         EXISTS (
           SELECT 1 FROM invoices inv
           WHERE inv.phase_budget_line_id = pbl.id
-            AND inv.contract_id IS NULL
             AND inv.status NOT IN ('voided','draft','rejected')
         ) AS has_direct_invoices
 
@@ -227,7 +226,7 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
       ORDER BY c.contract_date DESC NULLS LAST, c.id
     `, [phaseId, lineId]);
 
-    // Invoices against this budget line (via contract or direct)
+    // Invoices against this budget line (via direct link or via contract)
     const invoicesQ = await pool.query(`
       SELECT
         i.id, i.vendor_name, i.invoice_number, i.invoice_date,
@@ -238,14 +237,13 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
       LEFT JOIN contracts c ON c.id = i.contract_id
       WHERE i.status NOT IN ('voided','draft','rejected')
         AND (
-          i.contract_id IN (
-            SELECT id FROM contracts
-            WHERE phase_budget_line_id = $2 AND status NOT IN ('voided')
-          )
-          OR (i.phase_budget_line_id = $2 AND i.contract_id IS NULL)
-          OR EXISTS (
-            SELECT 1 FROM invoice_line_items ili
-            WHERE ili.invoice_id = i.id AND ili.phase_budget_line_id = $2
+          i.phase_budget_line_id = $2
+          OR (
+            i.phase_budget_line_id IS NULL
+            AND i.contract_id IN (
+              SELECT id FROM contracts
+              WHERE phase_budget_line_id = $2 AND status NOT IN ('voided')
+            )
           )
         )
       ORDER BY i.invoice_date DESC NULLS LAST, i.id
