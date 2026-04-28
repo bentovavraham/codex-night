@@ -485,3 +485,10 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
 CREATE INDEX IF NOT EXISTS idx_cli_pbl ON contract_line_items(phase_budget_line_id);
+
+-- QB account per contract line item (mirrors invoice_line_items.qb_account_id)
+DO $$ BEGIN
+  ALTER TABLE contract_line_items
+    ADD COLUMN qb_account_id INT REFERENCES qb_accounts(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;

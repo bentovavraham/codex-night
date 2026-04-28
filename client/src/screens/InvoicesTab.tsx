@@ -51,10 +51,6 @@ type Stage = 'drop' | 'extracting' | 'review';
 
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: 'Pending', pm_approved: 'PM ✓', partner_approved: 'Partner ✓',
-  approved: 'Approved', pushed: 'Pushed', paid: 'Paid', rejected: 'Rejected', on_hold: 'On Hold',
-};
 const STATUS_CSS: Record<string, string> = {
   pending: 'sPending', pm_approved: 'sPm', partner_approved: 'sPartner',
   approved: 'sApproved', pushed: 'sPushed', paid: 'sPaid',
@@ -259,6 +255,15 @@ function InvoiceList({ invoices, onUpload, phaseId, onEdit }: {
     },
   });
 
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      api.updateInvoice(id, { status }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['invoices', phaseId] });
+      qc.invalidateQueries({ queryKey: ['budget',   phaseId] });
+    },
+  });
+
   return (
     <div className={styles.listWrap}>
       {panelContractId && (
@@ -313,9 +318,21 @@ function InvoiceList({ invoices, onUpload, phaseId, onEdit }: {
                   </td>
                   <td className={`${styles.ltd} ${styles.mono} ${styles.right}`}>{usd.format(Number(inv.amount))}</td>
                   <td className={`${styles.ltd} ${styles.center}`}>
-                    <span className={`${styles.badge} ${styles[STATUS_CSS[inv.status] ?? 'sPending']}`}>
-                      {STATUS_LABEL[inv.status] ?? inv.status}
-                    </span>
+                    <select
+                      className={`${styles.statusSelect} ${styles[STATUS_CSS[inv.status] ?? 'sPending']}`}
+                      value={inv.status}
+                      disabled={statusMutation.isPending}
+                      onChange={e => statusMutation.mutate({ id: inv.id, status: e.target.value })}
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="pm_approved">PM ✓</option>
+                      <option value="partner_approved">Partner ✓</option>
+                      <option value="approved">Approved</option>
+                      <option value="pushed">Pushed</option>
+                      <option value="paid">Paid</option>
+                      <option value="on_hold">On Hold</option>
+                      <option value="rejected">Rejected</option>
+                    </select>
                   </td>
                   <td className={`${styles.ltd} ${styles.actionCell}`}>
                     {inv.contract_id && (

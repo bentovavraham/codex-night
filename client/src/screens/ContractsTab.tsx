@@ -4,7 +4,6 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './ContractsTab.module.css';
-import { ContractPanel } from './ContractPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -273,12 +272,11 @@ function InlineBudgetLinePicker({ lines, value, onChange }: {
 
 // ─── Contract list ────────────────────────────────────────────────────────────
 
-function ContractList({ contracts, phaseId, onUpload, onEdit, onView }: {
+function ContractList({ contracts, phaseId, onUpload, onEdit }: {
   contracts: any[];
   phaseId: number;
   onUpload: () => void;
   onEdit: (id: number) => void;
-  onView: (id: number) => void;
 }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const qc = useQueryClient();
@@ -319,9 +317,7 @@ function ContractList({ contracts, phaseId, onUpload, onEdit, onView }: {
             </thead>
             <tbody>
               {contracts.map((c: any) => (
-                <tr key={c.id} className={styles.listRow}
-                  style={{ cursor: 'pointer' }}
-                  onClick={e => { e.stopPropagation(); onView(c.id); }}>
+                <tr key={c.id} className={styles.listRow}>
                   <td className={styles.ltd}>{c.vendor_name}</td>
                   <td className={`${styles.ltd} ${styles.dim}`}>{c.budget_line_name ?? '—'}</td>
                   <td className={`${styles.ltd} ${styles.mono}`}>{c.reference_number || '—'}</td>
@@ -336,8 +332,13 @@ function ContractList({ contracts, phaseId, onUpload, onEdit, onView }: {
                       {STATUS_LABEL[c.status] ?? c.status}
                     </span>
                   </td>
-                  <td className={styles.ltd} onClick={e => e.stopPropagation()}>
+                  <td className={styles.ltd}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {c.file_reference && (
+                        <button className={styles.pdfBtn} onClick={() => onEdit(c.id)} title="View PDF">
+                          PDF
+                        </button>
+                      )}
                       <button className={styles.editBtn} onClick={() => onEdit(c.id)} title="Edit contract">
                         Edit
                       </button>
@@ -774,9 +775,8 @@ export default function ContractsTab() {
   const phaseIdNum   = Number(phaseId);
   const projectIdNum = Number(projectId);
   const qc = useQueryClient();
-  const [uploadOpen,      setUploadOpen]      = useState(false);
-  const [editContractId,  setEditContractId]  = useState<number | null>(null);
-  const [panelContractId, setPanelContractId] = useState<number | null>(null);
+  const [uploadOpen,     setUploadOpen]     = useState(false);
+  const [editContractId, setEditContractId] = useState<number | null>(null);
 
   const { data: contracts = [], isLoading } = useQuery<any[]>({
     queryKey: ['phaseContracts', phaseIdNum],
@@ -811,7 +811,6 @@ export default function ContractsTab() {
   }
 
   function handleEdit(id: number) {
-    setPanelContractId(null);
     setEditContractId(id);
     setUploadOpen(true);
   }
@@ -833,21 +832,11 @@ export default function ContractsTab() {
   }
 
   return (
-    <>
-      {panelContractId && (
-        <ContractPanel
-          contractId={panelContractId}
-          onClose={() => setPanelContractId(null)}
-          onEdit={() => handleEdit(panelContractId)}
-        />
-      )}
-      <ContractList
-        contracts={contracts}
-        phaseId={phaseIdNum}
-        onUpload={() => setUploadOpen(true)}
-        onEdit={handleEdit}
-        onView={(id) => setPanelContractId(id)}
-      />
-    </>
+    <ContractList
+      contracts={contracts}
+      phaseId={phaseIdNum}
+      onUpload={() => setUploadOpen(true)}
+      onEdit={handleEdit}
+    />
   );
 }

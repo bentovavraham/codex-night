@@ -163,14 +163,15 @@ router.post('/contracts', requireAuth, async (req, res, next) => {
         const li = lineItems[i];
         await client.query(
           `INSERT INTO contract_line_items
-             (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id)
-           VALUES ($1,$2,$3,$4,$5,$6)`,
+             (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id, qb_account_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [contractId,
            ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed',
            li.description || null,
            Number(li.budgeted_amount) || 0,
            i,
-           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null]
+           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null,
+           li.qb_account_id ? Number(li.qb_account_id) : null]
         );
       }
     }
@@ -236,8 +237,19 @@ router.get('/projects/:id/contracts', requireAuth, async (req, res, next) => {
                  AND invoice_type = 'tm') AS tm_invoiced_amount,
               (SELECT COALESCE(SUM(amount),0) FROM invoices
                  WHERE contract_id = c.id AND status IN ('approved','pushed','paid')
-                 AND invoice_type = 'expense') AS expense_invoiced_amount
+                 AND invoice_type = 'expense') AS expense_invoiced_amount,
+              (SELECT json_agg(json_build_object('budget_line_id', sub.bid, 'amount', sub.amt))
+               FROM (
+                 SELECT cli.phase_budget_line_id AS bid, SUM(cli.budgeted_amount) AS amt
+                 FROM contract_line_items cli
+                 WHERE cli.contract_id = c.id
+                   AND cli.phase_budget_line_id IS NOT NULL
+                   AND cli.phase_budget_line_id != COALESCE(c.phase_budget_line_id, -1)
+                 GROUP BY cli.phase_budget_line_id
+               ) sub) AS cli_allocations,
+              pbl.task_name AS budget_line_name
        FROM contracts c
+       LEFT JOIN phase_budget_lines pbl ON pbl.id = c.phase_budget_line_id
        WHERE ${filters.join(' AND ')}
        ORDER BY ${order}`,
       params
@@ -341,7 +353,8 @@ router.get('/contracts/:id', requireAuth, async (req, res, next) => {
          FROM contract_line_items cli
          LEFT JOIN qb_accounts qa ON qa.id = cli.qb_account_id
          WHERE cli.contract_id = $1
-         ORDER BY cli.sort_order, cli.id`, [contractId]
+         ORDER BY cli.sort_order, cli.id`,
+        [contractId]
       ),
       pool.query(
         `SELECT i.*,
@@ -430,14 +443,15 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
         const li = lineItems[i];
         await client.query(
           `INSERT INTO contract_line_items
-             (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id)
-           VALUES ($1,$2,$3,$4,$5,$6)`,
+             (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id, qb_account_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [contractId,
            ['fixed', 'tm', 'expense'].includes(li.billing_type) ? li.billing_type : 'fixed',
            li.description || null,
            Number(li.budgeted_amount) || 0,
            i,
-           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null]
+           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null,
+           li.qb_account_id ? Number(li.qb_account_id) : null]
         );
       }
     }

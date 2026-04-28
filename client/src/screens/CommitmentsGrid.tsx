@@ -59,6 +59,9 @@ interface PhaseContract {
   invoiced_expense: number;
   total_invoiced: number;
   remaining_commitment: number;
+  cli_allocations?: Array<{ budget_line_id: number; amount: number }>;
+  _partial_amount?: number;
+  _is_partial?: boolean;
   change_orders: Array<{
     id: number;
     co_number: string | null;
@@ -103,12 +106,20 @@ export default function CommitmentsGrid() {
     enabled: !!phaseIdNum,
   });
 
-  // Map budget_line_id → contracts[]
+  // Map budget_line_id → contracts[] (including partial cross-line allocations)
   const contractsByLine = useMemo(() => {
     const m = new Map<number, PhaseContract[]>();
     for (const c of contracts) {
-      if (!m.has(c.phase_budget_line_id)) m.set(c.phase_budget_line_id, []);
-      m.get(c.phase_budget_line_id)!.push(c);
+      // Primary budget line
+      if (c.phase_budget_line_id) {
+        if (!m.has(c.phase_budget_line_id)) m.set(c.phase_budget_line_id, []);
+        m.get(c.phase_budget_line_id)!.push(c);
+      }
+      // Secondary lines — contract line items assigned to a different budget line
+      for (const alloc of c.cli_allocations ?? []) {
+        if (!m.has(alloc.budget_line_id)) m.set(alloc.budget_line_id, []);
+        m.get(alloc.budget_line_id)!.push({ ...c, _partial_amount: alloc.amount, _is_partial: true });
+      }
     }
     return m;
   }, [contracts]);
@@ -292,11 +303,14 @@ export default function CommitmentsGrid() {
 
                         // ── Contract rows (drilldown) ──────────────────────
                         ...(lineOpen ? lineContracts.flatMap(c => {
-                          const hasCos   = c.change_orders.length > 0;
+                          const hasCos   = !c._is_partial && c.change_orders.length > 0;
                           const cosOpen  = !cosCollapsed.has(c.id);
+                          const rowKey   = c._is_partial ? `contract-partial:${c.id}:${row.id}` : `contract:${c.id}`;
+                          const displayAmount = c._is_partial ? c._partial_amount! : c.total_value;
+                          const displayCommit = c._is_partial ? c._partial_amount! : c.total_commitment;
 
                           return [
-                            <tr key={`contract:${c.id}`} className={cgStyles.contractRow}
+                            <tr key={rowKey} className={cgStyles.contractRow}
                                 style={{ cursor: 'pointer' }}
                                 onClick={() => setPanelContractId(c.id)}>
                               <td className={cgStyles.contractGutter}>
@@ -312,7 +326,12 @@ export default function CommitmentsGrid() {
                                 {c.reference_number && (
                                   <span className={cgStyles.refNum}>{c.reference_number}</span>
                                 )}
-                                {c.total_invoiced > 0 && (
+                                {c._is_partial && (
+                                  <span className={cgStyles.partialBadge} title={`Partial allocation from a multi-discipline contract (total: ${usd.format(c.total_value)})`}>
+                                    partial
+                                  </span>
+                                )}
+                                {!c._is_partial && c.total_invoiced > 0 && (
                                   <span className={cgStyles.invBadge} title={`${usd.format(c.total_invoiced)} invoiced`}>
                                     {usd.format(c.total_invoiced)} inv.
                                   </span>
@@ -320,16 +339,16 @@ export default function CommitmentsGrid() {
                               </td>
                               <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />
                               <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`}>
-                                {usd.format(c.total_value)}
+                                {usd.format(displayAmount)}
                               </td>
                               <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`}>
-                                {c.co_value > 0 ? money(c.co_value) : ''}
+                                {!c._is_partial && c.co_value > 0 ? money(c.co_value) : ''}
                               </td>
                               <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`}>
-                                {usd.format(c.total_commitment)}
+                                {usd.format(displayCommit)}
                               </td>
-                              <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum} ${c.remaining_commitment < 0 ? styles.danger : ''}`}>
-                                {c.total_invoiced > 0 ? usd.format(c.remaining_commitment) : '—'}
+                              <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum} ${!c._is_partial && c.remaining_commitment < 0 ? styles.danger : ''}`}>
+                                {!c._is_partial && c.total_invoiced > 0 ? usd.format(c.remaining_commitment) : '—'}
                               </td>
                               <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`} />
                               <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`} />

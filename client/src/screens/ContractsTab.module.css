@@ -234,6 +234,15 @@
 /* Confidence dot */
 .confDot { display:inline-block; width:6px; height:6px; border-radius:50%; flex-shrink:0; }
 
+.pdfBtn {
+  height: 20px; padding: 0 7px;
+  font-size: 10px; font-weight: 600;
+  background: var(--bg-2); color: var(--text-2);
+  border: 1px solid var(--border); border-radius: 3px; cursor: pointer;
+  white-space: nowrap;
+}
+.pdfBtn:hover { border-color: #888; color: var(--text-1); }
+
 .editBtn {
   height: 20px; padding: 0 7px;
   font-size: 10px; font-weight: 600;

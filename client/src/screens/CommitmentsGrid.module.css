@@ -107,6 +107,11 @@
   background: var(--bg-2); border: 1px solid var(--border);
   border-radius: 3px; padding: 0 5px; margin-left: 6px;
 }
+.partialBadge {
+  font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  color: #92400e; background: #fef3c7; border: 1px solid #fcd34d;
+  border-radius: 3px; padding: 0 5px; margin-left: 6px;
+}
 
 .openHint {
   font-size: 10px; color: var(--text-4); margin-left: 6px;
