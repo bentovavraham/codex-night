@@ -19,6 +19,7 @@ interface LineItem {
   rate: string;
   amount: string;
   qb_account_id: number | null;
+  phase_budget_line_id: number | null;
   // AI suggestion metadata
   suggested_qb_account_id: number | null;
   qb_suggestion_confidence: string | null;
@@ -237,9 +238,8 @@ function BudgetLinePicker({ lines, value, onChange }: {
 
 // ─── Invoice list ─────────────────────────────────────────────────────────────
 
-function InvoiceList({ invoices, onUpload, phaseId, onEdit }: {
+function InvoiceList({ invoices, phaseId, onEdit }: {
   invoices: any[];
-  onUpload: () => void;
   phaseId: number;
   onEdit: (id: number) => void;
 }) {
@@ -286,12 +286,11 @@ function InvoiceList({ invoices, onUpload, phaseId, onEdit }: {
 
       <div className={styles.toolbar}>
         <span className={styles.toolLabel}>Invoices</span>
-        <button className={styles.uploadBtn} onClick={onUpload}>+ Upload Invoice</button>
+        <span className={styles.uploadHint}>Upload invoices via the ↑ Import tab</span>
       </div>
       {invoices.length === 0 ? (
         <div className={styles.emptyState}>
-          <p>No invoices yet.</p>
-          <button className={styles.uploadBtnLg} onClick={onUpload}>Upload Invoice PDF</button>
+          <p>No invoices yet — upload PDFs via the <strong>↑ Import</strong> tab.</p>
         </div>
       ) : (
         <div className={styles.scrollArea}>
@@ -365,6 +364,17 @@ function InvoiceList({ invoices, onUpload, phaseId, onEdit }: {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className={styles.totalRow}>
+                <td colSpan={4} className={styles.totalLabel}>
+                  {invoices.length} invoice{invoices.length !== 1 ? 's' : ''}
+                </td>
+                <td className={`${styles.ltd} ${styles.mono} ${styles.right} ${styles.totalCell}`}>
+                  {usd.format(invoices.reduce((s: number, inv: any) => s + Number(inv.amount), 0))}
+                </td>
+                <td colSpan={2} />
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
@@ -428,6 +438,7 @@ function UploadPanel({
           rate:                     li.rate != null ? String(li.rate) : '',
           amount:                   li.amount != null ? String(li.amount) : '',
           qb_account_id:            li.qb_account_id ?? null,
+          phase_budget_line_id:     li.phase_budget_line_id ?? null,
           suggested_qb_account_id:  null,
           qb_suggestion_confidence: null,
         })),
@@ -460,6 +471,7 @@ function UploadPanel({
           rate:                     li.rate   != null ? String(li.rate)   : '',
           amount:                   li.amount != null ? String(li.amount) : '',
           qb_account_id:            null,
+          phase_budget_line_id:     null,
           suggested_qb_account_id:  li.suggested_qb_account_id  ?? null,
           qb_suggestion_confidence: li.qb_suggestion_confidence ?? null,
         }));
@@ -511,7 +523,8 @@ function UploadPanel({
       line_items: [...f.line_items, {
         billing_type: 'fixed', description: '', person: '', line_date: '',
         hours: '', rate: '', amount: '',
-        qb_account_id: null, suggested_qb_account_id: null, qb_suggestion_confidence: null,
+        qb_account_id: null, phase_budget_line_id: null,
+        suggested_qb_account_id: null, qb_suggestion_confidence: null,
       }],
     }));
   }
@@ -555,15 +568,16 @@ function UploadPanel({
         invoice_line_items: form.line_items
           .filter(li => Number(li.amount) > 0)
           .map((li, i) => ({
-            billing_type:  li.billing_type,
-            description:   li.description  || null,
-            person:        li.person       || null,
-            line_date:     li.line_date    || null,
-            hours:         li.hours  ? Number(li.hours)  : null,
-            rate:          li.rate   ? Number(li.rate)   : null,
-            amount:        Number(li.amount),
-            qb_account_id: li.qb_account_id ?? li.suggested_qb_account_id ?? null,
-            sort_order:    i,
+            billing_type:         li.billing_type,
+            description:          li.description  || null,
+            person:               li.person       || null,
+            line_date:            li.line_date    || null,
+            hours:                li.hours  ? Number(li.hours)  : null,
+            rate:                 li.rate   ? Number(li.rate)   : null,
+            amount:               Number(li.amount),
+            qb_account_id:        li.qb_account_id ?? li.suggested_qb_account_id ?? null,
+            phase_budget_line_id: li.phase_budget_line_id ?? null,
+            sort_order:           i,
           })),
       };
       if (form.contract_id) payload.contract_id = form.contract_id;
@@ -944,5 +958,5 @@ export default function InvoicesTab() {
     );
   }
 
-  return <InvoiceList invoices={invoices} onUpload={() => setUploadOpen(true)} phaseId={phaseIdNum} onEdit={handleEdit} />;
+  return <InvoiceList invoices={invoices} phaseId={phaseIdNum} onEdit={handleEdit} />;
 }

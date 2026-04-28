@@ -358,6 +358,24 @@ function ContractList({ contracts, phaseId, onUpload, onEdit }: {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              {(() => {
+                const active = contracts.filter((c: any) => c.status !== 'voided');
+                const totalCommit = active.reduce((s: number, c: any) => s + Number(c.total_commitment ?? c.total_value), 0);
+                const hasCos = active.some((c: any) => Number(c.co_value) > 0);
+                return (
+                  <tr className={styles.totalRow}>
+                    <td colSpan={4} className={styles.totalLabel}>
+                      {active.length} contract{active.length !== 1 ? 's' : ''}{hasCos ? ' + COs' : ''}
+                    </td>
+                    <td className={`${styles.ltd} ${styles.mono} ${styles.right} ${styles.totalCell}`}>
+                      {usd.format(totalCommit)}
+                    </td>
+                    <td colSpan={2} />
+                  </tr>
+                );
+              })()}
+            </tfoot>
           </table>
         </div>
       )}

@@ -55,6 +55,12 @@ const STATUS_COLOR: Record<string, string> = {
   approved: '#2563eb', voided: '#9ca3af', rejected: '#dc2626',
 };
 
+const INV_TYPE: Record<string, { label: string; bg: string; text: string }> = {
+  fixed:   { label: 'Fixed',   bg: '#dbeafe', text: '#1d4ed8' },
+  tm:      { label: 'T&M',     bg: '#fef3c7', text: '#92400e' },
+  expense: { label: 'Expense', bg: '#dcfce7', text: '#166534' },
+};
+
 const SECTIONS = [
   { key: 'professional_fees', label: 'Professional Fees' },
   { key: 'application_fees',  label: 'Application & Other Fees' },
@@ -165,29 +171,79 @@ function DrillPanel({ phaseId, target, onClose }: {
               ? <div className={styles.drillEmpty}>No invoices billed against this line.</div>
               : <table className={styles.drillTable}>
                   <thead><tr>
-                    <th>Invoice #</th><th>Vendor</th><th>Date</th><th>Status</th>
-                    <th className={styles.drillAmt}>Amount</th>
+                    <th>Invoice #</th>
+                    <th>Vendor</th>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Contract</th>
+                    <th>Status</th>
+                    <th className={styles.drillAmt}>Allocated</th>
+                    <th className={styles.drillAmt}>Inv. Total</th>
+                    <th />
                   </tr></thead>
                   <tbody>
-                    {invoices.map((inv: any) => (
-                      <tr key={inv.id} className={styles.drillRow}>
-                        <td className={styles.drillRef}>{inv.invoice_number || '—'}</td>
-                        <td className={styles.drillVendor}>{inv.vendor_name}</td>
-                        <td className={styles.drillRef}>{inv.invoice_date ? String(inv.invoice_date).slice(0, 10) : '—'}</td>
-                        <td>
-                          <span className={styles.drillBadge}
-                            style={{ background: (STATUS_COLOR[inv.status] ?? '#888') + '22', color: STATUS_COLOR[inv.status] ?? '#555' }}>
-                            {inv.status}
-                          </span>
-                        </td>
-                        <td className={`${styles.drillAmt} ${styles.drillAmtBold}`}>{usd.format(Number(inv.amount))}</td>
-                      </tr>
-                    ))}
+                    {invoices.map((inv: any) => {
+                      const t = INV_TYPE[inv.invoice_type];
+                      const allocated = Number(inv.amount);
+                      const total = Number(inv.total_amount);
+                      const isPartial = Math.abs(allocated - total) > 0.01;
+                      return (
+                        <tr key={inv.id} className={styles.drillRow}>
+                          <td className={styles.drillRef}>{inv.invoice_number || '—'}</td>
+                          <td className={styles.drillVendor}>{inv.vendor_name}</td>
+                          <td className={styles.drillRef}>{inv.invoice_date ? String(inv.invoice_date).slice(0, 10) : '—'}</td>
+                          <td>
+                            {t
+                              ? <span className={styles.drillBadge} style={{ background: t.bg, color: t.text }}>{t.label}</span>
+                              : <span className={styles.drillRef}>{inv.invoice_type || '—'}</span>
+                            }
+                          </td>
+                          <td>
+                            {inv.contract_ref
+                              ? <span className={styles.drillContractRef}>#{inv.contract_ref}</span>
+                              : <span className={styles.drillDirectBadge}>Direct</span>
+                            }
+                          </td>
+                          <td>
+                            <span className={styles.drillBadge}
+                              style={{ background: (STATUS_COLOR[inv.status] ?? '#888') + '22', color: STATUS_COLOR[inv.status] ?? '#555' }}>
+                              {inv.status}
+                            </span>
+                            {isPartial && <span className={styles.drillPartial}>split</span>}
+                          </td>
+                          <td className={`${styles.drillAmt} ${styles.drillAmtBold}`}>{usd.format(allocated)}</td>
+                          <td className={`${styles.drillAmt} ${styles.drillAmtDim}`}>{isPartial ? usd.format(total) : '—'}</td>
+                          <td>
+                            {inv.file_reference && (
+                              <button className={styles.drillPdfBtn}
+                                onClick={() => window.open(`/api/files/${encodeURIComponent(inv.file_reference)}`, '_blank')}
+                                title="View PDF">
+                                PDF
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
-                  <tfoot><tr className={styles.drillTotal}>
-                    <td colSpan={4}>Total billed</td>
-                    <td className={styles.drillAmt}>{usd.format(invoiceTotal)}</td>
-                  </tr></tfoot>
+                  <tfoot>
+                    {(['fixed', 'tm', 'expense'] as const).map(type => {
+                      const sub = invoices.filter((i: any) => i.invoice_type === type).reduce((s: number, i: any) => s + Number(i.amount), 0);
+                      if (sub === 0) return null;
+                      return (
+                        <tr key={type} className={styles.drillSubtotalRow}>
+                          <td colSpan={7} className={styles.drillSubtotalLabel}>{INV_TYPE[type].label}</td>
+                          <td className={`${styles.drillAmt} ${styles.drillAmtDim}`}>{usd.format(sub)}</td>
+                          <td />
+                        </tr>
+                      );
+                    })}
+                    <tr className={styles.drillTotal}>
+                      <td colSpan={7}>Total billed to this line</td>
+                      <td className={styles.drillAmt}>{usd.format(invoiceTotal)}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
                 </table>
             }
           </div>
@@ -234,7 +290,8 @@ const addRow = (t: Totals, r: BudgetRow): Totals => ({
   expenses:          t.expenses          + r.expense_charges,
   billed:            t.billed            + r.billed,
   paid:              t.paid              + r.paid,
-  rem_budget:        t.rem_budget        + r.remaining_budget,
+  // Only count rows with real activity; template rows with no contracts or invoices contribute 0
+  rem_budget:        t.rem_budget        + (r.committed > 0 || r.billed > 0 ? r.committed - r.billed : 0),
 });
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -255,6 +312,7 @@ export default function BudgetGrid() {
   const [collapsed,    setCollapsed]    = useState<Set<string>>(new Set());
   const [active,       setActive]       = useState<{ rowId: number; field: string }>({ rowId: -1, field: '' });
   const [showDetails,  setShowDetails]  = useState(false);
+  const [hideUnused,   setHideUnused]   = useState(false);
   const [panelRow,     setPanelRow]     = useState<BudgetRow | null>(null);
   const [drillTarget,  setDrillTarget]  = useState<DrillTarget | null>(null);
 
@@ -288,13 +346,6 @@ export default function BudgetGrid() {
     updateMutation.mutate({ id: rowId, data: { [field]: value } });
   }
 
-  const handleTabNext = useCallback((rowId: number, field: string) => {
-    const fi = TAB_FIELDS.indexOf(field);
-    if (fi < TAB_FIELDS.length - 1) { setActive({ rowId, field: TAB_FIELDS[fi + 1] }); return; }
-    const ri = rows.findIndex(r => r.id === rowId);
-    if (ri < rows.length - 1) setActive({ rowId: rows[ri + 1].id, field: TAB_FIELDS[0] });
-  }, [rows]);
-
   function toggle(key: string) {
     setCollapsed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   }
@@ -303,31 +354,47 @@ export default function BudgetGrid() {
     setDrillTarget(prev => prev?.rowId === t.rowId && prev?.cell === t.cell ? null : t);
   }
 
+  // A row is "unused" when it has no contracted amount and no billed invoices.
+  // User-added rows are always shown even if empty.
+  const filteredRows = useMemo(() =>
+    hideUnused
+      ? rows.filter(r => r.committed > 0 || r.billed > 0 || r.source === 'user')
+      : rows,
+    [rows, hideUnused]
+  );
+
   const tree = useMemo(() => {
     const m = new Map<string, Map<string, BudgetRow[]>>();
     for (const s of SECTIONS) m.set(s.key, new Map());
-    for (const r of rows) {
+    for (const r of filteredRows) {
       const sm = m.get(r.section); if (!sm) continue;
       const sg = r.sub_group ?? '__none__';
       if (!sm.has(sg)) sm.set(sg, []);
       sm.get(sg)!.push(r);
     }
     return m;
-  }, [rows]);
+  }, [filteredRows]);
 
   const secTotals = useMemo(() => {
     const t: Record<string, Totals> = {};
-    for (const r of rows) { if (!t[r.section]) t[r.section] = zero(); t[r.section] = addRow(t[r.section], r); }
+    for (const r of filteredRows) { if (!t[r.section]) t[r.section] = zero(); t[r.section] = addRow(t[r.section], r); }
     return t;
-  }, [rows]);
+  }, [filteredRows]);
 
   const sgTotals = useMemo(() => {
     const t: Record<string, Totals> = {};
-    for (const r of rows) { const k = r.sub_group ?? `${r.section}:none`; if (!t[k]) t[k] = zero(); t[k] = addRow(t[k], r); }
+    for (const r of filteredRows) { const k = r.sub_group ?? `${r.section}:none`; if (!t[k]) t[k] = zero(); t[k] = addRow(t[k], r); }
     return t;
-  }, [rows]);
+  }, [filteredRows]);
 
-  const grand = useMemo(() => rows.reduce((a, r) => addRow(a, r), zero()), [rows]);
+  const grand = useMemo(() => filteredRows.reduce((a, r) => addRow(a, r), zero()), [filteredRows]);
+
+  const handleTabNext = useCallback((rowId: number, field: string) => {
+    const fi = TAB_FIELDS.indexOf(field);
+    if (fi < TAB_FIELDS.length - 1) { setActive({ rowId, field: TAB_FIELDS[fi + 1] }); return; }
+    const ri = filteredRows.findIndex(r => r.id === rowId);
+    if (ri < filteredRows.length - 1) setActive({ rowId: filteredRows[ri + 1].id, field: TAB_FIELDS[0] });
+  }, [filteredRows]);
 
   if (isLoading) return <div className={styles.splash}>Loading budget…</div>;
   if (error)     return <div className={styles.splash}>Error loading budget.</div>;
@@ -379,6 +446,11 @@ export default function BudgetGrid() {
           </span>
         )}
         <div className={styles.toolActions}>
+          <button className={`${styles.tbBtn} ${hideUnused ? styles.tbBtnActive : ''}`}
+            onClick={() => setHideUnused(v => !v)}
+            title="Hide rows with no contracts or invoices">
+            {hideUnused ? `Active Only (${filteredRows.length}/${rows.length})` : 'Active Only'}
+          </button>
           <button className={`${styles.tbBtn} ${showDetails ? styles.tbBtnActive : ''}`}
             onClick={() => setShowDetails(v => !v)}>
             {showDetails ? 'Hide Details' : 'Details'}
@@ -483,8 +555,8 @@ export default function BudgetGrid() {
                               className={warnCls(row.billed, row.budgeted_amount)} />
                             <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.amount_due)}</td>
                             <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
-                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.remaining_budget < 0 ? styles.danger : ''}`}>
-                              {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
+                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${(row.committed > 0 || row.billed > 0) && row.committed - row.billed < 0 ? styles.danger : ''}`}>
+                              {(row.committed > 0 || row.billed > 0) ? usd.format(row.committed - row.billed) : '—'}
                             </td>
                             <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.billed, row.budgeted_amount)}`}>
                               {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}

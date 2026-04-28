@@ -37,6 +37,10 @@
 .sCompleted { background:#c7f0e2; color:#0d6655; }
 .sVoided    { background:#fde0dc; color:#922b21; }
 
+.totalRow td { position:sticky; bottom:0; z-index:3; background:var(--bg-2); border-top:2px solid var(--border-strong); }
+.totalLabel { padding:0 10px; height:32px; vertical-align:middle; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3); }
+.totalCell { font-weight:700 !important; color:var(--text-1) !important; }
+
 .emptyState { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:16px; color:var(--text-3); }
 .emptyState p { font-size:13px; }
 .uploadBtnLg { padding:10px 28px; background:var(--accent); color:#fff; border:none; border-radius:5px; font-size:13px; font-weight:600; cursor:pointer; }
