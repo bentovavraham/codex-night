@@ -35,6 +35,7 @@ interface InvoiceForm {
   description: string;
   contract_id: number | null;
   phase_budget_line_id: number | null;
+  status: string;
   line_items: LineItem[];
   reviewed: boolean;
 }
@@ -42,7 +43,8 @@ interface InvoiceForm {
 const EMPTY_FORM: InvoiceForm = {
   invoice_number: '', vendor_name: '', vendor_id: null, vendor_is_new: false,
   invoice_date: '', services_thru_date: '', amount: '',
-  description: '', contract_id: null, phase_budget_line_id: null, line_items: [], reviewed: false,
+  description: '', contract_id: null, phase_budget_line_id: null,
+  status: 'pending', line_items: [], reviewed: false,
 };
 
 type Stage = 'drop' | 'extracting' | 'review';
@@ -416,6 +418,7 @@ function UploadPanel({
         description:         inv.description ?? '',
         contract_id:         inv.contract_id ?? null,
         phase_budget_line_id: inv.phase_budget_line_id ?? null,
+        status:              inv.status ?? 'pending',
         line_items: (inv.invoice_line_items ?? []).map((li: any) => ({
           billing_type:             li.billing_type ?? 'fixed',
           description:              li.description ?? '',
@@ -471,6 +474,7 @@ function UploadPanel({
           description:         e.summary ?? '',
           contract_id:         null,
           phase_budget_line_id: null,
+          status:              'pending',
           line_items:          items,
           reviewed:            false,
         });
@@ -547,6 +551,7 @@ function UploadPanel({
         invoice_type:         invoiceType,
         project_id:           projectId,
         phase_budget_line_id: form.phase_budget_line_id || null,
+        status:               form.status,
         invoice_line_items: form.line_items
           .filter(li => Number(li.amount) > 0)
           .map((li, i) => ({
@@ -668,6 +673,24 @@ function UploadPanel({
                   ))}
                 </select>
               </div>
+
+              {/* Status */}
+              {editId && (
+                <div className={styles.hfGroup}>
+                  <label className={styles.hfLabel}>Status</label>
+                  <select className={styles.hfSelect} value={form.status}
+                    onChange={e => setF('status', e.target.value)}>
+                    <option value="pending">Pending</option>
+                    <option value="pm_approved">PM Approved</option>
+                    <option value="partner_approved">Partner Approved</option>
+                    <option value="approved">Approved</option>
+                    <option value="pushed">Pushed</option>
+                    <option value="paid">Paid</option>
+                    <option value="on_hold">On Hold</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </div>
+              )}
 
               {/* Budget line — required when no contract so the invoice rolls up correctly */}
               {!form.contract_id && (

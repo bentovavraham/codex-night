@@ -106,7 +106,7 @@ function DrillPanel({ phaseId, target, onClose }: {
   const { data, isLoading } = useQuery({
     queryKey: ['drill', phaseId, target.rowId],
     queryFn: () => api.drillBudgetLine(phaseId, target.rowId),
-    staleTime: 30_000,
+    staleTime: 0,
   });
   const contracts: any[] = data?.contracts ?? [];
   const invoices:  any[] = data?.invoices  ?? [];
