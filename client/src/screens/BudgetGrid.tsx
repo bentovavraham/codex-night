@@ -290,8 +290,7 @@ const addRow = (t: Totals, r: BudgetRow): Totals => ({
   expenses:          t.expenses          + r.expense_charges,
   billed:            t.billed            + r.billed,
   paid:              t.paid              + r.paid,
-  // Only count rows with real activity; template rows with no contracts or invoices contribute 0
-  rem_budget:        t.rem_budget        + (r.committed > 0 || r.billed > 0 ? r.committed - r.billed : 0),
+  rem_budget:        t.rem_budget        + r.remaining_budget,
 });
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -414,6 +413,8 @@ export default function BudgetGrid() {
     const amtDue = t.billed - t.paid;
     return <>
       <td className={cls}>{moneyD(t.budgeted)}</td>
+      <td className={`${cls} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
+      <td className={cls}>{t.budgeted > 0 ? remPct(t.billed, t.budgeted) : '—'}</td>
       <td className={cls}>{money(t.committed)}</td>
       <td className={cls}>{t.co_value > 0 ? money(t.co_value) : '—'}</td>
       <td className={`${cls} ${t.total_commitment > t.budgeted && t.budgeted > 0 ? styles.danger : ''}`}>{money(t.total_commitment)}</td>
@@ -423,8 +424,6 @@ export default function BudgetGrid() {
       <td className={cls}>{moneyD(t.billed)}</td>
       <td className={cls}>{money(amtDue)}</td>
       <td className={cls}>{money(t.paid)}</td>
-      <td className={`${cls} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
-      <td className={cls}>{remPct(t.billed, t.budgeted)}</td>
       <td className={cls}>{perSF(t.billed, gla_sf)}</td>
       <td className={cls}>{perAC(t.billed, gla_ac)}</td>
       <td className={`${cls} ${dc}`} /><td className={`${cls} ${dc}`} />
@@ -460,22 +459,24 @@ export default function BudgetGrid() {
 
       <div className={styles.scrollArea} onClick={() => setActive({ rowId: -1, field: '' })}>
         <table className={styles.table} onClick={e => e.stopPropagation()}>
-          <colgroup><col style={{width:24}}/><col style={{width:200}}/><col style={{width:100}}/><col style={{width:90}}/><col style={{width:90}}/><col style={{width:76}}/><col style={{width:90}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:76}}/><col style={{width:88}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:88}}/><col style={{width:50}}/><col style={{width:64}}/><col style={{width:64}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
+          <colgroup><col style={{width:24}}/><col style={{width:200}}/><col style={{width:100}}/><col style={{width:90}}/><col style={{width:88}}/><col style={{width:50}}/><col style={{width:90}}/><col style={{width:76}}/><col style={{width:90}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:76}}/><col style={{width:88}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:64}}/><col style={{width:64}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
           <thead>
             <tr className={styles.theadGroup}>
               <th colSpan={4} />
+              <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>Remaining</th>
               <th className={styles.thGroup} colSpan={3}>Contract Commitment</th>
               <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={4}>Invoiced</th>
               <th className={styles.thGroup} colSpan={2}>Payments</th>
-              <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>Remaining</th>
-              <th className={styles.thGroup} colSpan={2}>Unit Cost</th>
+              <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>Unit Cost</th>
               <th className={`${styles.th} ${dc}`} colSpan={4} />
             </tr>
             <tr className={styles.thead}>
               <th className={styles.th} />
               <th className={`${styles.th} ${styles.thLeft}`}>Task</th>
               <th className={`${styles.th} ${styles.thLeft}`}>Discipline</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Templated</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Budgeted</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
               <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Contracted ↓</th>
               <th className={`${styles.th} ${styles.thRight}`}>COs</th>
               <th className={`${styles.th} ${styles.thRight}`}>Total Commit</th>
@@ -485,8 +486,6 @@ export default function BudgetGrid() {
               <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Billed ↓</th>
               <th className={`${styles.th} ${styles.thRight}`}>Amt Due</th>
               <th className={`${styles.th} ${styles.thRight}`}>Paid</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
               <th className={`${styles.th} ${styles.thRight}`}>$/SF</th>
               <th className={`${styles.th} ${styles.thRight}`}>$/AC</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Calc Method</th>
@@ -539,6 +538,12 @@ export default function BudgetGrid() {
                               isActive={isA('budgeted_amount')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
                               onCommit={handleCommit} onTabNext={handleTabNext}
                               className={`${styles.tdMoney} ${(row.source ?? 'template') === 'template' && !row.amount_modified ? styles.amtTemplate : styles.amtModified}`} />
+                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.budgeted_amount > 0 && row.remaining_budget < 0 ? styles.danger : ''}`}>
+                              {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
+                            </td>
+                            <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.billed, row.budgeted_amount)}`}>
+                              {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}
+                            </td>
                             <DC value={row.committed} row={row} cell="committed"
                               active={isDrillActive && drillTarget?.cell === 'committed'} onDrill={drill} />
                             <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
@@ -555,12 +560,6 @@ export default function BudgetGrid() {
                               className={warnCls(row.billed, row.budgeted_amount)} />
                             <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.amount_due)}</td>
                             <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
-                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${(row.committed > 0 || row.billed > 0) && row.committed - row.billed < 0 ? styles.danger : ''}`}>
-                              {(row.committed > 0 || row.billed > 0) ? usd.format(row.committed - row.billed) : '—'}
-                            </td>
-                            <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.billed, row.budgeted_amount)}`}>
-                              {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}
-                            </td>
                             <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.billed, gla_sf)}</td>
                             <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
                             <EditCell value={row.calculation_method} rowId={row.id} field="calculation_method"
@@ -602,6 +601,8 @@ export default function BudgetGrid() {
             <tr className={styles.totalRow}>
               <td /><td className={styles.totalLabel} colSpan={2}>TOTAL</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{usd.format(grand.budgeted)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(grand.rem_budget)}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{grand.budgeted > 0 ? remPct(grand.billed, grand.budgeted) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.committed)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{grand.co_value > 0 ? usd.format(grand.co_value) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.total_commitment > grand.budgeted ? styles.danger : ''}`}>{usd.format(grand.total_commitment)}</td>
@@ -611,8 +612,6 @@ export default function BudgetGrid() {
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.billed)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.billed - grand.paid)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.paid)}</td>
-              <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.rem_budget < 0 ? styles.danger : ''}`}>{usd.format(grand.rem_budget)}</td>
-              <td className={`${styles.totalCell} ${styles.tdPct}`}>{remPct(grand.billed, grand.budgeted)}</td>
               <td className={`${styles.totalCell} ${styles.tdPct}`}>{perSF(grand.billed, gla_sf)}</td>
               <td className={`${styles.totalCell} ${styles.tdPct}`}>{perAC(grand.billed, gla_ac)}</td>
               <td className={`${styles.totalCell} ${dc}`} /><td className={`${styles.totalCell} ${dc}`} />
