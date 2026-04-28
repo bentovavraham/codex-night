@@ -196,6 +196,68 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/phases/:phaseId/budget-lines/:lineId/drill — cell drill-down
+router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (req, res, next) => {
+  try {
+    const phaseId = Number(req.params.phaseId);
+    const lineId  = Number(req.params.lineId);
+
+    // Contracts: primary (phase_budget_line_id = lineId) or partial (cli line items)
+    const contractsQ = await pool.query(`
+      SELECT
+        c.id, c.vendor_name, c.reference_number, c.status,
+        c.total_value, c.contract_date,
+        -- amount attributed to this budget line
+        COALESCE(
+          (SELECT SUM(cli.budgeted_amount) FROM contract_line_items cli
+           WHERE cli.contract_id = c.id AND COALESCE(cli.phase_budget_line_id, c.phase_budget_line_id) = $2),
+          CASE WHEN c.phase_budget_line_id = $2 AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
+               THEN c.total_value ELSE 0 END
+        ) AS allocated_amount,
+        c.phase_budget_line_id = $2 AS is_primary
+      FROM contracts c
+      WHERE c.status NOT IN ('voided','draft')
+        AND (
+          c.phase_budget_line_id = $2
+          OR EXISTS (
+            SELECT 1 FROM contract_line_items cli
+            WHERE cli.contract_id = c.id AND cli.phase_budget_line_id = $2
+          )
+        )
+      ORDER BY c.contract_date DESC NULLS LAST, c.id
+    `, [phaseId, lineId]);
+
+    // Invoices against this budget line (via contract or direct)
+    const invoicesQ = await pool.query(`
+      SELECT
+        i.id, i.vendor_name, i.invoice_number, i.invoice_date,
+        i.amount, i.status, i.invoice_type, i.contract_id,
+        c.reference_number AS contract_ref,
+        c.vendor_name AS contract_vendor
+      FROM invoices i
+      LEFT JOIN contracts c ON c.id = i.contract_id
+      WHERE i.status NOT IN ('voided','draft','rejected')
+        AND (
+          i.contract_id IN (
+            SELECT id FROM contracts
+            WHERE phase_budget_line_id = $2 AND status NOT IN ('voided')
+          )
+          OR (i.phase_budget_line_id = $2 AND i.contract_id IS NULL)
+          OR EXISTS (
+            SELECT 1 FROM invoice_line_items ili
+            WHERE ili.invoice_id = i.id AND ili.phase_budget_line_id = $2
+          )
+        )
+      ORDER BY i.invoice_date DESC NULLS LAST, i.id
+    `, [phaseId, lineId]);
+
+    res.json({
+      contracts: contractsQ.rows,
+      invoices:  invoicesQ.rows,
+    });
+  } catch (err) { next(err); }
+});
+
 // POST /api/phases/:phaseId/budget/init — seed from template
 router.post('/phases/:phaseId/budget/init', requireAuth, async (req, res, next) => {
   try {

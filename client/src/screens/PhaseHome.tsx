@@ -4,13 +4,13 @@ import { api } from '../api/client';
 import styles from './PhaseHome.module.css';
 
 const TABS = [
-  { to: 'budget',       label: 'Budget · Invoices' },
-  { to: 'commitments',  label: 'Budget · Contracts' },
-  { to: 'contracts',    label: 'Contracts' },
-  { to: 'invoices',     label: 'Invoices' },
-  { to: 'alerts',       label: 'Alerts' },
-  { to: 'history',      label: 'History' },
-  { to: 'import',       label: '↑ Import' },
+  { to: 'budget',      label: 'Budget' },
+  { to: 'commitments', label: 'Commitments' },
+  { to: 'contracts',   label: 'Contracts' },
+  { to: 'invoices',    label: 'Invoices' },
+  { to: 'alerts',      label: 'Alerts' },
+  { to: 'history',     label: 'History' },
+  { to: 'import',      label: '↑ Import' },
 ];
 
 export default function PhaseHome() {

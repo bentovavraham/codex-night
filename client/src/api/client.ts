@@ -43,6 +43,7 @@ export const api = {
   getBudget:    (phaseId: number)     => request<any[]>('GET',  `/api/phases/${phaseId}/budget`),
   updateBudgetLine: (id: number, data: any) => request<any>('PATCH', `/api/budget-lines/${id}`, data),
   getLineActivity: (lineId: number)          => request<any>('GET',  `/api/budget-lines/${lineId}/activity`),
+  drillBudgetLine: (phaseId: number, lineId: number) => request<any>('GET', `/api/phases/${phaseId}/budget-lines/${lineId}/drill`),
   initBudget:   (phaseId: number, template: string) => request<any>('POST', `/api/phases/${phaseId}/budget/init`, { template }),
 
   // Contracts

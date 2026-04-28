@@ -1,24 +1,24 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-
 import { api } from '../api/client';
 import type { BudgetRow } from './BudgetGrid';
 import styles from './BudgetGrid.module.css';
 import cgStyles from './CommitmentsGrid.module.css';
-import { ContractPanel } from './ContractPanel';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-const money  = (n: number) => n === 0 ? '' : usd.format(n);
-const moneyD = (n: number) => n === 0 ? '—' : usd.format(n);
-const remPct = (committed: number, budget: number): string =>
-  budget > 0 ? `${Math.round(((budget - committed) / budget) * 100)}%` : '—';
-const perSF = (amount: number, sf: number | null): string =>
-  sf && sf > 0 && amount > 0 ? `$${(amount / sf).toFixed(2)}` : '—';
-const perAC = (amount: number, ac: number | null): string =>
-  ac && ac > 0 && amount > 0 ? `$${Math.round(amount / ac).toLocaleString()}` : '—';
+const usd  = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const fmt  = (n: number) => n === 0 ? '—' : usd.format(n);
+const fmtZ = (n: number) => n === 0 ? ''  : usd.format(n);
+const pct  = (a: number, b: number) => b > 0 ? `${Math.round(((b - a) / b) * 100)}%` : '—';
+const perSF = (n: number, sf: number | null) => sf && sf > 0 && n > 0 ? `$${(n / sf).toFixed(2)}` : '—';
+const perAC = (n: number, ac: number | null) => ac && ac > 0 && n > 0 ? `$${Math.round(n / ac).toLocaleString()}` : '—';
+
+const STATUS_COLOR: Record<string, string> = {
+  active: '#16a34a', pending: '#d97706', draft: '#6b7280',
+  approved: '#2563eb', voided: '#9ca3af', rejected: '#dc2626',
+};
 
 const SECTIONS = [
   { key: 'professional_fees', label: 'Professional Fees' },
@@ -26,49 +26,155 @@ const SECTIONS = [
   { key: 'construction',      label: 'Estimated Extraordinary Construction Costs' },
 ] as const;
 
-const STATUS_LABEL: Record<string, string> = {
-  draft: 'Draft', pending: 'Pending', approved: 'Approved',
-  rejected: 'Rejected', voided: 'Voided', active: 'Active',
-};
+// ─── Drill Panel ──────────────────────────────────────────────────────────────
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+type DrillCell = 'committed' | 'billed';
 
-type Totals = { budgeted: number; committed: number; co_value: number; total_commitment: number; remaining_commit: number; };
-const zero = (): Totals => ({ budgeted: 0, committed: 0, co_value: 0, total_commitment: 0, remaining_commit: 0 });
-const addRow = (t: Totals, r: BudgetRow): Totals => ({
-  budgeted:          t.budgeted          + r.budgeted_amount,
-  committed:         t.committed         + r.committed,
-  co_value:          t.co_value          + r.co_value,
-  total_commitment:  t.total_commitment  + r.total_commitment,
-  remaining_commit:  t.remaining_commit  + r.remaining_commit,
-});
+interface DrillTarget { rowId: number; rowName: string; cell: DrillCell; }
 
-interface PhaseContract {
-  id: number;
-  phase_budget_line_id: number;
-  vendor_name: string;
-  reference_number: string | null;
-  total_value: number;
-  status: string;
-  contract_date: string | null;
-  co_count: number;
-  co_value: number;
-  total_commitment: number;
-  invoiced_fixed: number;
-  invoiced_tm: number;
-  invoiced_expense: number;
-  total_invoiced: number;
-  remaining_commitment: number;
-  cli_allocations?: Array<{ budget_line_id: number; amount: number }>;
-  _partial_amount?: number;
-  _is_partial?: boolean;
-  change_orders: Array<{
-    id: number;
-    co_number: string | null;
-    description: string;
-    amount: number;
-    status: string;
-  }>;
+function DrillPanel({ phaseId, target, onClose }: {
+  phaseId: number;
+  target: DrillTarget;
+  onClose: () => void;
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['drill', phaseId, target.rowId],
+    queryFn: () => api.drillBudgetLine(phaseId, target.rowId),
+    staleTime: 30_000,
+  });
+
+  const contracts: any[] = data?.contracts ?? [];
+  const invoices:  any[] = data?.invoices  ?? [];
+
+  const contractTotal = contracts.reduce((s: number, c: any) => s + Number(c.allocated_amount), 0);
+  const invoiceTotal  = invoices.reduce( (s: number, i: any) => s + Number(i.amount), 0);
+
+  return (
+    <div className={cgStyles.drillOverlay} onClick={onClose}>
+      <div className={cgStyles.drillPanel} onClick={e => e.stopPropagation()}>
+        <div className={cgStyles.drillHeader}>
+          <div>
+            <div className={cgStyles.drillTitle}>{target.rowName}</div>
+            <div className={cgStyles.drillSub}>{target.cell === 'committed' ? 'Contract Commitments' : 'Invoiced / Billed'}</div>
+          </div>
+          <button className={cgStyles.drillClose} onClick={onClose}>✕</button>
+        </div>
+
+        {isLoading && <div className={cgStyles.drillLoading}>Loading…</div>}
+
+        {!isLoading && target.cell === 'committed' && (
+          <div className={cgStyles.drillBody}>
+            {contracts.length === 0 ? (
+              <div className={cgStyles.drillEmpty}>No contracts committed to this line.</div>
+            ) : (
+              <table className={cgStyles.drillTable}>
+                <thead>
+                  <tr>
+                    <th>Vendor</th>
+                    <th>Ref #</th>
+                    <th>Status</th>
+                    <th className={cgStyles.drillAmt}>Allocated</th>
+                    <th className={cgStyles.drillAmt}>Contract Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {contracts.map((c: any) => (
+                    <tr key={c.id} className={cgStyles.drillRow}>
+                      <td className={cgStyles.drillVendor}>{c.vendor_name}</td>
+                      <td className={cgStyles.drillRef}>{c.reference_number || '—'}</td>
+                      <td>
+                        <span className={cgStyles.drillBadge}
+                          style={{ background: STATUS_COLOR[c.status] + '22', color: STATUS_COLOR[c.status] ?? '#555' }}>
+                          {c.status}
+                        </span>
+                        {!c.is_primary && (
+                          <span className={cgStyles.drillPartial} title="Multi-discipline contract — this is the portion allocated here">partial</span>
+                        )}
+                      </td>
+                      <td className={`${cgStyles.drillAmt} ${cgStyles.drillAmtBold}`}>{usd.format(Number(c.allocated_amount))}</td>
+                      <td className={`${cgStyles.drillAmt} ${cgStyles.drillAmtDim}`}>{usd.format(Number(c.total_value))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className={cgStyles.drillTotal}>
+                    <td colSpan={3}>Total committed</td>
+                    <td className={cgStyles.drillAmt}>{usd.format(contractTotal)}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </div>
+        )}
+
+        {!isLoading && target.cell === 'billed' && (
+          <div className={cgStyles.drillBody}>
+            {invoices.length === 0 ? (
+              <div className={cgStyles.drillEmpty}>No invoices billed against this line.</div>
+            ) : (
+              <table className={cgStyles.drillTable}>
+                <thead>
+                  <tr>
+                    <th>Invoice #</th>
+                    <th>Vendor</th>
+                    <th>Date</th>
+                    <th>Status</th>
+                    <th className={cgStyles.drillAmt}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((inv: any) => (
+                    <tr key={inv.id} className={cgStyles.drillRow}>
+                      <td className={cgStyles.drillRef}>{inv.invoice_number || '—'}</td>
+                      <td className={cgStyles.drillVendor}>{inv.vendor_name}</td>
+                      <td className={cgStyles.drillRef}>{inv.invoice_date ? String(inv.invoice_date).slice(0, 10) : '—'}</td>
+                      <td>
+                        <span className={cgStyles.drillBadge}
+                          style={{ background: STATUS_COLOR[inv.status] + '22', color: STATUS_COLOR[inv.status] ?? '#555' }}>
+                          {inv.status}
+                        </span>
+                      </td>
+                      <td className={`${cgStyles.drillAmt} ${cgStyles.drillAmtBold}`}>{usd.format(Number(inv.amount))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className={cgStyles.drillTotal}>
+                    <td colSpan={4}>Total billed</td>
+                    <td className={cgStyles.drillAmt}>{usd.format(invoiceTotal)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Drill cell ───────────────────────────────────────────────────────────────
+
+function DC({ value, zero: zeroStr = '—', row, cell, active, onDrill, className }: {
+  value: number;
+  zero?: string;
+  row: BudgetRow;
+  cell: DrillCell;
+  active: boolean;
+  onDrill: (t: DrillTarget) => void;
+  className?: string;
+}) {
+  const hasData = value !== 0;
+  return (
+    <td
+      className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${className ?? ''} ${hasData ? cgStyles.drillable : ''} ${active ? cgStyles.drillActive : ''}`}
+      onClick={hasData ? () => onDrill({ rowId: row.id, rowName: row.task_name, cell }) : undefined}
+      title={hasData ? 'Click to see breakdown' : undefined}
+    >
+      {value === 0 ? zeroStr : usd.format(value)}
+    </td>
+  );
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -76,6 +182,9 @@ interface PhaseContract {
 export default function CommitmentsGrid() {
   const { projectId, phaseId } = useParams<{ projectId: string; phaseId: string }>();
   const phaseIdNum = Number(phaseId);
+
+  const [collapsed,   setCollapsed]   = useState<Set<string>>(new Set());
+  const [drillTarget, setDrillTarget] = useState<DrillTarget | null>(null);
 
   const { data: project } = useQuery({
     queryKey: ['project', Number(projectId)],
@@ -85,323 +194,191 @@ export default function CommitmentsGrid() {
   const gla_sf = (project as any)?.gla_sf ? Number((project as any).gla_sf) : null;
   const gla_ac = (project as any)?.gla_ac ? Number((project as any).gla_ac) : null;
 
-  // collapsed: sec:key, sg:key, line:id
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  // expanded contract drilldown: line:id
-  const [contractsOpen, setContractsOpen] = useState<Set<number>>(new Set());
-  // collapsed CO list under a contract: contract:id
-  const [cosCollapsed, setCosCollapsed] = useState<Set<number>>(new Set());
-  // selected contract for detail panel
-  const [panelContractId, setPanelContractId] = useState<number | null>(null);
-
   const { data: rows = [], isLoading, error } = useQuery<BudgetRow[]>({
     queryKey: ['budget', phaseIdNum],
-    queryFn: () => api.getBudget(phaseIdNum),
-    enabled: !!phaseIdNum,
+    queryFn:  () => api.getBudget(phaseIdNum),
+    enabled:  !!phaseIdNum,
   });
-
-  const { data: contracts = [] } = useQuery<PhaseContract[]>({
-    queryKey: ['phaseContracts', phaseIdNum],
-    queryFn: () => api.listContracts(phaseIdNum),
-    enabled: !!phaseIdNum,
-  });
-
-  // Map budget_line_id → contracts[] (including partial cross-line allocations)
-  const contractsByLine = useMemo(() => {
-    const m = new Map<number, PhaseContract[]>();
-    for (const c of contracts) {
-      // Primary budget line
-      if (c.phase_budget_line_id) {
-        if (!m.has(c.phase_budget_line_id)) m.set(c.phase_budget_line_id, []);
-        m.get(c.phase_budget_line_id)!.push(c);
-      }
-      // Secondary lines — contract line items assigned to a different budget line
-      for (const alloc of c.cli_allocations ?? []) {
-        if (!m.has(alloc.budget_line_id)) m.set(alloc.budget_line_id, []);
-        m.get(alloc.budget_line_id)!.push({ ...c, _partial_amount: alloc.amount, _is_partial: true });
-      }
-    }
-    return m;
-  }, [contracts]);
 
   function toggle(key: string) {
     setCollapsed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   }
-  function toggleLine(id: number) {
-    setContractsOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  }
-  function toggleCo(id: number) {
-    setCosCollapsed(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  function drill(t: DrillTarget) {
+    setDrillTarget(prev => prev?.rowId === t.rowId && prev?.cell === t.cell ? null : t);
   }
 
-  const tree = useMemo(() => {
-    const m = new Map<string, Map<string, BudgetRow[]>>();
-    for (const s of SECTIONS) m.set(s.key, new Map());
-    for (const r of rows) {
-      const sm = m.get(r.section); if (!sm) continue;
-      const sg = r.sub_group ?? '__none__';
-      if (!sm.has(sg)) sm.set(sg, []);
-      sm.get(sg)!.push(r);
-    }
-    return m;
-  }, [rows]);
+  // Group rows into sections & sub-groups
+  const sections = SECTIONS.map(sec => {
+    const secRows = rows.filter(r => r.section === sec.key);
+    const sgKeys  = [...new Set(secRows.map(r => r.sub_group ?? '__none__'))];
+    const groups  = sgKeys.map(sg => ({
+      key:  sg,
+      label: sg === '__none__' ? null : sg,
+      rows: secRows.filter(r => (r.sub_group ?? '__none__') === sg),
+    }));
+    const total = secRows.reduce((a, r) => ({
+      budgeted:         a.budgeted         + r.budgeted_amount,
+      committed:        a.committed        + r.committed,
+      co_value:         a.co_value         + r.co_value,
+      total_commitment: a.total_commitment + r.total_commitment,
+      billed:           a.billed           + r.billed,
+      remaining_commit: a.remaining_commit + r.remaining_commit,
+    }), { budgeted: 0, committed: 0, co_value: 0, total_commitment: 0, billed: 0, remaining_commit: 0 });
+    return { ...sec, groups, total };
+  });
 
-  const secTotals = useMemo(() => {
-    const t: Record<string, Totals> = {};
-    for (const r of rows) { if (!t[r.section]) t[r.section] = zero(); t[r.section] = addRow(t[r.section], r); }
-    return t;
-  }, [rows]);
-
-  const sgTotals = useMemo(() => {
-    const t: Record<string, Totals> = {};
-    for (const r of rows) {
-      const k = r.sub_group ?? `${r.section}:none`;
-      if (!t[k]) t[k] = zero(); t[k] = addRow(t[k], r);
-    }
-    return t;
-  }, [rows]);
-
-  const grand = useMemo(() => rows.reduce((a, r) => addRow(a, r), zero()), [rows]);
+  const grand = rows.reduce((a, r) => ({
+    budgeted:         a.budgeted         + r.budgeted_amount,
+    committed:        a.committed        + r.committed,
+    co_value:         a.co_value         + r.co_value,
+    total_commitment: a.total_commitment + r.total_commitment,
+    billed:           a.billed           + r.billed,
+    remaining_commit: a.remaining_commit + r.remaining_commit,
+  }), { budgeted: 0, committed: 0, co_value: 0, total_commitment: 0, billed: 0, remaining_commit: 0 });
 
   if (isLoading) return <div className={styles.splash}>Loading…</div>;
   if (error)     return <div className={styles.splash}>Error loading data.</div>;
-  if (!rows.length) {
-    return (
-      <div className={styles.splash}>
-        <p className={styles.splashMsg}>No budget lines. Initialize the budget on the Budget tab first.</p>
-      </div>
-    );
-  }
-
-  const TotalsCells = ({ t }: { t: Totals }) => <>
-    <td className={styles.sn}>{moneyD(t.budgeted)}</td>
-    <td className={styles.sn}>{money(t.committed)}</td>
-    <td className={styles.sn}>{t.co_value > 0 ? money(t.co_value) : '—'}</td>
-    <td className={`${styles.sn} ${t.total_commitment > t.budgeted && t.budgeted > 0 ? styles.danger : ''}`}>
-      {money(t.total_commitment)}
-    </td>
-    <td className={`${styles.sn} ${t.remaining_commit < 0 ? styles.danger : ''}`}>
-      {moneyD(t.remaining_commit)}
-    </td>
-    <td className={styles.sn}>{remPct(t.total_commitment, t.budgeted)}</td>
-    <td className={styles.sn}>{perSF(t.total_commitment, gla_sf)}</td>
-    <td className={styles.sn}>{perAC(t.total_commitment, gla_ac)}</td>
-  </>;
+  if (!rows.length) return (
+    <div className={styles.splash}>
+      <p className={styles.splashMsg}>No budget lines. Initialize the budget on the Budget tab first.</p>
+    </div>
+  );
 
   return (
     <div className={styles.wrapper}>
-      {panelContractId && (
-        <ContractPanel contractId={panelContractId} onClose={() => setPanelContractId(null)} />
+      {drillTarget && (
+        <DrillPanel
+          phaseId={phaseIdNum}
+          target={drillTarget}
+          onClose={() => setDrillTarget(null)}
+        />
       )}
+
       <div className={styles.toolbar}>
         <span className={styles.toolLabel}>Commitments</span>
+        {drillTarget && (
+          <span className={cgStyles.drillHint}>
+            Showing: <strong>{drillTarget.rowName}</strong> · {drillTarget.cell === 'committed' ? 'Commitments' : 'Billed'}
+            <button className={cgStyles.drillClearBtn} onClick={() => setDrillTarget(null)}>✕ Close</button>
+          </span>
+        )}
       </div>
 
       <div className={styles.scrollArea}>
         <table className={styles.table}>
           <colgroup>
-            <col style={{ width: 24 }} />    {/* gutter */}
-            <col style={{ width: 230 }} />   {/* task / vendor */}
-            <col style={{ width: 110 }} />   {/* discipline / ref# / status */}
-            <col style={{ width: 96 }} />    {/* budget */}
-            <col style={{ width: 96 }} />    {/* init. contract */}
-            <col style={{ width: 88 }} />    {/* COs */}
-            <col style={{ width: 96 }} />    {/* total commitment */}
-            <col style={{ width: 96 }} />    {/* rem $ */}
-            <col style={{ width: 52 }} />    {/* rem % */}
-            <col style={{ width: 72 }} />    {/* $/SF */}
-            <col style={{ width: 72 }} />    {/* $/AC */}
+            <col style={{ width: 24 }} />
+            <col style={{ width: 240 }} />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 80 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 52 }} />
+            <col style={{ width: 68 }} />
+            <col style={{ width: 68 }} />
           </colgroup>
           <thead>
             <tr className={styles.theadGroup}>
-              <th className={styles.th} colSpan={3} />
-              <th className={styles.th} />
-              <th className={`${styles.thGroup}`} colSpan={5}>Contract Commitment</th>
-              <th className={styles.th} colSpan={2} />
+              <th colSpan={4} />
+              <th className={styles.thGroup} colSpan={3}>Contract Commitment</th>
+              <th className={styles.thGroup} colSpan={2}>Invoice Burn</th>
+              <th colSpan={3} />
             </tr>
             <tr className={styles.thead}>
               <th className={styles.th} />
-              <th className={`${styles.th} ${styles.thLeft}`}>Task / Vendor</th>
-              <th className={`${styles.th} ${styles.thLeft}`}>Discipline / Ref #</th>
+              <th className={`${styles.th} ${styles.thLeft}`}>Task</th>
+              <th className={`${styles.th} ${styles.thLeft}`}>Discipline</th>
               <th className={`${styles.th} ${styles.thRight}`}>Budget</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Init. Contract</th>
+              <th className={`${styles.th} ${styles.thRight} ${cgStyles.drillHdr}`} title="Click any cell to see contracts">Contracted ↓</th>
               <th className={`${styles.th} ${styles.thRight}`}>COs</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Total Commitment</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. $</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Total Commit</th>
+              <th className={`${styles.th} ${styles.thRight} ${cgStyles.drillHdr}`} title="Click any cell to see invoices">Billed ↓</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Remaining</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem %</th>
               <th className={`${styles.th} ${styles.thRight}`}>$/SF</th>
               <th className={`${styles.th} ${styles.thRight}`}>$/AC</th>
             </tr>
           </thead>
           <tbody>
-            {SECTIONS.map(sec => {
+            {sections.map(sec => {
               const secOpen = !collapsed.has(`sec:${sec.key}`);
-              const st = secTotals[sec.key] ?? zero();
-              const subMap = tree.get(sec.key) ?? new Map();
+              const st = sec.total;
 
               return [
+                // Section header row
                 <tr key={`sec:${sec.key}`} className={styles.secRow} onClick={() => toggle(`sec:${sec.key}`)}>
                   <td className={styles.secGutter}><span className={styles.chevron}>{secOpen ? '▼' : '▶'}</span></td>
                   <td className={styles.secLabel} colSpan={2}>{sec.label}</td>
-                  <TotalsCells t={st} />
+                  <td className={styles.sn}>{fmt(st.budgeted)}</td>
+                  <td className={styles.sn}>{fmtZ(st.committed)}</td>
+                  <td className={styles.sn}>{st.co_value > 0 ? fmtZ(st.co_value) : '—'}</td>
+                  <td className={`${styles.sn} ${st.total_commitment > st.budgeted && st.budgeted > 0 ? styles.danger : ''}`}>{fmtZ(st.total_commitment)}</td>
+                  <td className={styles.sn}>{fmtZ(st.billed)}</td>
+                  <td className={`${styles.sn} ${st.remaining_commit < 0 ? styles.danger : ''}`}>{fmt(st.remaining_commit)}</td>
+                  <td className={styles.sn}>{pct(st.total_commitment, st.budgeted)}</td>
+                  <td className={styles.sn}>{perSF(st.total_commitment, gla_sf)}</td>
+                  <td className={styles.sn}>{perAC(st.total_commitment, gla_ac)}</td>
                 </tr>,
 
-                ...(secOpen ? Array.from(subMap.entries()).flatMap(([sgKey, sgRows]) => {
-                  const hasSg  = sgKey !== '__none__';
-                  const sgOpen = !collapsed.has(`sg:${sgKey}`);
-                  const sgt    = sgTotals[sgKey] ?? zero();
+                ...(secOpen ? sec.groups.flatMap(sg => [
+                  // Sub-group header (if named)
+                  ...(sg.label ? [
+                    <tr key={`sg:${sg.key}`} className={styles.sgRow} onClick={() => toggle(`sg:${sg.key}`)}>
+                      <td className={styles.sgGutter}><span className={styles.chevron}>{!collapsed.has(`sg:${sg.key}`) ? '▼' : '▶'}</span></td>
+                      <td className={styles.sgLabel} colSpan={11}>{sg.label}</td>
+                    </tr>
+                  ] : []),
 
-                  return [
-                    ...(hasSg ? [
-                      <tr key={`sg:${sgKey}`} className={styles.sgRow} onClick={() => toggle(`sg:${sgKey}`)}>
-                        <td className={styles.sgGutter}><span className={styles.chevron}>{sgOpen ? '▼' : '▶'}</span></td>
-                        <td className={styles.sgLabel} colSpan={2}>{sgKey}</td>
-                        <TotalsCells t={sgt} />
+                  // Data rows
+                  ...(!collapsed.has(`sg:${sg.key}`) ? sg.rows.map(row => {
+                    const isActive = drillTarget?.rowId === row.id;
+                    return (
+                      <tr key={row.id} className={`${styles.dataRow} ${isActive ? cgStyles.activeRow : ''}`}>
+                        <td className={styles.rowGutter} />
+                        <td className={`${styles.cell} ${styles.tdTask}`}>{row.task_name}</td>
+                        <td className={`${styles.cell} ${styles.tdDisc}`}>{row.discipline ?? '—'}</td>
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
+                          {row.budgeted_amount > 0 ? usd.format(row.budgeted_amount) : '—'}
+                        </td>
+                        <DC value={row.committed} zero="" row={row} cell="committed"
+                            active={isActive && drillTarget?.cell === 'committed'} onDrill={drill} />
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
+                          {row.co_count > 0 ? <span title={`${row.co_count} CO${row.co_count > 1 ? 's' : ''}`}>{usd.format(row.co_value)}</span> : ''}
+                        </td>
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
+                          {fmtZ(row.total_commitment)}
+                        </td>
+                        <DC value={row.billed} zero="" row={row} cell="billed"
+                            active={isActive && drillTarget?.cell === 'billed'} onDrill={drill} />
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.remaining_commit < 0 ? styles.danger : ''}`}>
+                          {row.budgeted_amount > 0 ? usd.format(row.remaining_commit) : '—'}
+                        </td>
+                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>
+                          {row.budgeted_amount > 0 ? pct(row.total_commitment, row.budgeted_amount) : '—'}
+                        </td>
+                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.total_commitment, gla_sf)}</td>
+                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.total_commitment, gla_ac)}</td>
                       </tr>
-                    ] : []),
-
-                    ...(sgOpen ? sgRows.flatMap((row: BudgetRow) => {
-                      const lineContracts = contractsByLine.get(row.id) ?? [];
-                      const hasContracts  = lineContracts.length > 0;
-                      const lineOpen      = contractsOpen.has(row.id);
-
-                      return [
-                        // ── Budget line row ────────────────────────────────
-                        <tr
-                          key={row.id}
-                          className={`${styles.dataRow} ${hasContracts ? cgStyles.lineClickable : ''}`}
-                          onClick={hasContracts ? () => toggleLine(row.id) : undefined}
-                        >
-                          <td className={styles.rowGutter}>
-                            {hasContracts && (
-                              <span className={styles.chevron}>{lineOpen ? '▼' : '▶'}</span>
-                            )}
-                          </td>
-                          <td className={`${styles.cell} ${styles.tdTask}`}>{row.task_name}</td>
-                          <td className={`${styles.cell} ${styles.tdDisc}`}>{row.discipline}</td>
-                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
-                            {row.budgeted_amount > 0 ? usd.format(row.budgeted_amount) : '—'}
-                          </td>
-                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.committed)}</td>
-                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
-                            {row.co_count > 0
-                              ? <span title={`${row.co_count} CO${row.co_count > 1 ? 's' : ''}`}>{money(row.co_value)}</span>
-                              : ''}
-                          </td>
-                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
-                            {money(row.total_commitment)}
-                          </td>
-                          <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.remaining_commit < 0 ? styles.danger : ''}`}>
-                            {row.budgeted_amount > 0 ? usd.format(row.remaining_commit) : '—'}
-                          </td>
-                          <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>
-                            {row.budgeted_amount > 0 ? remPct(row.total_commitment, row.budgeted_amount) : '—'}
-                          </td>
-                          <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.total_commitment, gla_sf)}</td>
-                          <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.total_commitment, gla_ac)}</td>
-                        </tr>,
-
-                        // ── Contract rows (drilldown) ──────────────────────
-                        ...(lineOpen ? lineContracts.flatMap(c => {
-                          const hasCos   = !c._is_partial && c.change_orders.length > 0;
-                          const cosOpen  = !cosCollapsed.has(c.id);
-                          const rowKey   = c._is_partial ? `contract-partial:${c.id}:${row.id}` : `contract:${c.id}`;
-                          const displayAmount = c._is_partial ? c._partial_amount! : c.total_value;
-                          const displayCommit = c._is_partial ? c._partial_amount! : c.total_commitment;
-
-                          return [
-                            <tr key={rowKey} className={cgStyles.contractRow}
-                                style={{ cursor: 'pointer' }}
-                                onClick={() => setPanelContractId(c.id)}>
-                              <td className={cgStyles.contractGutter}>
-                                {hasCos && <span className={styles.chevron} onClick={e => { e.stopPropagation(); toggleCo(c.id); }}>{cosOpen ? '▼' : '▶'}</span>}
-                              </td>
-                              <td className={`${styles.cell} ${cgStyles.vendorCell}`}>
-                                {c.vendor_name}
-                              </td>
-                              <td className={`${styles.cell} ${cgStyles.refCell}`}>
-                                <span className={`${cgStyles.statusBadge} ${cgStyles[`status_${c.status}`]}`}>
-                                  {STATUS_LABEL[c.status] ?? c.status}
-                                </span>
-                                {c.reference_number && (
-                                  <span className={cgStyles.refNum}>{c.reference_number}</span>
-                                )}
-                                {c._is_partial && (
-                                  <span className={cgStyles.partialBadge} title={`Partial allocation from a multi-discipline contract (total: ${usd.format(c.total_value)})`}>
-                                    partial
-                                  </span>
-                                )}
-                                {!c._is_partial && c.total_invoiced > 0 && (
-                                  <span className={cgStyles.invBadge} title={`${usd.format(c.total_invoiced)} invoiced`}>
-                                    {usd.format(c.total_invoiced)} inv.
-                                  </span>
-                                )}
-                              </td>
-                              <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />
-                              <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`}>
-                                {usd.format(displayAmount)}
-                              </td>
-                              <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`}>
-                                {!c._is_partial && c.co_value > 0 ? money(c.co_value) : ''}
-                              </td>
-                              <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum}`}>
-                                {usd.format(displayCommit)}
-                              </td>
-                              <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.contractNum} ${!c._is_partial && c.remaining_commitment < 0 ? styles.danger : ''}`}>
-                                {!c._is_partial && c.total_invoiced > 0 ? usd.format(c.remaining_commitment) : '—'}
-                              </td>
-                              <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`} />
-                              <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`} />
-                              <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`} />
-                            </tr>,
-
-                            // ── CO sub-rows ────────────────────────────────
-                            ...(hasCos && cosOpen ? c.change_orders.map(co => (
-                              <tr key={`co:${co.id}`} className={cgStyles.coRow}>
-                                <td className={cgStyles.coGutter} />
-                                <td className={`${styles.cell} ${cgStyles.coDesc}`} colSpan={2}>
-                                  <span className={cgStyles.coLabel}>
-                                    CO{co.co_number ? ` ${co.co_number}` : ''}
-                                  </span>
-                                  {' '}{co.description}
-                                </td>
-                                <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />
-                                <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />
-                                <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.coNum}`}>
-                                  {usd.format(co.amount)}
-                                </td>
-                                <td className={`${styles.cell} ${styles.tdMoney} ${cgStyles.coNum}`}>
-                                  {usd.format(co.amount)}
-                                </td>
-                                <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`} />
-                                <td className={`${styles.cell} ${styles.tdPct}  ${styles.ro}`} />
-                                <td className={`${styles.cell} ${styles.tdPct}  ${styles.ro}`} />
-                                <td className={`${styles.cell} ${styles.tdPct}  ${styles.ro}`} />
-                              </tr>
-                            )) : []),
-                          ];
-                        }) : []),
-                      ];
-                    }) : []),
-                  ];
-                }) : []),
+                    );
+                  }) : []),
+                ]) : []),
               ];
             })}
           </tbody>
           <tfoot>
             <tr className={styles.totalRow}>
-              <td />
-              <td className={styles.totalLabel} colSpan={2}>TOTAL</td>
+              <td /><td className={styles.totalLabel} colSpan={2}>TOTAL</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{usd.format(grand.budgeted)}</td>
-              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.committed)}</td>
-              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.co_value)}</td>
-              <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.total_commitment > grand.budgeted ? styles.danger : ''}`}>
-                {moneyD(grand.total_commitment)}
-              </td>
-              <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.remaining_commit < 0 ? styles.danger : ''}`}>
-                {usd.format(grand.remaining_commit)}
-              </td>
-              <td className={`${styles.totalCell} ${styles.tdPct}`}>{remPct(grand.total_commitment, grand.budgeted)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{fmt(grand.committed)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{grand.co_value > 0 ? usd.format(grand.co_value) : '—'}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.total_commitment > grand.budgeted ? styles.danger : ''}`}>{usd.format(grand.total_commitment)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{fmt(grand.billed)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.remaining_commit < 0 ? styles.danger : ''}`}>{usd.format(grand.remaining_commit)}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{pct(grand.total_commitment, grand.budgeted)}</td>
               <td className={`${styles.totalCell} ${styles.tdPct}`}>{perSF(grand.total_commitment, gla_sf)}</td>
               <td className={`${styles.totalCell} ${styles.tdPct}`}>{perAC(grand.total_commitment, gla_ac)}</td>
             </tr>
