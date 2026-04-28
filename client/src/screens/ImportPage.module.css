@@ -37,6 +37,19 @@
   flex: 1;
 }
 
+.reprocessBtn {
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  border: 1px solid #e8921a;
+  background: transparent;
+  color: #e8921a;
+  cursor: pointer;
+  font-weight: 600;
+}
+.reprocessBtn:hover { background: #e8921a; color: #fff; }
+.reprocessBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .clearFailedBtn {
   font-size: 11px;
   padding: 3px 7px;
@@ -314,6 +327,94 @@
 }
 .formEmptyText { font-size: 13px; color: #9e8e82; }
 
+/* ─── QB Picker ──────────────────────────────────────────────────────────── */
+
+.qbPicker { position: relative; }
+
+.qbDisplay {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid #ccc3b8;
+  background: #fff;
+  cursor: pointer;
+  min-height: 26px;
+  font-size: 11px;
+  overflow: hidden;
+}
+.qbDisplay:hover { border-color: #e8921a; }
+.qbEmpty { border-style: dashed; }
+.qbAi { border-color: #e8921a; background: #fdf4e8; }
+
+.qbNum { font-size: 10px; color: #9e8e82; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.qbName { flex: 1; font-size: 11px; color: #2e2520; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.qbPlaceholder { font-size: 11px; color: #c8bbaf; flex: 1; }
+.qbClear { background: none; border: none; color: #b0a296; cursor: pointer; font-size: 10px; padding: 0; line-height: 1; flex-shrink: 0; }
+.qbClear:hover { color: #c4522a; }
+
+.qbDropdown {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  min-width: 260px;
+  background: #fff;
+  border: 1px solid #ccc3b8;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.14);
+  z-index: 9999;
+  overflow: hidden;
+}
+
+.qbSearch {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: none;
+  border-bottom: 1px solid #eee5d8;
+  font-size: 12px;
+  font-family: inherit;
+  background: #faf7f3;
+}
+.qbSearch:focus { outline: none; }
+
+.qbList { max-height: 200px; overflow-y: auto; }
+.qbOption { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 11px; cursor: pointer; }
+.qbOption:hover { background: #fdf4e8; }
+.qbOptionSelected { background: #fdf4e8; font-weight: 600; }
+.qbOptNum { color: #9e8e82; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.qbOptName { color: #2e2520; }
+.qbNoMatch { padding: 10px; font-size: 11px; color: #b0a296; text-align: center; }
+
+/* T&M sub-row */
+.tmSub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+.tmField {
+  padding: 2px 4px;
+  border: 1px solid #ccc3b8;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: inherit;
+  color: #2e2520;
+  background: #fff;
+  min-width: 0;
+  flex: 1;
+}
+.tmField:focus { outline: none; border-color: #e8921a; }
+.tmSep { font-size: 11px; color: #9e8e82; flex-shrink: 0; }
+
+.totalMismatch {
+  font-size: 10px;
+  color: #c4522a;
+  margin-left: 8px;
+}
+
 /* ─── Review form ────────────────────────────────────────────────────────── */
 
 .formWrap {
@@ -588,6 +689,8 @@
 }
 
 .tColBl   { width: 160px; }
+.tColHash { width: 22px; color: #b0a296; font-size: 10px; text-align: center; }
+.tColCat  { width: 150px; }
 .tColType { width: 62px; }
 .tColDesc { /* flex */ }
 .tColAmt  { width: 80px; }

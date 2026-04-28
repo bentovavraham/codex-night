@@ -428,6 +428,10 @@ CREATE TABLE IF NOT EXISTS invoice_line_items (
 CREATE INDEX IF NOT EXISTS idx_ili_invoice      ON invoice_line_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_ili_contract_line ON invoice_line_items(contract_line_item_id);
 
+-- Per-line budget line on invoice_line_items (mirrors contract_line_items.phase_budget_line_id)
+DO $$ BEGIN ALTER TABLE invoice_line_items ADD COLUMN phase_budget_line_id INTEGER REFERENCES phase_budget_lines(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+CREATE INDEX IF NOT EXISTS idx_ili_pbl ON invoice_line_items(phase_budget_line_id);
+
 -- Direct budget line link on invoices: allows standalone invoices (no contract)
 -- to still roll up into the correct budget line row.
 DO $$ BEGIN ALTER TABLE invoices ADD COLUMN phase_budget_line_id INTEGER REFERENCES phase_budget_lines(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;

@@ -33,6 +33,23 @@ interface LineItem {
   differs_from_primary?: boolean;
 }
 
+interface InvoiceLineItem {
+  billing_type: 'fixed' | 'tm' | 'expense';
+  description: string;
+  person: string;
+  line_date: string;
+  hours: string;
+  rate: string;
+  amount: string;
+  qb_account_id: number | null;
+  suggested_qb_account_id: number | null;
+  qb_suggestion_confidence: string | null;
+  phase_budget_line_id: number | null;
+  suggested_budget_line_id: number | null;
+}
+
+interface QbAccount { id: number; account_number: string; full_name: string; short_name: string; }
+
 const STATUS_LABEL: Record<string, string> = {
   queued: 'Queued', extracting: 'Extracting…', needs_review: 'Needs Review',
   confirmed: 'Confirmed', failed: 'Failed', discarded: 'Discarded',
@@ -184,6 +201,62 @@ function InlineBudgetLinePicker({ lines, value, onChange }: {
   );
 }
 
+// ─── QB account picker ────────────────────────────────────────────────────────
+
+function QbPicker({ accounts, value, suggestedId, suggestionConfidence, onChange }: {
+  accounts: QbAccount[]; value: number | null; suggestedId: number | null;
+  suggestionConfidence: string | null; onChange: (id: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selected  = accounts.find(a => a.id === value) ?? null;
+  const suggested = accounts.find(a => a.id === suggestedId) ?? null;
+  const display   = selected ?? suggested;
+  const isAi      = !selected && !!suggested;
+  const filtered  = useMemo(() => {
+    if (!query.trim()) return accounts;
+    const q = query.toLowerCase();
+    return accounts.filter(a => a.account_number.toLowerCase().includes(q) || a.full_name.toLowerCase().includes(q));
+  }, [accounts, query]);
+  useEffect(() => {
+    function onOut(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    if (open) document.addEventListener('mousedown', onOut);
+    return () => document.removeEventListener('mousedown', onOut);
+  }, [open]);
+  return (
+    <div ref={ref} className={styles.qbPicker}>
+      <div className={`${styles.qbDisplay} ${isAi ? styles.qbAi : ''} ${!display ? styles.qbEmpty : ''}`}
+        onClick={() => { setQuery(''); setOpen(true); setTimeout(() => inputRef.current?.focus(), 20); }}>
+        {display ? (
+          <>
+            <span className={styles.qbNum}>{display.account_number}</span>
+            <span className={styles.qbName}>{display.full_name}</span>
+            <button className={styles.qbClear} onClick={e => { e.stopPropagation(); onChange(null); }}>✕</button>
+          </>
+        ) : <span className={styles.qbPlaceholder}>Category…</span>}
+      </div>
+      {open && (
+        <div className={styles.qbDropdown}>
+          <input ref={inputRef} className={styles.qbSearch} value={query}
+            onChange={e => setQuery(e.target.value)} placeholder="Search by number or name…" />
+          <div className={styles.qbList}>
+            {filtered.map(a => (
+              <div key={a.id} className={`${styles.qbOption} ${a.id === (value ?? suggestedId) ? styles.qbOptionSelected : ''}`}
+                onMouseDown={() => { onChange(a.id); setOpen(false); }}>
+                <span className={styles.qbOptNum}>{a.account_number}</span>
+                <span className={styles.qbOptName}>{a.full_name}</span>
+              </div>
+            ))}
+            {filtered.length === 0 && <div className={styles.qbNoMatch}>No match</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Duplicate warning ────────────────────────────────────────────────────────
 
 function DupBanner({ matches, acknowledged, onAck }: {
@@ -290,9 +363,11 @@ function QueueCard({ item, selected, onClick, onFlipType, onRetry, onDiscard }: 
 
 // ─── Review form (right panel content) ───────────────────────────────────────
 
-function ReviewForm({ item, budgetLines, onConfirm, onDiscard, saving }: {
+function ReviewForm({ item, budgetLines, contracts, qbAccounts, onConfirm, onDiscard, saving }: {
   item: ImportItem;
   budgetLines: any[];
+  contracts: any[];
+  qbAccounts: QbAccount[];
   onConfirm: (formData: any) => Promise<void>;
   onDiscard: () => Promise<void>;
   saving: boolean;
@@ -303,7 +378,9 @@ function ReviewForm({ item, budgetLines, onConfirm, onDiscard, saving }: {
   const [vendor, setVendor] = useState(ext.vendor_name || '');
   const [description, setDescription] = useState(ext.description || ext.summary || '');
   const [budgetLineId, setBudgetLineId] = useState<number | null>(
-    ext.suggested_primary_budget_line_id ?? item.suggested_budget_line_id ?? null
+    isContract
+      ? (ext.suggested_primary_budget_line_id ?? item.suggested_budget_line_id ?? null)
+      : (ext.suggested_primary_budget_line_id ?? item.suggested_budget_line_id ?? null)
   );
   const [reviewed, setReviewed] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -325,8 +402,24 @@ function ReviewForm({ item, budgetLines, onConfirm, onDiscard, saving }: {
   const [invoiceNumber, setInvoiceNumber] = useState(ext.invoice_number || '');
   const [amount, setAmount] = useState(ext.amount ? String(ext.amount) : '');
   const [invoiceDate, setInvoiceDate] = useState(ext.invoice_date || '');
-  const [invoiceType, setInvoiceType] = useState('fixed');
   const [invoiceStatus, setInvoiceStatus] = useState('pending');
+  const [contractId, setContractId] = useState<number | null>(ext.suggested_contract_id ?? null);
+  const [invoiceLineItems, setInvoiceLineItems] = useState<InvoiceLineItem[]>(() =>
+    (ext.line_items || []).map((li: any) => ({
+      billing_type: (['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed') as InvoiceLineItem['billing_type'],
+      description: li.description || '',
+      person: li.person || '',
+      line_date: li.line_date || '',
+      hours: li.hours != null ? String(li.hours) : '',
+      rate: li.rate != null ? String(li.rate) : '',
+      amount: li.amount != null ? String(li.amount) : '',
+      qb_account_id: null,
+      suggested_qb_account_id: li.suggested_qb_account_id ?? null,
+      qb_suggestion_confidence: li.qb_suggestion_confidence ?? null,
+      phase_budget_line_id: li.suggested_budget_line_id ?? null,
+      suggested_budget_line_id: li.suggested_budget_line_id ?? null,
+    }))
+  );
 
   const [dupMatches, setDupMatches] = useState<any[]>([]);
   const [dupAcked, setDupAcked] = useState(false);
@@ -342,9 +435,19 @@ function ReviewForm({ item, budgetLines, onConfirm, onDiscard, saving }: {
 
   const hasLineItems = lineItems.length > 0;
   const fixedTotal = lineItems.filter(li => li.billing_type === 'fixed').reduce((s, li) => s + (Number(li.budgeted_amount) || 0), 0);
+
+  const invLineTotal = invoiceLineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0);
+  const hasInvLines = invoiceLineItems.length > 0;
+
+  function addInvLine() { setInvoiceLineItems(li => [...li, { billing_type: 'fixed', description: '', person: '', line_date: '', hours: '', rate: '', amount: '', qb_account_id: null, suggested_qb_account_id: null, qb_suggestion_confidence: null, phase_budget_line_id: null, suggested_budget_line_id: null }]); }
+  function removeInvLine(idx: number) { setInvoiceLineItems(li => li.filter((_, i) => i !== idx)); }
+  function setInvLine(idx: number, patch: Partial<InvoiceLineItem>) {
+    setInvoiceLineItems(li => { const n = [...li]; n[idx] = { ...n[idx], ...patch }; return n; });
+  }
   const hasTm = lineItems.some(li => li.billing_type === 'tm');
   const dupBlocked = dupMatches.length > 0 && !dupAcked;
-  const canConfirm = reviewed && !!vendor.trim() && !dupBlocked && !saving;
+  const hasBudgetTarget = isContract ? true : (!!contractId || !!budgetLineId);
+  const canConfirm = reviewed && !!vendor.trim() && !dupBlocked && !saving && hasBudgetTarget;
   const confirmingRef = useRef(false);
 
   function addLine() { setLineItems(li => [...li, { billing_type: 'fixed', description: '', budgeted_amount: '', phase_budget_line_id: null }]); }
@@ -357,10 +460,13 @@ function ReviewForm({ item, budgetLines, onConfirm, onDiscard, saving }: {
     if (confirmingRef.current) return;
     setSaveError(null);
     if (!vendor.trim()) return setSaveError('Vendor name is required.');
-    if (!hasLineItems && !budgetLineId) return setSaveError('Budget line is required when there are no contract tasks.');
+    if (!hasLineItems && !budgetLineId && isContract) return setSaveError('Budget line is required when there are no contract tasks.');
+    if (!isContract && !contractId && !budgetLineId) return setSaveError('Link to a contract or select a budget line.');
     if (!reviewed) return setSaveError('Please confirm you have reviewed the details.');
     if (dupBlocked) return setSaveError('Please acknowledge the duplicate warning.');
     const base = { vendor_name: vendor.trim(), description, phase_budget_line_id: budgetLineId };
+    const invTypes = new Set(invoiceLineItems.map(li => li.billing_type));
+    const derivedType = invTypes.has('tm') ? 'tm' : invTypes.has('expense') ? 'expense' : 'fixed';
     const formData = isContract
       ? { ...base, total_value: Number(totalValue) || 0, contract_date: contractDate || null,
           reference_number: referenceNumber || null, status: contractStatus,
@@ -369,8 +475,18 @@ function ReviewForm({ item, budgetLines, onConfirm, onDiscard, saving }: {
             budgeted_amount: Number(li.budgeted_amount) || 0,
             phase_budget_line_id: li.phase_budget_line_id ?? null,
           })) }
-      : { ...base, invoice_number: invoiceNumber, amount: Number(amount) || 0,
-          invoice_date: invoiceDate || null, invoice_type: invoiceType, status: invoiceStatus };
+      : { ...base, invoice_number: invoiceNumber,
+          contract_id: contractId,
+          amount: hasInvLines ? invLineTotal : (Number(amount) || 0),
+          invoice_date: invoiceDate || null, invoice_type: derivedType, status: invoiceStatus,
+          line_items: invoiceLineItems.filter(li => li.description.trim() || Number(li.amount)).map(li => ({
+            billing_type: li.billing_type, description: li.description,
+            person: li.person || null, line_date: li.line_date || null,
+            hours: li.hours ? Number(li.hours) : null, rate: li.rate ? Number(li.rate) : null,
+            amount: Number(li.amount) || 0,
+            qb_account_id: li.qb_account_id ?? li.suggested_qb_account_id ?? null,
+            phase_budget_line_id: li.phase_budget_line_id ?? null,
+          })) };
     confirmingRef.current = true;
     try { await onConfirm(formData); }
     finally { confirmingRef.current = false; }
@@ -503,26 +619,36 @@ function ReviewForm({ item, budgetLines, onConfirm, onDiscard, saving }: {
           </>
         ) : (
           <>
+            {/* Contract link */}
+            <div className={styles.fGroup}>
+              <label className={styles.fLabel}>Contract <span className={styles.fHint}>optional — links this invoice to a contract</span></label>
+              <select className={styles.fSelect} value={contractId ?? ''}
+                onChange={e => setContractId(e.target.value ? Number(e.target.value) : null)}>
+                <option value="">— No contract (standalone invoice) —</option>
+                {contracts.map((c: any) => (
+                  <option key={c.id} value={c.id}>
+                    {c.vendor_name}{c.reference_number ? ` · ${c.reference_number}` : ''} (${Number(c.total_value).toLocaleString()})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Budget line — required when no contract */}
+            {!contractId && (
+              <div className={styles.fGroup}>
+                <label className={styles.fLabel}>Task / Budget Line <span className={styles.fRequired}>required</span></label>
+                <BudgetLinePicker lines={budgetLines} value={budgetLineId} onChange={setBudgetLineId} />
+              </div>
+            )}
+
             <div className={styles.fRow}>
               <div className={styles.fGroup}>
                 <label className={styles.fLabel}>Invoice #</label>
-                <input className={styles.fInput} value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="INV-001" />
-              </div>
-              <div className={styles.fGroup}>
-                <label className={styles.fLabel}>Amount</label>
-                <input className={`${styles.fInput} ${styles.mono}`} value={amount} onChange={e => setAmount(e.target.value)} type="number" min="0" step="0.01" placeholder="0.00" />
+                <input className={styles.fInput} value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="e.g. 8241" />
               </div>
               <div className={styles.fGroup}>
                 <label className={styles.fLabel}>Invoice Date</label>
                 <input className={styles.fInput} value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} type="date" />
-              </div>
-              <div className={styles.fGroup}>
-                <label className={styles.fLabel}>Type</label>
-                <select className={styles.fSelect} value={invoiceType} onChange={e => setInvoiceType(e.target.value)}>
-                  <option value="fixed">Fixed</option>
-                  <option value="tm">T&amp;M</option>
-                  <option value="expense">Expense</option>
-                </select>
               </div>
               <div className={styles.fGroup}>
                 <label className={styles.fLabel}>Status</label>
@@ -534,9 +660,92 @@ function ReviewForm({ item, budgetLines, onConfirm, onDiscard, saving }: {
                 </select>
               </div>
             </div>
+
             <div className={styles.fGroup}>
-              <label className={styles.fLabel}>Description</label>
-              <textarea className={styles.fTextarea} value={description} onChange={e => setDescription(e.target.value)} rows={3} placeholder="What is this invoice for?" />
+              <label className={styles.fLabel}>Description / Scope</label>
+              <textarea className={styles.fTextarea} value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="What is this invoice for?" />
+            </div>
+
+            {/* Category details — full line item table */}
+            <div className={styles.tasksSection}>
+              <div className={styles.tasksSectionTitle}>
+                Category Details
+                {hasInvLines && <span className={styles.tasksTotal}>{usd2.format(invLineTotal)}</span>}
+              </div>
+              <table className={styles.tasksTable}>
+                <thead>
+                  <tr className={styles.tasksThead}>
+                    <th className={styles.tColHash}>#</th>
+                    <th className={styles.tColBl}>BUDGET LINE</th>
+                    <th className={styles.tColCat}>QB CATEGORY</th>
+                    <th className={styles.tColType}>TYPE</th>
+                    <th className={styles.tColDesc}>DESCRIPTION</th>
+                    <th className={`${styles.tColAmt} ${styles.right}`}>AMOUNT</th>
+                    <th className={styles.tColDel} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoiceLineItems.map((li, i) => (
+                    <tr key={i} className={`${styles.tRow} ${li.phase_budget_line_id !== li.suggested_budget_line_id && li.suggested_budget_line_id ? styles.tRowFlagged : ''}`}>
+                      <td className={styles.tColHash}>{i + 1}</td>
+                      <td className={styles.tColBl}>
+                        <InlineBudgetLinePicker lines={budgetLines} value={li.phase_budget_line_id}
+                          onChange={id => setInvLine(i, { phase_budget_line_id: id })} />
+                      </td>
+                      <td className={styles.tColCat}>
+                        <QbPicker accounts={qbAccounts} value={li.qb_account_id}
+                          suggestedId={li.suggested_qb_account_id} suggestionConfidence={li.qb_suggestion_confidence}
+                          onChange={id => setInvLine(i, { qb_account_id: id })} />
+                      </td>
+                      <td className={styles.tColType}>
+                        <select className={styles.tTypeSelect} value={li.billing_type}
+                          onChange={e => setInvLine(i, { billing_type: e.target.value as InvoiceLineItem['billing_type'] })}>
+                          <option value="fixed">Fixed</option>
+                          <option value="tm">T&amp;M</option>
+                          <option value="expense">Expense</option>
+                        </select>
+                      </td>
+                      <td className={styles.tColDesc}>
+                        <input className={styles.tDescInput} value={li.description}
+                          onChange={e => setInvLine(i, { description: e.target.value })} placeholder="Description"
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addInvLine(); } }} />
+                        {li.billing_type === 'tm' && (
+                          <div className={styles.tmSub}>
+                            <input className={styles.tmField} value={li.person} onChange={e => setInvLine(i, { person: e.target.value })} placeholder="Person" />
+                            <input className={styles.tmField} type="date" value={li.line_date} onChange={e => setInvLine(i, { line_date: e.target.value })} />
+                            <input className={styles.tmField} value={li.hours} onChange={e => setInvLine(i, { hours: e.target.value })} placeholder="hrs" style={{ width: 44 }} />
+                            <span className={styles.tmSep}>×</span>
+                            <input className={styles.tmField} value={li.rate} onChange={e => setInvLine(i, { rate: e.target.value })} placeholder="rate" style={{ width: 54 }} />
+                          </div>
+                        )}
+                      </td>
+                      <td className={`${styles.tColAmt} ${styles.right}`}>
+                        <input className={`${styles.tAmtInput} ${styles.mono}`} value={li.amount}
+                          onChange={e => setInvLine(i, { amount: e.target.value })} placeholder="0.00"
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addInvLine(); } }} />
+                      </td>
+                      <td className={styles.tColDel}>
+                        <button className={styles.tDelBtn} onClick={() => removeInvLine(i)}>✕</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className={styles.tasksFooter}>
+                <button className={styles.addBtn} onClick={addInvLine}>+ Add line</button>
+                {hasInvLines && invoiceLineItems.length > 0 && Math.abs(invLineTotal - (Number(amount) || 0)) > 0.02 && (
+                  <span className={styles.totalMismatch}>⚠ Lines total {usd2.format(invLineTotal)}, header says {usd2.format(Number(amount))}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Total amount (header) */}
+            <div className={styles.fGroup}>
+              <label className={styles.fLabel}>Total Amount</label>
+              <input className={`${styles.fInput} ${styles.mono}`} value={hasInvLines ? usd2.format(invLineTotal) : amount}
+                onChange={e => { if (!hasInvLines) setAmount(e.target.value); }}
+                readOnly={hasInvLines} style={hasInvLines ? { background: '#f5f0eb' } : {}}
+                placeholder="0.00" />
             </div>
           </>
         )}
@@ -619,6 +828,18 @@ export default function ImportPage() {
     staleTime: 60_000,
   });
 
+  const { data: contracts = [] } = useQuery<any[]>({
+    queryKey: ['phaseContracts', phaseIdNum],
+    queryFn: () => api.listContracts(phaseIdNum),
+    staleTime: 30_000,
+  });
+
+  const { data: qbAccounts = [] } = useQuery<QbAccount[]>({
+    queryKey: ['qbAccounts'],
+    queryFn: () => api.listQbAccounts(),
+    staleTime: Infinity,
+  });
+
   const pending = queue.filter(i => !['confirmed','discarded'].includes(i.status));
   const done    = queue.filter(i =>  ['confirmed','discarded'].includes(i.status));
   const failedCount = pending.filter(i => i.status === 'failed').length;
@@ -648,6 +869,11 @@ export default function ImportPage() {
   });
   const clearFailedMutation = useMutation({
     mutationFn: () => api.clearFailedImports(phaseIdNum),
+    onSuccess: () => refetch(),
+  });
+
+  const reprocessMutation = useMutation({
+    mutationFn: () => api.reprocessImports(phaseIdNum),
     onSuccess: () => refetch(),
   });
 
@@ -705,6 +931,12 @@ export default function ImportPage() {
       <div className={styles.queuePanel}>
         <div className={styles.queueHeader}>
           <span className={styles.queueTitle}>Import Queue</span>
+          {pending.filter(i => i.status === 'needs_review').length > 0 && (
+            <button className={styles.reprocessBtn} onClick={() => reprocessMutation.mutate()}
+              disabled={reprocessMutation.isPending} title="Re-run AI on all pending items">
+              {reprocessMutation.isPending ? '…' : '↺ Re-process'}
+            </button>
+          )}
           {failedCount > 0 && (
             <button className={styles.clearFailedBtn} onClick={() => clearFailedMutation.mutate()}
               disabled={clearFailedMutation.isPending}>
@@ -782,6 +1014,8 @@ export default function ImportPage() {
             key={selectedItem.id}
             item={selectedItem}
             budgetLines={budgetLines}
+            contracts={contracts}
+            qbAccounts={qbAccounts}
             onConfirm={handleConfirm}
             onDiscard={handleDiscard}
             saving={saving}

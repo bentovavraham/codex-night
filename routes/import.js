@@ -6,7 +6,7 @@ const fs = require('fs');
 const pool = require('../db/pool');
 const fileStorage = require('../lib/storage');
 const { requireAuth } = require('../middleware/auth');
-const { classifyDocument, extractContract, extractInvoice, suggestLineBudgets } = require('../lib/extract');
+const { classifyDocument, extractContract, extractInvoice, suggestLineBudgets, suggestInvoiceLineCodes } = require('../lib/extract');
 
 // Use memory storage — save to Postgres immediately so files survive restarts + Render deploys
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -25,6 +25,47 @@ function matchBudgetLine(description, vendorName, budgetLines) {
   }
   if (!best || bestScore < 0.2) return { lineId: null, confidence: 'low' };
   return { lineId: best.id, confidence: bestScore > 0.6 ? 'high' : 'medium' };
+}
+
+// Contract matching — normalize vendor name and find best contract match
+function normalizeVendor(name) {
+  return (name || '').toLowerCase()
+    .replace(/\b(llc|inc|corp|ltd|co\b|company|associates|engineering|land|consulting)\b/g, '')
+    .replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function matchInvoiceToContract(extracted, contracts) {
+  if (!contracts.length) return null;
+  const invVendor = normalizeVendor(extracted.vendor_name);
+  if (!invVendor) return null;
+
+  // Build a searchable text blob from all extracted invoice data
+  const invText = JSON.stringify(extracted).toLowerCase();
+
+  const vendorMatches = contracts.filter(c => {
+    const cv = normalizeVendor(c.vendor_name);
+    return cv === invVendor || cv.startsWith(invVendor) || invVendor.startsWith(cv) ||
+           (invVendor.length > 5 && cv.includes(invVendor)) ||
+           (cv.length > 5 && invVendor.includes(cv));
+  });
+
+  if (vendorMatches.length === 0) return null;
+
+  // Among vendor matches, try to pin to a specific contract by reference number
+  for (const c of vendorMatches) {
+    if (c.reference_number && invText.includes(c.reference_number.toLowerCase())) {
+      return { contract_id: c.id, confidence: 'high', reason: 'Vendor + contract reference number found in invoice' };
+    }
+  }
+
+  // Single vendor match — high confidence
+  if (vendorMatches.length === 1) {
+    return { contract_id: vendorMatches[0].id, confidence: 'high', reason: 'Vendor name match' };
+  }
+
+  // Multiple vendor matches, pick largest contract (most likely the primary engagement)
+  const sorted = [...vendorMatches].sort((a, b) => Number(b.total_value) - Number(a.total_value));
+  return { contract_id: sorted[0].id, confidence: 'medium', reason: 'Vendor match — multiple contracts, picked largest' };
 }
 
 // POST /api/phases/:phaseId/import — upload multiple files
@@ -56,6 +97,23 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
       'SELECT id, task_name, discipline FROM phase_budget_lines WHERE phase_id = $1',
       [phaseId]
     )).rows;
+
+    const qbAccounts = (await pool.query('SELECT id, account_number, full_name, short_name FROM qb_accounts ORDER BY account_number')).rows;
+
+    const phaseContracts = (await pool.query(`
+      SELECT DISTINCT c.id, c.vendor_name, c.reference_number, c.total_value, c.status
+      FROM contracts c
+      WHERE c.phase_budget_line_id IN (
+        SELECT id FROM phase_budget_lines WHERE phase_id = $1
+      ) AND c.status NOT IN ('voided')
+      UNION
+      SELECT DISTINCT c.id, c.vendor_name, c.reference_number, c.total_value, c.status
+      FROM contracts c
+      JOIN contract_line_items cli ON cli.contract_id = c.id
+      WHERE cli.phase_budget_line_id IN (
+        SELECT id FROM phase_budget_lines WHERE phase_id = $1
+      ) AND c.status NOT IN ('voided')
+    `, [phaseId])).rows;
 
     const CONCURRENCY = 2;
     const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -90,33 +148,93 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
         const extracted = await callWithRetry(() =>
           type === 'contract' ? extractContract(buf) : extractInvoice(buf)
         );
-        if (type === 'contract' && extracted.line_items?.length && budgetLines.length) {
-          try {
-            const blSuggestions = await callWithRetry(() => suggestLineBudgets(
-              extracted.line_items, budgetLines,
-              { vendor_name: extracted.vendor_name, description: extracted.description }
-            ));
-            if (blSuggestions) {
-              extracted.suggested_primary_budget_line_id = blSuggestions.primary_budget_line_id;
+        if (type === 'contract') {
+          // ── Contract: AI budget line suggestions per task ──
+          if (extracted.line_items?.length && budgetLines.length) {
+            try {
+              const blSuggestions = await callWithRetry(() => suggestLineBudgets(
+                extracted.line_items, budgetLines,
+                { vendor_name: extracted.vendor_name, description: extracted.description }
+              ));
+              if (blSuggestions) {
+                extracted.suggested_primary_budget_line_id = blSuggestions.primary_budget_line_id;
+                const byIndex = {};
+                for (const s of blSuggestions.lines) byIndex[s.line_index] = s;
+                extracted.line_items = extracted.line_items.map((li, i) => ({
+                  ...li,
+                  suggested_budget_line_id: byIndex[i]?.budget_line_id ?? null,
+                  differs_from_primary:     byIndex[i]?.differs_from_primary ?? false,
+                  budget_line_confidence:   byIndex[i]?.confidence ?? null,
+                  budget_line_reason:       byIndex[i]?.reason ?? null,
+                }));
+              }
+            } catch (blErr) {
+              console.warn('suggestLineBudgets (contract) failed:', blErr.message);
+            }
+          }
+        } else {
+          // ── Invoice: contract match + QB codes + budget line ──
+
+          // 1. Auto-match to existing contract
+          const contractMatch = matchInvoiceToContract(extracted, phaseContracts);
+          if (contractMatch) {
+            extracted.suggested_contract_id = contractMatch.contract_id;
+            extracted.contract_match_confidence = contractMatch.confidence;
+            extracted.contract_match_reason = contractMatch.reason;
+          }
+
+          // 2. QB account suggestions per line item
+          if (extracted.line_items?.length && qbAccounts.length) {
+            try {
+              const codeSuggestions = await callWithRetry(() =>
+                suggestInvoiceLineCodes(buf, extracted.line_items, qbAccounts, extracted.vendor_name)
+              );
               const byIndex = {};
-              for (const s of blSuggestions.lines) byIndex[s.line_index] = s;
+              for (const s of codeSuggestions) byIndex[s.line_index] = s;
               extracted.line_items = extracted.line_items.map((li, i) => ({
                 ...li,
-                suggested_budget_line_id: byIndex[i]?.budget_line_id ?? null,
-                differs_from_primary:     byIndex[i]?.differs_from_primary ?? false,
-                budget_line_confidence:   byIndex[i]?.confidence ?? null,
-                budget_line_reason:       byIndex[i]?.reason ?? null,
+                suggested_qb_account_id:  byIndex[i]?.qb_account_id  ?? null,
+                qb_suggestion_confidence: byIndex[i]?.confidence      ?? null,
               }));
+            } catch (qbErr) {
+              console.warn('suggestInvoiceLineCodes failed:', qbErr.message);
             }
-          } catch (blErr) {
-            console.warn('suggestLineBudgets failed:', blErr.message);
+          }
+
+          // 3. Budget line suggestion (used as fallback if no contract, or for standalone invoices)
+          if (budgetLines.length) {
+            const lineItems = extracted.line_items?.length
+              ? extracted.line_items
+              : [{ description: extracted.summary || extracted.vendor_name, amount: extracted.amount }];
+            try {
+              const blSuggestions = await callWithRetry(() => suggestLineBudgets(
+                lineItems, budgetLines,
+                { vendor_name: extracted.vendor_name, description: extracted.summary }
+              ));
+              if (blSuggestions) {
+                extracted.suggested_primary_budget_line_id = blSuggestions.primary_budget_line_id;
+                if (extracted.line_items?.length) {
+                  const byIndex = {};
+                  for (const s of blSuggestions.lines) byIndex[s.line_index] = s;
+                  extracted.line_items = extracted.line_items.map((li, i) => ({
+                    ...li,
+                    suggested_budget_line_id: byIndex[i]?.budget_line_id ?? null,
+                    budget_line_confidence:   byIndex[i]?.confidence ?? null,
+                  }));
+                }
+              }
+            } catch (blErr) {
+              console.warn('suggestLineBudgets (invoice) failed:', blErr.message);
+            }
           }
         }
+
         const desc = type === 'contract' ? extracted.description : extracted.summary;
         const vendor = extracted.vendor_name;
         const primaryLineId = (type === 'contract' && extracted.suggested_primary_budget_line_id) || null;
+        const invLineId = (type === 'invoice' && extracted.suggested_primary_budget_line_id) || null;
         const { lineId: fallbackLineId, confidence: matchConf } = matchBudgetLine(desc, vendor, budgetLines);
-        const lineId = primaryLineId ?? fallbackLineId;
+        const lineId = primaryLineId ?? invLineId ?? fallbackLineId;
         await pool.query(
           `UPDATE import_queue SET status='needs_review', doc_type=$1, doc_type_confidence=$2,
            extracted_data=$3, suggested_budget_line_id=$4, match_confidence=$5, updated_at=NOW()
@@ -183,7 +301,7 @@ router.get('/import-queue/:id/duplicates', requireAuth, async (req, res, next) =
            WHERE LOWER(TRIM(vendor_name))=$1
              AND ABS(amount::numeric - $2) / NULLIF($2, 0) < 0.05
              AND invoice_date IS NOT NULL
-             AND ABS(EXTRACT(EPOCH FROM (invoice_date::date - $3::date))) < 86400*60`,
+             AND ABS(invoice_date::date - $3::date) < 60`,
           [vendor, amount, invDate]
         );
         r.rows.forEach(row => { if (!matches.find(m => m.id === row.id)) matches.push({ ...row, match_type: 'fuzzy', reason: 'Same vendor, similar amount & date' }); });
@@ -212,7 +330,7 @@ router.get('/import-queue/:id/duplicates', requireAuth, async (req, res, next) =
            WHERE LOWER(TRIM(vendor_name))=$1
              AND ABS(total_value::numeric - $2) / NULLIF($2, 0) < 0.10
              AND contract_date IS NOT NULL
-             AND ABS(EXTRACT(EPOCH FROM (contract_date::date - $3::date))) < 86400*90`,
+             AND ABS(contract_date::date - $3::date) < 90`,
           [vendor, amount, cDate]
         );
         r.rows.forEach(row => { if (!matches.find(m => m.id === row.id)) matches.push({ ...row, match_type: 'fuzzy', reason: 'Same vendor, similar amount & date' }); });
@@ -300,15 +418,32 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
       const phaseRes = await client.query('SELECT project_id FROM phases WHERE id=$1', [item.phase_id]);
       const projectId = phaseRes.rows[0]?.project_id;
       const r = await client.query(
-        `INSERT INTO invoices (project_id, phase_budget_line_id, vendor_name, invoice_number, amount,
+        `INSERT INTO invoices (project_id, phase_budget_line_id, contract_id, vendor_name, invoice_number, amount,
           invoice_date, description, status, file_reference, invoice_type, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-        [projectId, lineId, formData.vendor_name, formData.invoice_number||'',
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+        [projectId, lineId, formData.contract_id||null, formData.vendor_name, formData.invoice_number||'',
          Number(formData.amount)||0, formData.invoice_date||null, formData.description||null,
          formData.status||'pending', item.file_reference, formData.invoice_type||'fixed',
          req.session.userId]
       );
       invoiceId = r.rows[0].id;
+      // Save invoice line items
+      const invLines = Array.isArray(formData.line_items) ? formData.line_items : [];
+      for (let idx = 0; idx < invLines.length; idx++) {
+        const li = invLines[idx];
+        await client.query(
+          `INSERT INTO invoice_line_items
+             (invoice_id, sort_order, billing_type, description, person, line_date, hours, rate, amount, qb_account_id, phase_budget_line_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [invoiceId, idx, li.billing_type||'fixed', li.description||'',
+           li.person||null, li.line_date||null,
+           li.hours != null ? Number(li.hours) : null,
+           li.rate != null ? Number(li.rate) : null,
+           Number(li.amount)||0,
+           li.qb_account_id ? Number(li.qb_account_id) : null,
+           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null]
+        );
+      }
     }
 
     await client.query(
@@ -338,6 +473,19 @@ router.post('/import-queue/:id/retry', requireAuth, async (req, res, next) => {
       [item.phase_id]
     )).rows;
 
+    const qbAccountsRetry = (await pool.query('SELECT id, account_number, full_name, short_name FROM qb_accounts ORDER BY account_number')).rows;
+
+    const phaseContractsRetry = (await pool.query(`
+      SELECT DISTINCT c.id, c.vendor_name, c.reference_number, c.total_value FROM contracts c
+      WHERE c.phase_budget_line_id IN (SELECT id FROM phase_budget_lines WHERE phase_id = $1)
+        AND c.status NOT IN ('voided')
+      UNION
+      SELECT DISTINCT c.id, c.vendor_name, c.reference_number, c.total_value FROM contracts c
+      JOIN contract_line_items cli ON cli.contract_id = c.id
+      WHERE cli.phase_budget_line_id IN (SELECT id FROM phase_budget_lines WHERE phase_id = $1)
+        AND c.status NOT IN ('voided')
+    `, [item.phase_id])).rows;
+
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     async function callWithRetry(fn, maxRetries = 5) {
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -357,30 +505,195 @@ router.post('/import-queue/:id/retry', requireAuth, async (req, res, next) => {
         const extracted = await callWithRetry(() =>
           type === 'contract' ? extractContract(buf) : extractInvoice(buf)
         );
-        if (type === 'contract' && extracted.line_items?.length && budgetLines.length) {
-          try {
-            const blSuggestions = await callWithRetry(() => suggestLineBudgets(
-              extracted.line_items, budgetLines,
-              { vendor_name: extracted.vendor_name, description: extracted.description }
-            ));
-            if (blSuggestions) {
-              extracted.suggested_primary_budget_line_id = blSuggestions.primary_budget_line_id;
+        if (type === 'contract') {
+          if (extracted.line_items?.length && budgetLines.length) {
+            try {
+              const blSuggestions = await callWithRetry(() => suggestLineBudgets(
+                extracted.line_items, budgetLines,
+                { vendor_name: extracted.vendor_name, description: extracted.description }
+              ));
+              if (blSuggestions) {
+                extracted.suggested_primary_budget_line_id = blSuggestions.primary_budget_line_id;
+                const byIndex = {};
+                for (const s of blSuggestions.lines) byIndex[s.line_index] = s;
+                extracted.line_items = extracted.line_items.map((li, i) => ({
+                  ...li,
+                  suggested_budget_line_id: byIndex[i]?.budget_line_id ?? null,
+                  differs_from_primary:     byIndex[i]?.differs_from_primary ?? false,
+                  budget_line_confidence:   byIndex[i]?.confidence ?? null,
+                  budget_line_reason:       byIndex[i]?.reason ?? null,
+                }));
+              }
+            } catch (blErr) { console.warn('suggestLineBudgets (retry contract) failed:', blErr.message); }
+          }
+        } else {
+          const contractMatch = matchInvoiceToContract(extracted, phaseContractsRetry);
+          if (contractMatch) {
+            extracted.suggested_contract_id = contractMatch.contract_id;
+            extracted.contract_match_confidence = contractMatch.confidence;
+          }
+          if (extracted.line_items?.length && qbAccountsRetry.length) {
+            try {
+              const codeSuggestions = await callWithRetry(() =>
+                suggestInvoiceLineCodes(buf, extracted.line_items, qbAccountsRetry, extracted.vendor_name)
+              );
               const byIndex = {};
-              for (const s of blSuggestions.lines) byIndex[s.line_index] = s;
+              for (const s of codeSuggestions) byIndex[s.line_index] = s;
               extracted.line_items = extracted.line_items.map((li, i) => ({
                 ...li,
-                suggested_budget_line_id: byIndex[i]?.budget_line_id ?? null,
-                differs_from_primary:     byIndex[i]?.differs_from_primary ?? false,
-                budget_line_confidence:   byIndex[i]?.confidence ?? null,
-                budget_line_reason:       byIndex[i]?.reason ?? null,
+                suggested_qb_account_id:  byIndex[i]?.qb_account_id ?? null,
+                qb_suggestion_confidence: byIndex[i]?.confidence     ?? null,
               }));
-            }
-          } catch (blErr) {
-            console.warn('suggestLineBudgets failed:', blErr.message);
+            } catch (qbErr) { console.warn('suggestInvoiceLineCodes (retry) failed:', qbErr.message); }
+          }
+          if (budgetLines.length) {
+            try {
+              const lineItems = extracted.line_items?.length
+                ? extracted.line_items
+                : [{ description: extracted.summary || extracted.vendor_name, amount: extracted.amount }];
+              const blSuggestions = await callWithRetry(() => suggestLineBudgets(
+                lineItems, budgetLines,
+                { vendor_name: extracted.vendor_name, description: extracted.summary }
+              ));
+              if (blSuggestions) {
+                extracted.suggested_primary_budget_line_id = blSuggestions.primary_budget_line_id;
+                if (extracted.line_items?.length) {
+                  const byIndex = {};
+                  for (const s of blSuggestions.lines) byIndex[s.line_index] = s;
+                  extracted.line_items = extracted.line_items.map((li, i) => ({
+                    ...li,
+                    suggested_budget_line_id: byIndex[i]?.budget_line_id ?? null,
+                    budget_line_confidence:   byIndex[i]?.confidence ?? null,
+                  }));
+                }
+              }
+            } catch (blErr) { console.warn('suggestLineBudgets (retry invoice) failed:', blErr.message); }
           }
         }
         const desc = type === 'contract' ? extracted.description : extracted.summary;
         const primaryLineId = (type === 'contract' && extracted.suggested_primary_budget_line_id) || null;
+        const invLineId = (type === 'invoice' && extracted.suggested_primary_budget_line_id) || null;
+        const { lineId: fallbackLineId, confidence: matchConf } = matchBudgetLine(desc, extracted.vendor_name, budgetLines);
+        const lineId = primaryLineId ?? invLineId ?? fallbackLineId;
+        await pool.query(
+          `UPDATE import_queue SET status='needs_review', doc_type=$1, doc_type_confidence=$2,
+           extracted_data=$3, suggested_budget_line_id=$4, match_confidence=$5, updated_at=NOW() WHERE id=$6`,
+          [type, confidence, JSON.stringify(extracted), lineId, matchConf, item.id]
+        );
+      } catch (err) {
+        await pool.query(`UPDATE import_queue SET status='failed', error_message=$1, updated_at=NOW() WHERE id=$2`, [err.message, item.id]);
+      }
+    })();
+  } catch (err) { next(err); }
+});
+
+// POST /api/phases/:phaseId/import/reprocess — re-run AI on all needs_review items
+router.post('/phases/:phaseId/import/reprocess', requireAuth, async (req, res, next) => {
+  try {
+    const phaseId = Number(req.params.phaseId);
+    const items = (await pool.query(
+      `SELECT * FROM import_queue WHERE phase_id=$1 AND status='needs_review' ORDER BY created_at`,
+      [phaseId]
+    )).rows;
+    if (!items.length) return res.json({ ok: true, count: 0 });
+
+    // Mark all as queued so UI shows progress
+    await pool.query(
+      `UPDATE import_queue SET status='queued', updated_at=NOW() WHERE phase_id=$1 AND status='needs_review'`,
+      [phaseId]
+    );
+    res.json({ ok: true, count: items.length });
+
+    // Run same background pipeline as initial import
+    const budgetLines = (await pool.query(
+      'SELECT id, task_name, discipline FROM phase_budget_lines WHERE phase_id=$1', [phaseId]
+    )).rows;
+    const qbAccounts = (await pool.query('SELECT id, account_number, full_name, short_name FROM qb_accounts ORDER BY account_number')).rows;
+    const phaseContracts = (await pool.query(`
+      SELECT DISTINCT c.id, c.vendor_name, c.reference_number, c.total_value FROM contracts c
+      WHERE c.phase_budget_line_id IN (SELECT id FROM phase_budget_lines WHERE phase_id=$1) AND c.status NOT IN ('voided')
+      UNION
+      SELECT DISTINCT c.id, c.vendor_name, c.reference_number, c.total_value FROM contracts c
+      JOIN contract_line_items cli ON cli.contract_id = c.id
+      WHERE cli.phase_budget_line_id IN (SELECT id FROM phase_budget_lines WHERE phase_id=$1) AND c.status NOT IN ('voided')
+    `, [phaseId])).rows;
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    async function callWithRetry(fn, maxRetries = 5) {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try { return await fn(); } catch (err) {
+          const is429 = err.status === 429 || String(err.message).includes('429') || String(err.message).includes('rate limit');
+          if (is429 && attempt < maxRetries) { await sleep(Math.min(60000, 6000 * Math.pow(2, attempt))); }
+          else { throw err; }
+        }
+      }
+    }
+
+    const CONCURRENCY = 2;
+    let i = 0;
+    async function processOne() {
+      if (i >= items.length) return;
+      const item = items[i++];
+      try {
+        await pool.query(`UPDATE import_queue SET status='extracting', updated_at=NOW() WHERE id=$1`, [item.id]);
+        const buf = (await fileStorage.read(item.file_reference)).buffer;
+        const { type, confidence } = await callWithRetry(() => classifyDocument(buf));
+        const extracted = await callWithRetry(() =>
+          type === 'contract' ? extractContract(buf) : extractInvoice(buf)
+        );
+        if (type === 'contract') {
+          if (extracted.line_items?.length && budgetLines.length) {
+            try {
+              const bl = await callWithRetry(() => suggestLineBudgets(extracted.line_items, budgetLines,
+                { vendor_name: extracted.vendor_name, description: extracted.description }));
+              if (bl) {
+                extracted.suggested_primary_budget_line_id = bl.primary_budget_line_id;
+                const byIdx = {};
+                for (const s of bl.lines) byIdx[s.line_index] = s;
+                extracted.line_items = extracted.line_items.map((li, idx) => ({
+                  ...li,
+                  suggested_budget_line_id: byIdx[idx]?.budget_line_id ?? null,
+                  differs_from_primary: byIdx[idx]?.differs_from_primary ?? false,
+                  budget_line_confidence: byIdx[idx]?.confidence ?? null,
+                  budget_line_reason: byIdx[idx]?.reason ?? null,
+                }));
+              }
+            } catch (e) { console.warn('reprocess bl error:', e.message); }
+          }
+        } else {
+          const contractMatch = matchInvoiceToContract(extracted, phaseContracts);
+          if (contractMatch) { extracted.suggested_contract_id = contractMatch.contract_id; extracted.contract_match_confidence = contractMatch.confidence; }
+          if (extracted.line_items?.length && qbAccounts.length) {
+            try {
+              const sug = await callWithRetry(() => suggestInvoiceLineCodes(buf, extracted.line_items, qbAccounts, extracted.vendor_name));
+              const byIdx = {};
+              for (const s of sug) byIdx[s.line_index] = s;
+              extracted.line_items = extracted.line_items.map((li, idx) => ({
+                ...li, suggested_qb_account_id: byIdx[idx]?.qb_account_id ?? null, qb_suggestion_confidence: byIdx[idx]?.confidence ?? null,
+              }));
+            } catch (e) { console.warn('reprocess qb error:', e.message); }
+          }
+          if (budgetLines.length) {
+            try {
+              const lineItems = extracted.line_items?.length ? extracted.line_items
+                : [{ description: extracted.summary || '', amount: extracted.amount }];
+              const bl = await callWithRetry(() => suggestLineBudgets(lineItems, budgetLines,
+                { vendor_name: extracted.vendor_name, description: extracted.summary }));
+              if (bl) {
+                extracted.suggested_primary_budget_line_id = bl.primary_budget_line_id;
+                if (extracted.line_items?.length) {
+                  const byIdx2 = {};
+                  for (const s of bl.lines) byIdx2[s.line_index] = s;
+                  extracted.line_items = extracted.line_items.map((li, idx) => ({
+                    ...li, suggested_budget_line_id: byIdx2[idx]?.budget_line_id ?? null,
+                  }));
+                }
+              }
+            } catch (e) { console.warn('reprocess invoice bl error:', e.message); }
+          }
+        }
+        const desc = type === 'contract' ? extracted.description : extracted.summary;
+        const primaryLineId = extracted.suggested_primary_budget_line_id || null;
         const { lineId: fallbackLineId, confidence: matchConf } = matchBudgetLine(desc, extracted.vendor_name, budgetLines);
         const lineId = primaryLineId ?? fallbackLineId;
         await pool.query(
@@ -391,7 +704,13 @@ router.post('/import-queue/:id/retry', requireAuth, async (req, res, next) => {
       } catch (err) {
         await pool.query(`UPDATE import_queue SET status='failed', error_message=$1, updated_at=NOW() WHERE id=$2`, [err.message, item.id]);
       }
-    })();
+    }
+    const workers = Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => {
+      const run = async () => { await processOne(); if (i < items.length) await run(); };
+      return run();
+    });
+    Promise.all(workers).catch(e => console.error('Reprocess worker error:', e));
+
   } catch (err) { next(err); }
 });
 

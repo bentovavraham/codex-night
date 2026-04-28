@@ -108,7 +108,7 @@ function EditCell({ value, rowId, field, numeric, isActive, onActivate, onCommit
   }
 
   return (
-    <td className={`${styles.cell} ${styles.editableCell} ${className ?? ''} ${!display ? styles.cellEmpty : ''}`} onDoubleClick={open}>
+    <td className={`${styles.cell} ${styles.editableCell} ${className ?? ''} ${!display ? styles.cellEmpty : ''}`} onClick={open}>
       {display || null}
     </td>
   );
@@ -406,9 +406,8 @@ export default function BudgetGrid() {
 
                       const isA = (f: string) => active.rowId === row.id && active.field === f;
                       return (
-                        <tr key={row.id} className={`${styles.dataRow} ${styles.lineClickable} ${row.source === 'user' ? styles.rowUserAdded : ''}`}
-                            onClick={(e) => { if ((e.target as HTMLElement).closest('input,select,button')) return; setPanelRow(row); }}>
-                          <td className={styles.rowGutter}>
+                        <tr key={row.id} className={`${styles.dataRow} ${row.source === 'user' ? styles.rowUserAdded : ''}`}>
+                          <td className={styles.rowGutter} onClick={() => setPanelRow(row)} style={{ cursor: 'pointer' }}>
                             <span className={styles.rowArrow}>›</span>
                           </td>
                           <EditCell value={row.task_name} rowId={row.id} field="task_name"
