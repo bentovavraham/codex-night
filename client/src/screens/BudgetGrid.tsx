@@ -38,6 +38,16 @@ export interface BudgetRow {
   has_direct_invoices: boolean;
   source: 'template' | 'user';
   amount_modified: boolean;
+  // QB account hierarchy
+  qb_account_id: number | null;
+  qb_account_number: string | null;
+  qb_short_name: string | null;
+  qb_sort_order: number;
+  qb_parent_id: number | null;
+  qb_parent_number: string | null;
+  qb_parent_name: string | null;
+  qb_parent_sort: number;
+  qb_category: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -61,11 +71,17 @@ const INV_TYPE: Record<string, { label: string; bg: string; text: string }> = {
   expense: { label: 'Expense', bg: '#dcfce7', text: '#166534' },
 };
 
-const SECTIONS = [
-  { key: 'professional_fees', label: 'Professional Fees' },
-  { key: 'application_fees',  label: 'Application & Other Fees' },
-  { key: 'construction',      label: 'Estimated Extraordinary Construction Costs' },
-] as const;
+// QB category display labels (parent account → friendly label)
+const QB_CATEGORY_LABEL: Record<string, string> = {
+  entitlement:       'Entitlement',
+  construction:      'Construction & Land Development',
+  professional_fees: 'Professional Fees',
+  g_and_a:           'General & Administrative',
+  closing:           'Closing Costs',
+  finance:           'Finance',
+  land:              'Land',
+  capital:           'Capital Cost',
+};
 
 const TAB_FIELDS = ['task_name', 'discipline', 'budgeted_amount', 'consultant', 'calculation_method', 'notes'];
 
@@ -362,27 +378,40 @@ export default function BudgetGrid() {
     [rows, hideUnused]
   );
 
+  // QB-hierarchy tree: parent_account → rows (sorted by qb_sort_order within each parent)
+  // parentKey = qb_parent_number ?? qb_account_number ?? 'unclassified'
   const tree = useMemo(() => {
-    const m = new Map<string, Map<string, BudgetRow[]>>();
-    for (const s of SECTIONS) m.set(s.key, new Map());
+    // ordered list of parent keys (preserving first-seen sort order)
+    const parentOrder: string[] = [];
+    const parentMeta: Record<string, { label: string; sort: number; category: string }> = {};
+    const m = new Map<string, BudgetRow[]>();
+
     for (const r of filteredRows) {
-      const sm = m.get(r.section); if (!sm) continue;
-      const sg = r.sub_group ?? '__none__';
-      if (!sm.has(sg)) sm.set(sg, []);
-      sm.get(sg)!.push(r);
+      const pk = r.qb_parent_number ?? r.qb_account_number ?? 'unclassified';
+      if (!m.has(pk)) {
+        m.set(pk, []);
+        parentOrder.push(pk);
+        parentMeta[pk] = {
+          label: r.qb_parent_name ?? r.qb_short_name ?? 'Unclassified',
+          sort:  r.qb_parent_sort ?? r.qb_sort_order ?? 9999,
+          category: r.qb_category ?? 'other',
+        };
+      }
+      m.get(pk)!.push(r);
     }
-    return m;
+    // stable sort parent keys by their sort value
+    parentOrder.sort((a, b) => parentMeta[a].sort - parentMeta[b].sort);
+    return { order: parentOrder, meta: parentMeta, rows: m };
   }, [filteredRows]);
 
-  const secTotals = useMemo(() => {
+  // Totals by parent account key
+  const parentTotals = useMemo(() => {
     const t: Record<string, Totals> = {};
-    for (const r of filteredRows) { if (!t[r.section]) t[r.section] = zero(); t[r.section] = addRow(t[r.section], r); }
-    return t;
-  }, [filteredRows]);
-
-  const sgTotals = useMemo(() => {
-    const t: Record<string, Totals> = {};
-    for (const r of filteredRows) { const k = r.sub_group ?? `${r.section}:none`; if (!t[k]) t[k] = zero(); t[k] = addRow(t[k], r); }
+    for (const r of filteredRows) {
+      const pk = r.qb_parent_number ?? r.qb_account_number ?? 'unclassified';
+      if (!t[pk]) t[pk] = zero();
+      t[pk] = addRow(t[pk], r);
+    }
     return t;
   }, [filteredRows]);
 
@@ -459,7 +488,7 @@ export default function BudgetGrid() {
 
       <div className={styles.scrollArea} onClick={() => setActive({ rowId: -1, field: '' })}>
         <table className={styles.table} onClick={e => e.stopPropagation()}>
-          <colgroup><col style={{width:24}}/><col style={{width:200}}/><col style={{width:100}}/><col style={{width:90}}/><col style={{width:88}}/><col style={{width:50}}/><col style={{width:90}}/><col style={{width:76}}/><col style={{width:90}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:76}}/><col style={{width:88}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:64}}/><col style={{width:64}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
+          <colgroup><col style={{width:24}}/><col style={{width:70}}/><col style={{width:230}}/><col style={{width:90}}/><col style={{width:88}}/><col style={{width:50}}/><col style={{width:90}}/><col style={{width:76}}/><col style={{width:90}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:76}}/><col style={{width:88}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:64}}/><col style={{width:64}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
           <thead>
             <tr className={styles.theadGroup}>
               <th colSpan={4} />
@@ -472,8 +501,8 @@ export default function BudgetGrid() {
             </tr>
             <tr className={styles.thead}>
               <th className={styles.th} />
-              <th className={`${styles.th} ${styles.thLeft}`}>Task</th>
-              <th className={`${styles.th} ${styles.thLeft}`}>Discipline</th>
+              <th className={`${styles.th} ${styles.thLeft}`}>Acct #</th>
+              <th className={`${styles.th} ${styles.thLeft}`}>Task / Description</th>
               <th className={`${styles.th} ${styles.thRight}`}>Budgeted</th>
               <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget</th>
               <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
@@ -490,109 +519,87 @@ export default function BudgetGrid() {
               <th className={`${styles.th} ${styles.thRight}`}>$/AC</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Calc Method</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Consultant</th>
-              <th className={`${styles.th} ${styles.thLeft} ${dc}`}>QB Codes</th>
+              <th className={`${styles.th} ${styles.thLeft} ${dc}`}>QB Account</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Notes</th>
             </tr>
           </thead>
           <tbody>
-            {SECTIONS.map(sec => {
-              const secOpen = !collapsed.has(`sec:${sec.key}`);
-              const st = secTotals[sec.key] ?? zero();
-              const subMap = tree.get(sec.key) ?? new Map();
+            {tree.order.map(pk => {
+              const grpOpen = !collapsed.has(`grp:${pk}`);
+              const gt = parentTotals[pk] ?? zero();
+              const grpRows = tree.rows.get(pk) ?? [];
+              const grpLabel = tree.meta[pk]?.label ?? pk;
               return [
-                <tr key={`sec:${sec.key}`} className={styles.secRow} onClick={() => toggle(`sec:${sec.key}`)}>
-                  <td className={styles.secGutter}><span className={styles.chevron}>{secOpen ? '▼' : '▶'}</span></td>
-                  <td className={styles.secLabel} colSpan={2}>{sec.label}</td>
-                  <SumCells t={st} variant="hdr" />
+                <tr key={`grp:${pk}`} className={styles.secRow} onClick={() => toggle(`grp:${pk}`)}>
+                  <td className={styles.secGutter}><span className={styles.chevron}>{grpOpen ? '▼' : '▶'}</span></td>
+                  <td className={styles.secLabel} colSpan={2}>{grpLabel}</td>
+                  <SumCells t={gt} variant="hdr" />
                 </tr>,
 
-                ...(secOpen ? Array.from(subMap.entries()).flatMap(([sgKey, sgRows]) => {
-                  const hasSg  = sgKey !== '__none__';
-                  const sgOpen = !collapsed.has(`sg:${sgKey}`);
-                  const sgt    = sgTotals[sgKey] ?? zero();
-                  return [
-                    ...(hasSg ? [
-                      <tr key={`sg:${sgKey}`} className={styles.sgRow} onClick={() => toggle(`sg:${sgKey}`)}>
-                        <td className={styles.sgGutter}><span className={styles.chevron}>{sgOpen ? '▼' : '▶'}</span></td>
-                        <td className={styles.sgLabel} colSpan={2}>{sgKey}</td>
-                        <SumCells t={sgt} variant="hdr" />
+                ...(grpOpen ? [
+                  ...grpRows.map((row: BudgetRow) => {
+                    const isA = (f: string) => active.rowId === row.id && active.field === f;
+                    const isDrillActive = drillTarget?.rowId === row.id;
+                    return (
+                      <tr key={row.id} className={`${styles.dataRow} ${row.source === 'user' ? styles.rowUserAdded : ''} ${isDrillActive ? styles.drillActiveRow : ''}`}>
+                        <td className={styles.rowGutter} onClick={() => setPanelRow(row)} style={{ cursor: 'pointer' }}>
+                          <span className={styles.rowArrow}>›</span>
+                        </td>
+                        <td className={`${styles.cell} ${styles.tdAcct} ${styles.ro}`}
+                          title={row.qb_short_name ?? undefined}>
+                          {row.qb_account_number ?? '—'}
+                        </td>
+                        <EditCell value={row.task_name} rowId={row.id} field="task_name"
+                          isActive={isA('task_name')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+                          onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdTask} />
+                        <EditCell value={row.budgeted_amount} rowId={row.id} field="budgeted_amount" numeric
+                          isActive={isA('budgeted_amount')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+                          onCommit={handleCommit} onTabNext={handleTabNext}
+                          className={`${styles.tdMoney} ${(row.source ?? 'template') === 'template' && !row.amount_modified ? styles.amtTemplate : styles.amtModified}`} />
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.budgeted_amount > 0 && row.remaining_budget < 0 ? styles.danger : ''}`}>
+                          {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
+                        </td>
+                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.billed, row.budgeted_amount)}`}>
+                          {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}
+                        </td>
+                        <DC value={row.committed} row={row} cell="committed"
+                          active={isDrillActive && drillTarget?.cell === 'committed'} onDrill={drill} />
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
+                          {row.co_count > 0 ? <span title={`${row.co_count} CO${row.co_count > 1 ? 's' : ''}`}>{money(row.co_value)}</span> : ''}
+                        </td>
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
+                          {money(row.total_commitment)}
+                        </td>
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.fixed_charges)}</td>
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.tm_charges)}</td>
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.expense_charges)}</td>
+                        <DC value={row.billed} row={row} cell="billed"
+                          active={isDrillActive && drillTarget?.cell === 'billed'} onDrill={drill}
+                          className={warnCls(row.billed, row.budgeted_amount)} />
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.amount_due)}</td>
+                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
+                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.billed, gla_sf)}</td>
+                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
+                        <EditCell value={row.calculation_method} rowId={row.id} field="calculation_method"
+                          isActive={isA('calculation_method')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+                          onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdCalc} ${dc}`} />
+                        <EditCell value={row.consultant} rowId={row.id} field="consultant"
+                          isActive={isA('consultant')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+                          onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdText} ${dc}`} />
+                        <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`}>
+                          {row.qb_account_number ?? ''}
+                          {row.has_direct_invoices && <span className={styles.directBadge}>Direct</span>}
+                        </td>
+                        <EditCell value={row.notes} rowId={row.id} field="notes"
+                          isActive={isA('notes')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+                          onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdNotes} ${dc}`} />
                       </tr>
-                    ] : []),
-
-                    ...(sgOpen ? [
-                      ...sgRows.map((row: BudgetRow) => {
-                        const isA = (f: string) => active.rowId === row.id && active.field === f;
-                        const isDrillActive = drillTarget?.rowId === row.id;
-                        return (
-                          <tr key={row.id} className={`${styles.dataRow} ${row.source === 'user' ? styles.rowUserAdded : ''} ${isDrillActive ? styles.drillActiveRow : ''}`}>
-                            <td className={styles.rowGutter} onClick={() => setPanelRow(row)} style={{ cursor: 'pointer' }}>
-                              <span className={styles.rowArrow}>›</span>
-                            </td>
-                            <EditCell value={row.task_name} rowId={row.id} field="task_name"
-                              isActive={isA('task_name')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                              onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdTask} />
-                            <EditCell value={row.discipline} rowId={row.id} field="discipline"
-                              isActive={isA('discipline')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                              onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdDisc} />
-                            <EditCell value={row.budgeted_amount} rowId={row.id} field="budgeted_amount" numeric
-                              isActive={isA('budgeted_amount')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                              onCommit={handleCommit} onTabNext={handleTabNext}
-                              className={`${styles.tdMoney} ${(row.source ?? 'template') === 'template' && !row.amount_modified ? styles.amtTemplate : styles.amtModified}`} />
-                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.budgeted_amount > 0 && row.remaining_budget < 0 ? styles.danger : ''}`}>
-                              {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
-                            </td>
-                            <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.billed, row.budgeted_amount)}`}>
-                              {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}
-                            </td>
-                            <DC value={row.committed} row={row} cell="committed"
-                              active={isDrillActive && drillTarget?.cell === 'committed'} onDrill={drill} />
-                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
-                              {row.co_count > 0 ? <span title={`${row.co_count} CO${row.co_count > 1 ? 's' : ''}`}>{money(row.co_value)}</span> : ''}
-                            </td>
-                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
-                              {money(row.total_commitment)}
-                            </td>
-                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.fixed_charges)}</td>
-                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.tm_charges)}</td>
-                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.expense_charges)}</td>
-                            <DC value={row.billed} row={row} cell="billed"
-                              active={isDrillActive && drillTarget?.cell === 'billed'} onDrill={drill}
-                              className={warnCls(row.billed, row.budgeted_amount)} />
-                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.amount_due)}</td>
-                            <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
-                            <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.billed, gla_sf)}</td>
-                            <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
-                            <EditCell value={row.calculation_method} rowId={row.id} field="calculation_method"
-                              isActive={isA('calculation_method')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                              onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdCalc} ${dc}`} />
-                            <EditCell value={row.consultant} rowId={row.id} field="consultant"
-                              isActive={isA('consultant')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                              onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdText} ${dc}`} />
-                            <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`} title={row.qb_codes_used || undefined}>
-                              {row.qb_codes_used || ''}
-                              {row.has_direct_invoices && <span className={styles.directBadge}>Direct</span>}
-                            </td>
-                            <EditCell value={row.notes} rowId={row.id} field="notes"
-                              isActive={isA('notes')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                              onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdNotes} ${dc}`} />
-                          </tr>
-                        );
-                      }),
-                      ...(hasSg ? [
-                        <tr key={`sg:${sgKey}:sub`} className={styles.sgSubRow}>
-                          <td /><td className={styles.sgSubLabel} colSpan={2}>Total — {sgKey}</td>
-                          <SumCells t={sgt} variant="sg" />
-                        </tr>
-                      ] : []),
-                    ] : []),
-                  ];
-                }) : []),
-
-                ...(secOpen ? [
-                  <tr key={`sec:${sec.key}:sub`} className={styles.secSubRow}>
-                    <td /><td className={styles.secSubLabel} colSpan={2}>Total — {sec.label}</td>
-                    <SumCells t={st} variant="sec" />
-                  </tr>
+                    );
+                  }),
+                  <tr key={`grp:${pk}:sub`} className={styles.secSubRow}>
+                    <td /><td className={styles.secSubLabel} colSpan={2}>Total — {grpLabel}</td>
+                    <SumCells t={gt} variant="sec" />
+                  </tr>,
                 ] : []),
               ];
             })}

@@ -492,3 +492,10 @@ DO $$ BEGIN
     ADD COLUMN qb_account_id INT REFERENCES qb_accounts(id) ON DELETE SET NULL;
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
+
+-- Allow multiple tasks per (phase, qb_account): hybrid model where tasks keep
+-- granularity but roll up to the GL code for QB reconciliation.
+DO $$ BEGIN
+  ALTER TABLE phase_budget_lines DROP CONSTRAINT IF EXISTS phase_budget_lines_phase_id_qb_account_id_key;
+EXCEPTION WHEN others THEN NULL;
+END $$;

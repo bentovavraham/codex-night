@@ -29,6 +29,17 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         pbl.sort_order,
         pbl.source,
         pbl.amount_modified,
+        pbl.qb_account_id,
+
+        -- QB account hierarchy fields
+        qa.account_number                       AS qb_account_number,
+        qa.short_name                           AS qb_short_name,
+        qa.sort_order                           AS qb_sort_order,
+        qp.id                                   AS qb_parent_id,
+        qp.account_number                       AS qb_parent_number,
+        qp.short_name                           AS qb_parent_name,
+        qp.sort_order                           AS qb_parent_sort,
+        COALESCE(qa.category, qp.category)      AS qb_category,
 
         -- Committed: sum contributions to this budget line from active contracts.
         -- Line items with their own phase_budget_line_id override the contract-level line.
@@ -205,14 +216,12 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         ) AS has_direct_invoices
 
       FROM phase_budget_lines pbl
+      LEFT JOIN qb_accounts qa ON qa.id = pbl.qb_account_id
+      LEFT JOIN qb_accounts qp ON qp.id = qa.parent_id
       WHERE pbl.phase_id = $1
       ORDER BY
-        CASE pbl.section
-          WHEN 'professional_fees' THEN 1
-          WHEN 'application_fees'  THEN 2
-          WHEN 'construction'      THEN 3
-          ELSE 4
-        END,
+        COALESCE(qp.sort_order, qa.sort_order, 9999),
+        COALESCE(qa.sort_order, 9999),
         pbl.sort_order,
         pbl.id
     `, [phaseId]);
@@ -250,6 +259,15 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         remaining_commit,
         pct_billed,
         has_direct_invoices: r.has_direct_invoices === true || r.has_direct_invoices === 't',
+        qb_account_id:      r.qb_account_id ?? null,
+        qb_account_number:  r.qb_account_number ?? null,
+        qb_short_name:      r.qb_short_name ?? null,
+        qb_sort_order:      r.qb_sort_order != null ? Number(r.qb_sort_order) : 9999,
+        qb_parent_id:       r.qb_parent_id ?? null,
+        qb_parent_number:   r.qb_parent_number ?? null,
+        qb_parent_name:     r.qb_parent_name ?? null,
+        qb_parent_sort:     r.qb_parent_sort != null ? Number(r.qb_parent_sort) : 9999,
+        qb_category:        r.qb_category ?? null,
       };
     });
 
@@ -350,16 +368,22 @@ router.post('/phases/:phaseId/budget/init', requireAuth, async (req, res, next) 
       return res.status(409).json({ error: 'Budget already initialized' });
     }
 
+    // Build account_number → qb_account_id lookup
+    const { rows: accts } = await pool.query('SELECT id, account_number FROM qb_accounts');
+    const numToId = {};
+    for (const a of accts) numToId[a.account_number] = a.id;
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       for (let i = 0; i < TEMPLATE.length; i++) {
         const t = TEMPLATE[i];
+        const qbId = t.account_number ? numToId[t.account_number] ?? null : null;
         await client.query(
           `INSERT INTO phase_budget_lines
-             (phase_id, task_name, discipline, section, sub_group, budgeted_amount, sort_order, source)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'template')`,
-          [phaseId, t.task_name, t.discipline, t.section, t.sub_group || null, t.default_amount || 0, i + 1]
+             (phase_id, task_name, discipline, section, sub_group, budgeted_amount, sort_order, source, qb_account_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'template', $8)`,
+          [phaseId, t.task_name, t.discipline, t.section, t.sub_group || null, t.default_amount || 0, i + 1, qbId]
         );
       }
       await client.query('COMMIT');
