@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -16,6 +17,9 @@ interface ContractLine {
   qb_account_id: number | null;
   suggested_qb_account_id: number | null;
   qb_suggestion_confidence: string | null;
+  phase_budget_line_id: number | null;
+  differs_from_primary?: boolean;
+  budget_line_confidence?: string | null;
 }
 
 interface ContractForm {
@@ -192,6 +196,81 @@ function BudgetLinePicker({ lines, value, onChange }: {
   );
 }
 
+// ─── Inline budget line picker for task table rows (portal-based) ─────────────
+
+function InlineBudgetLinePicker({ lines, value, onChange }: {
+  lines: any[]; value: number | null; onChange: (id: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selected = lines.find(l => l.id === value) ?? null;
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return lines;
+    const q = query.toLowerCase();
+    return lines.filter(l =>
+      l.task_name.toLowerCase().includes(q) || (l.discipline || '').toLowerCase().includes(q)
+    );
+  }, [lines, query]);
+
+  function openPicker() {
+    if (!triggerRef.current) return;
+    const r = triggerRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 2, left: r.left, width: Math.max(r.width, 280) });
+    setQuery('');
+    setOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 20);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function onOut(e: MouseEvent) {
+      if (triggerRef.current?.contains(e.target as Node)) return;
+      if ((e.target as Element)?.closest?.('[data-inbl-dp]')) return;
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', onOut);
+    return () => document.removeEventListener('mousedown', onOut);
+  }, [open]);
+
+  return (
+    <>
+      <div ref={triggerRef} className={styles.inblTrigger} onClick={openPicker}
+        title={selected ? `${selected.task_name}${selected.discipline ? ` · ${selected.discipline}` : ''}` : 'Click to assign budget line'}>
+        {selected ? (
+          <>
+            <span className={styles.inblLabel}>{selected.task_name}</span>
+            <button className={styles.inblClear} onClick={e => { e.stopPropagation(); onChange(null); }}>✕</button>
+          </>
+        ) : (
+          <span className={styles.inblEmpty}>— inherit —</span>
+        )}
+      </div>
+      {open && createPortal(
+        <div data-inbl-dp className={styles.inblDropdown} style={{ top: pos.top, left: pos.left, width: pos.width }}>
+          <input ref={inputRef} className={styles.inblSearch} value={query}
+            onChange={e => setQuery(e.target.value)} placeholder="Search budget lines…" />
+          <div className={styles.inblList}>
+            <div className={styles.inblOption} onMouseDown={() => { onChange(null); setOpen(false); }}>— inherit —</div>
+            {filtered.map(l => (
+              <div key={l.id}
+                className={`${styles.inblOption} ${l.id === value ? styles.inblSelected : ''}`}
+                onMouseDown={() => { onChange(l.id); setOpen(false); }}>
+                {l.task_name}{l.discipline ? ` · ${l.discipline}` : ''}
+              </div>
+            ))}
+            {filtered.length === 0 && <div className={styles.inblNoMatch}>No match</div>}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 // ─── Contract list ────────────────────────────────────────────────────────────
 
 function ContractList({ contracts, phaseId, onUpload, onEdit, onView }: {
@@ -287,10 +366,11 @@ function ContractList({ contracts, phaseId, onUpload, onEdit, onView }: {
 
 // ─── Upload + review panel ────────────────────────────────────────────────────
 
-function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, editId }: {
+function UploadPanel({ budgetLines, qbAccounts, projectId, phaseId, onClose, onSaved, editId }: {
   budgetLines: any[];
   qbAccounts: QbAccount[];
   projectId: number;
+  phaseId: number;
   onClose: () => void;
   onSaved: () => void;
   editId?: number;
@@ -331,6 +411,7 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
           qb_account_id:            li.qb_account_id ?? null,
           suggested_qb_account_id:  null,
           qb_suggestion_confidence: null,
+          phase_budget_line_id:     li.phase_budget_line_id ?? null,
         })),
         reviewed: true,
       });
@@ -347,7 +428,7 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
     setStage('extracting');
     setExtractError(null);
     try {
-      const result = await api.extractContract(file);
+      const result = await api.extractContract(file, phaseId);
       setFileRef(result.file_reference ?? null);
       if (result.extracted) {
         const e = result.extracted;
@@ -359,16 +440,19 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
           qb_account_id:            null,
           suggested_qb_account_id:  li.suggested_qb_account_id  ?? null,
           qb_suggestion_confidence: li.qb_suggestion_confidence ?? null,
+          phase_budget_line_id:     li.suggested_budget_line_id ?? null,
+          differs_from_primary:     li.differs_from_primary ?? false,
+          budget_line_confidence:   li.budget_line_confidence ?? null,
         }));
         setForm({
-          vendor_name:         e.vendor_name      ?? '',
-          reference_number:    e.reference_number ?? '',
-          contract_date:       e.contract_date    ?? '',
-          description:         e.description      ?? '',
-          phase_budget_line_id: null,
-          status:              'draft',
-          line_items:          items,
-          reviewed:            false,
+          vendor_name:          e.vendor_name      ?? '',
+          reference_number:     e.reference_number ?? '',
+          contract_date:        e.contract_date    ?? '',
+          description:          e.description      ?? '',
+          phase_budget_line_id: e.suggested_primary_budget_line_id ?? null,
+          status:               'draft',
+          line_items:           items,
+          reviewed:             false,
         });
       }
       if (result.extract_error) setExtractError(result.extract_error);
@@ -401,6 +485,7 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
       line_items: [...f.line_items, {
         billing_type: 'fixed', description: '', budgeted_amount: '',
         qb_account_id: null, suggested_qb_account_id: null, qb_suggestion_confidence: null,
+        phase_budget_line_id: null,
       }],
     }));
   }
@@ -414,11 +499,13 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
     .reduce((s, li) => s + (Number(li.budgeted_amount) || 0), 0);
   const hasTm = form.line_items.some(li => li.billing_type === 'tm');
 
+  const hasLineItems = form.line_items.length > 0;
+
   async function handleSave() {
     setSaveError(null);
-    if (!form.vendor_name.trim())        return setSaveError('Vendor name is required.');
-    if (!form.phase_budget_line_id)      return setSaveError('Budget line is required.');
-    if (!form.reviewed)                  return setSaveError('Please check the review confirmation.');
+    if (!form.vendor_name.trim())                          return setSaveError('Vendor name is required.');
+    if (!hasLineItems && !form.phase_budget_line_id)       return setSaveError('Budget line is required when there are no contract tasks.');
+    if (!form.reviewed)                                    return setSaveError('Please check the review confirmation.');
 
     setSaving(true);
     try {
@@ -435,11 +522,12 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
         contract_line_items:  form.line_items
           .filter(li => li.description.trim())
           .map((li, i) => ({
-            billing_type:    li.billing_type,
-            description:     li.description,
-            budgeted_amount: Number(li.budgeted_amount) || 0,
-            qb_account_id:   li.qb_account_id ?? li.suggested_qb_account_id ?? null,
-            sort_order:      i,
+            billing_type:         li.billing_type,
+            description:          li.description,
+            budgeted_amount:      Number(li.budgeted_amount) || 0,
+            qb_account_id:        li.qb_account_id ?? li.suggested_qb_account_id ?? null,
+            sort_order:           i,
+            phase_budget_line_id: li.phase_budget_line_id ?? null,
           })),
       };
       if (editId) {
@@ -520,17 +608,19 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
                   onChange={e => setF('vendor_name', e.target.value)} placeholder="Who is this contract with?" />
               </div>
 
-              {/* Budget line — always required */}
+              {/* Budget line — required only when no task breakdown exists */}
               <div className={styles.hfGroup}>
                 <label className={styles.hfLabel}>
-                  Task / Budget Line <span className={styles.hfRequired}>required</span>
+                  {hasLineItems
+                    ? <>Fallback Budget Line <span className={styles.hfHintInline}>used only for tasks with no specific assignment</span></>
+                    : <>Task / Budget Line <span className={styles.hfRequired}>required</span></>}
                 </label>
                 <BudgetLinePicker
                   lines={budgetLines}
                   value={form.phase_budget_line_id}
                   onChange={id => setF('phase_budget_line_id', id)}
                 />
-                <div className={styles.hfHint}>Which budget task does this contract commit against?</div>
+                {!hasLineItems && <div className={styles.hfHint}>Which budget task does this contract commit against?</div>}
               </div>
 
               <div className={styles.hfRow}>
@@ -571,6 +661,7 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
                   <tr className={styles.catThead}>
                     <th className={styles.colHash}>#</th>
                     <th className={styles.colCat}>CATEGORY</th>
+                    <th className={styles.colBudgetLine}>BUDGET LINE</th>
                     <th className={styles.colType}>TYPE</th>
                     <th className={styles.colDesc}>DESCRIPTION</th>
                     <th className={`${styles.colAmt} ${styles.right}`}>AMOUNT</th>
@@ -579,7 +670,7 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
                 </thead>
                 <tbody>
                   {form.line_items.map((li, i) => (
-                    <tr key={i} className={styles.catRow}>
+                    <tr key={i} className={`${styles.catRow} ${li.differs_from_primary ? styles.catRowFlagged : ''}`}>
                       <td className={styles.colHash}>{i + 1}</td>
                       <td className={styles.colCat}>
                         <QbPicker
@@ -588,6 +679,13 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
                           suggestedId={li.suggested_qb_account_id}
                           suggestionConfidence={li.qb_suggestion_confidence}
                           onChange={id => setLine(i, { qb_account_id: id })}
+                        />
+                      </td>
+                      <td className={styles.colBudgetLine}>
+                        <InlineBudgetLinePicker
+                          lines={budgetLines}
+                          value={li.phase_budget_line_id}
+                          onChange={id => setLine(i, { phase_budget_line_id: id })}
                         />
                       </td>
                       <td className={styles.colType}>
@@ -627,6 +725,11 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, onClose, onSaved, edi
                   <button className={styles.addLineBtn} onClick={addLine}>Add task</button>
                   {form.line_items.length > 0 && (
                     <button className={styles.clearLinesBtn} onClick={clearLines}>Clear all</button>
+                  )}
+                  {form.line_items.some(li => li.differs_from_primary) && (
+                    <button className={styles.clearLinesBtn} onClick={() =>
+                      setForm(f => ({ ...f, line_items: f.line_items.map(li => ({ ...li, differs_from_primary: false, phase_budget_line_id: null })) }))
+                    }>Clear overrides</button>
                   )}
                 </div>
                 <div className={styles.lineTotal}>
@@ -721,6 +824,7 @@ export default function ContractsTab() {
         budgetLines={budgetLines}
         qbAccounts={qbAccounts}
         projectId={projectIdNum}
+        phaseId={phaseIdNum}
         editId={editContractId ?? undefined}
         onClose={handleClose}
         onSaved={handleSaved}

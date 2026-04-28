@@ -30,12 +30,25 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         pbl.source,
         pbl.amount_modified,
 
-        -- Committed: sum of active contract values against this budget line
+        -- Committed: sum contributions to this budget line from active contracts.
+        -- Line items with their own phase_budget_line_id override the contract-level line.
+        -- Contracts with no line items contribute total_value at the contract level.
         COALESCE((
-          SELECT SUM(c.total_value)
-          FROM contracts c
-          WHERE c.phase_budget_line_id = pbl.id
-            AND c.status NOT IN ('voided','draft')
+          SELECT SUM(contribution) FROM (
+            SELECT cli.budgeted_amount AS contribution
+            FROM contracts c
+            JOIN contract_line_items cli ON cli.contract_id = c.id
+            WHERE COALESCE(cli.phase_budget_line_id, c.phase_budget_line_id) = pbl.id
+              AND c.status NOT IN ('voided','draft')
+
+            UNION ALL
+
+            SELECT c.total_value AS contribution
+            FROM contracts c
+            WHERE c.phase_budget_line_id = pbl.id
+              AND c.status NOT IN ('voided','draft')
+              AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
+          ) sub
         ), 0) AS committed,
 
         -- Change order count

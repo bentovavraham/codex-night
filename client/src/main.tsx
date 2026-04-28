@@ -14,6 +14,7 @@ import CommitmentsGrid from './screens/CommitmentsGrid';
 import PlaceholderTab from './screens/PlaceholderTab';
 import InvoicesTab from './screens/InvoicesTab';
 import ContractsTab from './screens/ContractsTab';
+import ImportPage from './screens/ImportPage';
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -37,6 +38,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="change-orders" element={<PlaceholderTab label="Change Orders" />} />
               <Route path="alerts"        element={<PlaceholderTab label="Alerts" />} />
               <Route path="history"       element={<PlaceholderTab label="History" />} />
+              <Route path="import"        element={<ImportPage />} />
             </Route>
             <Route path="invoices"  element={<PlaceholderTab label="Global Invoices" />} />
             <Route path="by-trade"  element={<PlaceholderTab label="By Trade" />} />

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './ImportDrawer.module.css';
@@ -103,6 +104,81 @@ function BudgetLinePicker({ lines, value, onChange }: {
   );
 }
 
+// ── Compact inline budget line picker (portal-based, for table rows) ─────────
+
+function InlineBudgetLinePicker({ lines, value, onChange }: {
+  lines: any[]; value: number | null; onChange: (id: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selected = lines.find(l => l.id === value) ?? null;
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return lines;
+    const q = query.toLowerCase();
+    return lines.filter(l =>
+      l.task_name.toLowerCase().includes(q) || (l.discipline || '').toLowerCase().includes(q)
+    );
+  }, [lines, query]);
+
+  function openPicker() {
+    if (!triggerRef.current) return;
+    const r = triggerRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 2, left: r.left, width: Math.max(r.width, 280) });
+    setQuery('');
+    setOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 20);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function onOut(e: MouseEvent) {
+      if (triggerRef.current?.contains(e.target as Node)) return;
+      if ((e.target as Element)?.closest?.('[data-inbl-dp]')) return;
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', onOut);
+    return () => document.removeEventListener('mousedown', onOut);
+  }, [open]);
+
+  return (
+    <>
+      <div ref={triggerRef} className={styles.inblTrigger} onClick={openPicker}
+        title={selected ? `${selected.task_name}${selected.discipline ? ` · ${selected.discipline}` : ''}` : 'Click to assign budget line'}>
+        {selected ? (
+          <>
+            <span className={styles.inblLabel}>{selected.task_name}</span>
+            <button className={styles.inblClear} onClick={e => { e.stopPropagation(); onChange(null); }}>✕</button>
+          </>
+        ) : (
+          <span className={styles.inblEmpty}>— inherit —</span>
+        )}
+      </div>
+      {open && createPortal(
+        <div data-inbl-dp className={styles.inblDropdown} style={{ top: pos.top, left: pos.left, width: pos.width }}>
+          <input ref={inputRef} className={styles.inblSearch} value={query}
+            onChange={e => setQuery(e.target.value)} placeholder="Search budget lines…" />
+          <div className={styles.inblList}>
+            <div className={styles.inblOption} onMouseDown={() => { onChange(null); setOpen(false); }}>— inherit —</div>
+            {filtered.map(l => (
+              <div key={l.id}
+                className={`${styles.inblOption} ${l.id === value ? styles.inblSelected : ''}`}
+                onMouseDown={() => { onChange(l.id); setOpen(false); }}>
+                {l.task_name}{l.discipline ? ` · ${l.discipline}` : ''}
+              </div>
+            ))}
+            {filtered.length === 0 && <div className={styles.inblNoMatch}>No match</div>}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 // ── Duplicate Warning Banner ──────────────────────────────────────────────────
 
 function DupBanner({ matches, acknowledged, onAck }: {
@@ -150,6 +226,8 @@ interface LineItem {
   billing_type: 'fixed' | 'tm' | 'expense';
   description: string;
   budgeted_amount: string;
+  phase_budget_line_id: number | null;
+  differs_from_primary?: boolean;
 }
 
 function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving }: {
@@ -166,9 +244,40 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
   // Common fields
   const [vendor, setVendor] = useState(ext.vendor_name || '');
   const [description, setDescription] = useState(ext.description || ext.summary || '');
-  const [budgetLineId, setBudgetLineId] = useState<number | null>(item.suggested_budget_line_id ?? null);
+  const [budgetLineId, setBudgetLineId] = useState<number | null>(
+    ext.suggested_primary_budget_line_id ?? item.suggested_budget_line_id ?? null
+  );
   const [reviewed, setReviewed] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Resizable form pane
+  const [formWidth, setFormWidth] = useState(() => Math.min(520, Math.round(window.innerWidth * 0.45)));
+  const dragState = useRef<{ active: boolean; startX: number; startW: number }>({ active: false, startX: 0, startW: 0 });
+
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragState.current.active) return;
+      const delta = dragState.current.startX - e.clientX;
+      const maxW = window.innerWidth - 200;
+      setFormWidth(Math.max(340, Math.min(maxW, dragState.current.startW + delta)));
+    }
+    function onUp() {
+      if (!dragState.current.active) return;
+      dragState.current.active = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+  }, []);
+
+  function startDrag(e: React.MouseEvent) {
+    dragState.current = { active: true, startX: e.clientX, startW: formWidth };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  }
 
   // Contract fields
   const [totalValue, setTotalValue] = useState(ext.total_value ? String(ext.total_value) : '');
@@ -177,9 +286,11 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
   const [contractStatus, setContractStatus] = useState('active');
   const [lineItems, setLineItems] = useState<LineItem[]>(() =>
     (ext.line_items || []).map((li: any) => ({
-      billing_type: li.billing_type || 'fixed',
+      billing_type: (['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed') as LineItem['billing_type'],
       description: li.description || '',
       budgeted_amount: li.budgeted_amount != null ? String(li.budgeted_amount) : '',
+      phase_budget_line_id: li.suggested_budget_line_id ?? null,
+      differs_from_primary: li.differs_from_primary ?? false,
     }))
   );
 
@@ -216,7 +327,7 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
   const canConfirm = reviewed && !!vendor.trim() && !dupBlocked && !saving;
 
   function addLine() {
-    setLineItems(li => [...li, { billing_type: 'fixed', description: '', budgeted_amount: '' }]);
+    setLineItems(li => [...li, { billing_type: 'fixed', description: '', budgeted_amount: '', phase_budget_line_id: null }]);
   }
   function removeLine(idx: number) {
     setLineItems(li => li.filter((_, i) => i !== idx));
@@ -225,10 +336,14 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
     setLineItems(li => { const n = [...li]; n[idx] = { ...n[idx], ...patch }; return n; });
   }
 
+  const hasLineItems = lineItems.length > 0;
+  const confirmingRef = useRef(false);
+
   async function handleConfirm() {
+    if (confirmingRef.current) return;
     setSaveError(null);
     if (!vendor.trim()) return setSaveError('Vendor name is required.');
-    if (!budgetLineId) return setSaveError('Budget line is required.');
+    if (!hasLineItems && !budgetLineId) return setSaveError('Budget line is required when there are no contract tasks.');
     if (!reviewed) return setSaveError('Please confirm you have reviewed the details.');
     if (dupBlocked) return setSaveError('Please acknowledge the duplicate warning.');
 
@@ -239,10 +354,13 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
           line_items: lineItems.filter(li => li.description.trim()).map(li => ({
             billing_type: li.billing_type, description: li.description,
             budgeted_amount: Number(li.budgeted_amount) || 0,
+            phase_budget_line_id: li.phase_budget_line_id ?? null,
           })) }
       : { ...base, invoice_number: invoiceNumber, amount: Number(amount) || 0,
           invoice_date: invoiceDate || null, invoice_type: invoiceType, status: invoiceStatus };
-    await onConfirm(formData);
+    confirmingRef.current = true;
+    try { await onConfirm(formData); }
+    finally { confirmingRef.current = false; }
   }
 
   return (
@@ -254,8 +372,11 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
           : <div className={styles.reviewNoPdf}>No PDF available</div>}
       </div>
 
+      {/* Drag-to-resize handle */}
+      <div className={styles.reviewDragHandle} onMouseDown={startDrag} />
+
       {/* Right: Form */}
-      <div className={styles.reviewFormPane}>
+      <div className={styles.reviewFormPane} style={{ width: formWidth }}>
         {/* Bar */}
         <div className={styles.reviewBar}>
           <button className={styles.reviewBackBtn} onClick={onBack}>← Queue</button>
@@ -263,6 +384,10 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
             <TypeChip type={item.doc_type} />
             <span className={styles.reviewBarFile} title={item.original_filename}>{item.original_filename}</span>
           </div>
+          {pdfSrc && (
+            <a href={pdfSrc} target="_blank" rel="noopener noreferrer" className={styles.openPdfBtn}
+              title="Open PDF in new tab — then use Cmd+F / Ctrl+F to search">🔍</a>
+          )}
           <button className={styles.reviewCloseBtn} onClick={onBack}>✕</button>
         </div>
 
@@ -282,11 +407,19 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
               placeholder="Who is this from?" />
           </div>
 
-          {/* Budget line */}
-          <div className={styles.rGroup}>
-            <label className={styles.rLabel}>Task / Budget Line <span className={styles.rRequired}>required</span></label>
-            <BudgetLinePicker lines={budgetLines} value={budgetLineId} onChange={setBudgetLineId} />
-          </div>
+          {/* Budget line — only required for simple contracts with no task breakdown */}
+          {!hasLineItems && (
+            <div className={styles.rGroup}>
+              <label className={styles.rLabel}>Task / Budget Line <span className={styles.rRequired}>required</span></label>
+              <BudgetLinePicker lines={budgetLines} value={budgetLineId} onChange={setBudgetLineId} />
+            </div>
+          )}
+          {hasLineItems && (
+            <div className={styles.rGroup}>
+              <label className={styles.rLabel}>Fallback Budget Line <span className={styles.rFallbackHint}>used only for tasks with no specific assignment</span></label>
+              <BudgetLinePicker lines={budgetLines} value={budgetLineId} onChange={setBudgetLineId} />
+            </div>
+          )}
 
           {isContract ? (
             <>
@@ -329,6 +462,7 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
                 <table className={styles.rTable}>
                   <thead>
                     <tr className={styles.rThead}>
+                      <th className={styles.rColBudgetLine}>BUDGET LINE</th>
                       <th className={styles.rColType}>TYPE</th>
                       <th className={styles.rColDesc}>DESCRIPTION</th>
                       <th className={`${styles.rColAmt} ${styles.right}`}>AMOUNT</th>
@@ -337,7 +471,14 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
                   </thead>
                   <tbody>
                     {lineItems.map((li, i) => (
-                      <tr key={i} className={styles.rTrow}>
+                      <tr key={i} className={`${styles.rTrow} ${li.differs_from_primary ? styles.rTrowFlagged : ''}`}>
+                        <td className={styles.rColBudgetLine}>
+                          <InlineBudgetLinePicker
+                            lines={budgetLines}
+                            value={li.phase_budget_line_id}
+                            onChange={id => setLine(i, { phase_budget_line_id: id })}
+                          />
+                        </td>
                         <td className={styles.rColType}>
                           <select className={styles.rTypeSelect} value={li.billing_type}
                             onChange={e => setLine(i, { billing_type: e.target.value as LineItem['billing_type'] })}>
@@ -370,6 +511,11 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
                 </table>
                 <div className={styles.rTableFooter}>
                   <button className={styles.rAddBtn} onClick={addLine}>+ Add task</button>
+                  {lineItems.some(li => li.differs_from_primary) && (
+                    <button className={styles.rAddBtn} onClick={() =>
+                      setLineItems(items => items.map(li => ({ ...li, differs_from_primary: false, phase_budget_line_id: null })))
+                    }>Clear overrides</button>
+                  )}
                   <div className={styles.rTableTotal}>
                     {fixedTotal > 0 && <span className={styles.mono}>{usd2.format(fixedTotal)} fixed</span>}
                     {hasTm && <span className={styles.tmTag}>+ T&amp;M</span>}
@@ -502,10 +648,10 @@ function QueueCard({ item, onClick, onFlipType, onRetry, onDiscard }: {
           {item.original_filename}
         </span>
         {item.status === 'failed' && (
-          <>
-            <button className={styles.retryBtn} onClick={e => { e.stopPropagation(); onRetry(); }}>Retry</button>
-            <button className={styles.discardSmallBtn} onClick={e => { e.stopPropagation(); onDiscard(); }}>Discard</button>
-          </>
+          <button className={styles.retryBtn} onClick={e => { e.stopPropagation(); onRetry(); }}>Retry</button>
+        )}
+        {item.status !== 'confirmed' && item.status !== 'discarded' && (
+          <button className={styles.discardSmallBtn} onClick={e => { e.stopPropagation(); onDiscard(); }} title="Remove from queue">✕</button>
         )}
         <StatusBadge status={item.status} />
       </div>
@@ -530,11 +676,14 @@ function QueueCard({ item, onClick, onFlipType, onRetry, onDiscard }: {
 function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const justDropped = useRef(false);
 
   const isPdf = (f: File) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation(); setDragging(false);
+    justDropped.current = true;
+    setTimeout(() => { justDropped.current = false; }, 300);
     const all = Array.from(e.dataTransfer.files);
     const files = all.filter(isPdf);
     onFiles(files.length ? files : all);
@@ -547,7 +696,7 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
       onDragOver={e => { e.preventDefault(); setDragging(true); }}
       onDragLeave={e => { e.preventDefault(); setDragging(false); }}
       onDrop={handleDrop}
-      onClick={() => inputRef.current?.click()}
+      onClick={() => { if (!justDropped.current) inputRef.current?.click(); }}
     >
       <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple hidden
         onChange={e => { const files = Array.from(e.target.files || []).filter(isPdf); if (files.length) onFiles(files); e.target.value = ''; }} />
@@ -567,6 +716,7 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
   const [doneOpen, setDoneOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploadingRef = useRef(false);
 
   const { data: queue = [], refetch } = useQuery<ImportItem[]>({
     queryKey: ['importQueue', phaseId],
@@ -606,10 +756,12 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
 
   const handleFiles = async (files: File[]) => {
     if (!files.length) { setUploadError('No PDF files detected.'); return; }
+    if (uploadingRef.current) return;
+    uploadingRef.current = true;
     setUploadError(null); setUploading(true);
     try { await api.importFiles(phaseId, files); await refetch(); }
     catch (err: any) { setUploadError(err?.message || 'Upload failed'); }
-    finally { setUploading(false); }
+    finally { setUploading(false); uploadingRef.current = false; }
   };
 
   const handleFlipType = async (item: ImportItem) => {

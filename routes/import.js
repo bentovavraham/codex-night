@@ -6,7 +6,7 @@ const fs = require('fs');
 const pool = require('../db/pool');
 const fileStorage = require('../lib/storage');
 const { requireAuth } = require('../middleware/auth');
-const { classifyDocument, extractContract, extractInvoice } = require('../lib/extract');
+const { classifyDocument, extractContract, extractInvoice, suggestLineBudgets } = require('../lib/extract');
 
 // Use memory storage — save to Postgres immediately so files survive restarts + Render deploys
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -90,9 +90,33 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
         const extracted = await callWithRetry(() =>
           type === 'contract' ? extractContract(buf) : extractInvoice(buf)
         );
+        if (type === 'contract' && extracted.line_items?.length && budgetLines.length) {
+          try {
+            const blSuggestions = await callWithRetry(() => suggestLineBudgets(
+              extracted.line_items, budgetLines,
+              { vendor_name: extracted.vendor_name, description: extracted.description }
+            ));
+            if (blSuggestions) {
+              extracted.suggested_primary_budget_line_id = blSuggestions.primary_budget_line_id;
+              const byIndex = {};
+              for (const s of blSuggestions.lines) byIndex[s.line_index] = s;
+              extracted.line_items = extracted.line_items.map((li, i) => ({
+                ...li,
+                suggested_budget_line_id: byIndex[i]?.budget_line_id ?? null,
+                differs_from_primary:     byIndex[i]?.differs_from_primary ?? false,
+                budget_line_confidence:   byIndex[i]?.confidence ?? null,
+                budget_line_reason:       byIndex[i]?.reason ?? null,
+              }));
+            }
+          } catch (blErr) {
+            console.warn('suggestLineBudgets failed:', blErr.message);
+          }
+        }
         const desc = type === 'contract' ? extracted.description : extracted.summary;
         const vendor = extracted.vendor_name;
-        const { lineId, confidence: matchConf } = matchBudgetLine(desc, vendor, budgetLines);
+        const primaryLineId = (type === 'contract' && extracted.suggested_primary_budget_line_id) || null;
+        const { lineId: fallbackLineId, confidence: matchConf } = matchBudgetLine(desc, vendor, budgetLines);
+        const lineId = primaryLineId ?? fallbackLineId;
         await pool.query(
           `UPDATE import_queue SET status='needs_review', doc_type=$1, doc_type_confidence=$2,
            extracted_data=$3, suggested_budget_line_id=$4, match_confidence=$5, updated_at=NOW()
@@ -264,9 +288,12 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
       for (let idx = 0; idx < lineItems.length; idx++) {
         const li = lineItems[idx];
         await client.query(
-          `INSERT INTO contract_line_items (contract_id, sort_order, billing_type, description, budgeted_amount)
-           VALUES ($1,$2,$3,$4,$5)`,
-          [contractId, idx, li.billing_type||'fixed', li.description||'', Number(li.budgeted_amount)||0]
+          `INSERT INTO contract_line_items
+             (contract_id, sort_order, billing_type, description, budgeted_amount, phase_budget_line_id)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [contractId, idx, li.billing_type||'fixed', li.description||'',
+           Number(li.budgeted_amount)||0,
+           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null]
         );
       }
     } else {
@@ -330,8 +357,32 @@ router.post('/import-queue/:id/retry', requireAuth, async (req, res, next) => {
         const extracted = await callWithRetry(() =>
           type === 'contract' ? extractContract(buf) : extractInvoice(buf)
         );
+        if (type === 'contract' && extracted.line_items?.length && budgetLines.length) {
+          try {
+            const blSuggestions = await callWithRetry(() => suggestLineBudgets(
+              extracted.line_items, budgetLines,
+              { vendor_name: extracted.vendor_name, description: extracted.description }
+            ));
+            if (blSuggestions) {
+              extracted.suggested_primary_budget_line_id = blSuggestions.primary_budget_line_id;
+              const byIndex = {};
+              for (const s of blSuggestions.lines) byIndex[s.line_index] = s;
+              extracted.line_items = extracted.line_items.map((li, i) => ({
+                ...li,
+                suggested_budget_line_id: byIndex[i]?.budget_line_id ?? null,
+                differs_from_primary:     byIndex[i]?.differs_from_primary ?? false,
+                budget_line_confidence:   byIndex[i]?.confidence ?? null,
+                budget_line_reason:       byIndex[i]?.reason ?? null,
+              }));
+            }
+          } catch (blErr) {
+            console.warn('suggestLineBudgets failed:', blErr.message);
+          }
+        }
         const desc = type === 'contract' ? extracted.description : extracted.summary;
-        const { lineId, confidence: matchConf } = matchBudgetLine(desc, extracted.vendor_name, budgetLines);
+        const primaryLineId = (type === 'contract' && extracted.suggested_primary_budget_line_id) || null;
+        const { lineId: fallbackLineId, confidence: matchConf } = matchBudgetLine(desc, extracted.vendor_name, budgetLines);
+        const lineId = primaryLineId ?? fallbackLineId;
         await pool.query(
           `UPDATE import_queue SET status='needs_review', doc_type=$1, doc_type_confidence=$2,
            extracted_data=$3, suggested_budget_line_id=$4, match_confidence=$5, updated_at=NOW() WHERE id=$6`,

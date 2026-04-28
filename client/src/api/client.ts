@@ -91,10 +91,11 @@ export const api = {
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
     return payload;
   },
-  extractContract: async (file: File) => {
+  extractContract: async (file: File, phaseId?: number) => {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch('/api/contracts/extract', { method: 'POST', credentials: 'same-origin', body: form });
+    const url = phaseId ? `/api/contracts/extract?phaseId=${phaseId}` : '/api/contracts/extract';
+    const res = await fetch(url, { method: 'POST', credentials: 'same-origin', body: form });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
     return payload;

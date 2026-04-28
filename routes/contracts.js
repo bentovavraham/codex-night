@@ -4,7 +4,7 @@ const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const projects = require('./projects');
 const storage = require('../lib/storage');
-const { extractContract, suggestContractLines, suggestInvoiceLineCodes } = require('../lib/extract');
+const { extractContract, suggestContractLines, suggestInvoiceLineCodes, suggestLineBudgets } = require('../lib/extract');
 
 const router = express.Router();
 
@@ -84,6 +84,37 @@ router.post('/contracts/extract', requireAuth, pdfUpload.single('file'), async (
           console.warn('QB code suggestion for contract failed:', codeErr.message);
         }
       }
+
+      // Budget line suggestion per line item when phaseId is provided
+      const phaseId = req.query.phaseId ? Number(req.query.phaseId) : null;
+      if (phaseId && extracted && extracted.line_items?.length) {
+        try {
+          const blResult = await pool.query(
+            `SELECT id, task_name, discipline FROM phase_budget_lines WHERE phase_id = $1`,
+            [phaseId]
+          );
+          if (blResult.rows.length > 0) {
+            const blSuggestions = await suggestLineBudgets(
+              extracted.line_items, blResult.rows,
+              { vendor_name: extracted.vendor_name, description: extracted.description }
+            );
+            if (blSuggestions) {
+              extracted.suggested_primary_budget_line_id = blSuggestions.primary_budget_line_id;
+              const byIndex = {};
+              for (const s of blSuggestions.lines) byIndex[s.line_index] = s;
+              extracted.line_items = extracted.line_items.map((li, i) => ({
+                ...li,
+                suggested_budget_line_id: byIndex[i]?.budget_line_id ?? null,
+                differs_from_primary:     byIndex[i]?.differs_from_primary ?? false,
+                budget_line_confidence:   byIndex[i]?.confidence ?? null,
+                budget_line_reason:       byIndex[i]?.reason ?? null,
+              }));
+            }
+          }
+        } catch (blErr) {
+          console.warn('Budget line suggestion failed:', blErr.message);
+        }
+      }
     } catch (err) {
       console.error('Contract extraction failed:', err.message);
       extract_error = err.message;
@@ -132,13 +163,14 @@ router.post('/contracts', requireAuth, async (req, res, next) => {
         const li = lineItems[i];
         await client.query(
           `INSERT INTO contract_line_items
-             (contract_id, billing_type, description, budgeted_amount, sort_order)
-           VALUES ($1,$2,$3,$4,$5)`,
+             (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
           [contractId,
            ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed',
            li.description || null,
            Number(li.budgeted_amount) || 0,
-           i]
+           i,
+           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null]
         );
       }
     }
@@ -398,13 +430,14 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
         const li = lineItems[i];
         await client.query(
           `INSERT INTO contract_line_items
-             (contract_id, billing_type, description, budgeted_amount, sort_order)
-           VALUES ($1,$2,$3,$4,$5)`,
+             (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
           [contractId,
            ['fixed', 'tm', 'expense'].includes(li.billing_type) ? li.billing_type : 'fixed',
            li.description || null,
            Number(li.budgeted_amount) || 0,
-           i]
+           i,
+           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null]
         );
       }
     }

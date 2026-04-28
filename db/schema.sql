@@ -473,3 +473,11 @@ DO $$ BEGIN
   );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE INDEX IF NOT EXISTS idx_import_queue_phase ON import_queue(phase_id);
+
+-- Per-line budget line allocation: allows one contract to span multiple budget lines.
+DO $$ BEGIN
+  ALTER TABLE contract_line_items
+    ADD COLUMN phase_budget_line_id INT REFERENCES phase_budget_lines(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_cli_pbl ON contract_line_items(phase_budget_line_id);
