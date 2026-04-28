@@ -378,30 +378,48 @@ export default function BudgetGrid() {
     [rows, hideUnused]
   );
 
-  // QB-hierarchy tree: parent_account → rows (sorted by qb_sort_order within each parent)
-  // parentKey = qb_parent_number ?? qb_account_number ?? 'unclassified'
+  // QB-hierarchy tree: parent_account → leaf_account → rows
   const tree = useMemo(() => {
-    // ordered list of parent keys (preserving first-seen sort order)
     const parentOrder: string[] = [];
     const parentMeta: Record<string, { label: string; sort: number; category: string }> = {};
-    const m = new Map<string, BudgetRow[]>();
+    // parent → ordered leaf keys
+    const leafOrder: Record<string, string[]> = {};
+    // leaf → { label, number, sort }
+    const leafMeta: Record<string, { label: string; number: string; sort: number }> = {};
+    // leaf → rows
+    const leafRows: Record<string, BudgetRow[]> = {};
 
     for (const r of filteredRows) {
       const pk = r.qb_parent_number ?? r.qb_account_number ?? 'unclassified';
-      if (!m.has(pk)) {
-        m.set(pk, []);
+      const lk = r.qb_account_number ?? 'unclassified';
+
+      if (!parentMeta[pk]) {
         parentOrder.push(pk);
         parentMeta[pk] = {
           label: r.qb_parent_name ?? r.qb_short_name ?? 'Unclassified',
           sort:  r.qb_parent_sort ?? r.qb_sort_order ?? 9999,
           category: r.qb_category ?? 'other',
         };
+        leafOrder[pk] = [];
       }
-      m.get(pk)!.push(r);
+      if (!leafRows[lk]) {
+        leafRows[lk] = [];
+        leafMeta[lk] = {
+          label:  r.qb_short_name ?? lk,
+          number: r.qb_account_number ?? lk,
+          sort:   r.qb_sort_order ?? 9999,
+        };
+        leafOrder[pk].push(lk);
+      }
+      leafRows[lk].push(r);
     }
-    // stable sort parent keys by their sort value
+
     parentOrder.sort((a, b) => parentMeta[a].sort - parentMeta[b].sort);
-    return { order: parentOrder, meta: parentMeta, rows: m };
+    for (const pk of parentOrder) {
+      leafOrder[pk].sort((a, b) => leafMeta[a].sort - leafMeta[b].sort);
+    }
+
+    return { order: parentOrder, meta: parentMeta, leafOrder, leafMeta, leafRows };
   }, [filteredRows]);
 
   // Totals by parent account key
@@ -411,6 +429,17 @@ export default function BudgetGrid() {
       const pk = r.qb_parent_number ?? r.qb_account_number ?? 'unclassified';
       if (!t[pk]) t[pk] = zero();
       t[pk] = addRow(t[pk], r);
+    }
+    return t;
+  }, [filteredRows]);
+
+  // Totals by leaf account key
+  const leafTotals = useMemo(() => {
+    const t: Record<string, Totals> = {};
+    for (const r of filteredRows) {
+      const lk = r.qb_account_number ?? 'unclassified';
+      if (!t[lk]) t[lk] = zero();
+      t[lk] = addRow(t[lk], r);
     }
     return t;
   }, [filteredRows]);
@@ -527,8 +556,68 @@ export default function BudgetGrid() {
             {tree.order.map(pk => {
               const grpOpen = !collapsed.has(`grp:${pk}`);
               const gt = parentTotals[pk] ?? zero();
-              const grpRows = tree.rows.get(pk) ?? [];
               const grpLabel = tree.meta[pk]?.label ?? pk;
+              const lks = tree.leafOrder[pk] ?? [];
+
+              const renderRow = (row: BudgetRow) => {
+                const isA = (f: string) => active.rowId === row.id && active.field === f;
+                const isDrillActive = drillTarget?.rowId === row.id;
+                return (
+                  <tr key={row.id} className={`${styles.dataRow} ${row.source === 'user' ? styles.rowUserAdded : ''} ${isDrillActive ? styles.drillActiveRow : ''}`}>
+                    <td className={styles.rowGutter} onClick={() => setPanelRow(row)} style={{ cursor: 'pointer' }}>
+                      <span className={styles.rowArrow}>›</span>
+                    </td>
+                    <td className={`${styles.cell} ${styles.tdAcct} ${styles.ro}`} title={row.qb_short_name ?? undefined}>
+                      {row.qb_account_number ?? '—'}
+                    </td>
+                    <EditCell value={row.task_name} rowId={row.id} field="task_name"
+                      isActive={isA('task_name')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+                      onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdTask} />
+                    <EditCell value={row.budgeted_amount} rowId={row.id} field="budgeted_amount" numeric
+                      isActive={isA('budgeted_amount')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+                      onCommit={handleCommit} onTabNext={handleTabNext}
+                      className={`${styles.tdMoney} ${(row.source ?? 'template') === 'template' && !row.amount_modified ? styles.amtTemplate : styles.amtModified}`} />
+                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.budgeted_amount > 0 && row.remaining_budget < 0 ? styles.danger : ''}`}>
+                      {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
+                    </td>
+                    <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.billed, row.budgeted_amount)}`}>
+                      {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}
+                    </td>
+                    <DC value={row.committed} row={row} cell="committed"
+                      active={isDrillActive && drillTarget?.cell === 'committed'} onDrill={drill} />
+                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
+                      {row.co_count > 0 ? <span title={`${row.co_count} CO${row.co_count > 1 ? 's' : ''}`}>{money(row.co_value)}</span> : ''}
+                    </td>
+                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
+                      {money(row.total_commitment)}
+                    </td>
+                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.fixed_charges)}</td>
+                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.tm_charges)}</td>
+                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.expense_charges)}</td>
+                    <DC value={row.billed} row={row} cell="billed"
+                      active={isDrillActive && drillTarget?.cell === 'billed'} onDrill={drill}
+                      className={warnCls(row.billed, row.budgeted_amount)} />
+                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.amount_due)}</td>
+                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
+                    <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.billed, gla_sf)}</td>
+                    <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
+                    <EditCell value={row.calculation_method} rowId={row.id} field="calculation_method"
+                      isActive={isA('calculation_method')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+                      onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdCalc} ${dc}`} />
+                    <EditCell value={row.consultant} rowId={row.id} field="consultant"
+                      isActive={isA('consultant')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+                      onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdText} ${dc}`} />
+                    <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`}>
+                      {row.qb_account_number ?? ''}
+                      {row.has_direct_invoices && <span className={styles.directBadge}>Direct</span>}
+                    </td>
+                    <EditCell value={row.notes} rowId={row.id} field="notes"
+                      isActive={isA('notes')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+                      onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdNotes} ${dc}`} />
+                  </tr>
+                );
+              };
+
               return [
                 <tr key={`grp:${pk}`} className={styles.secRow} onClick={() => toggle(`grp:${pk}`)}>
                   <td className={styles.secGutter}><span className={styles.chevron}>{grpOpen ? '▼' : '▶'}</span></td>
@@ -537,64 +626,22 @@ export default function BudgetGrid() {
                 </tr>,
 
                 ...(grpOpen ? [
-                  ...grpRows.map((row: BudgetRow) => {
-                    const isA = (f: string) => active.rowId === row.id && active.field === f;
-                    const isDrillActive = drillTarget?.rowId === row.id;
-                    return (
-                      <tr key={row.id} className={`${styles.dataRow} ${row.source === 'user' ? styles.rowUserAdded : ''} ${isDrillActive ? styles.drillActiveRow : ''}`}>
-                        <td className={styles.rowGutter} onClick={() => setPanelRow(row)} style={{ cursor: 'pointer' }}>
-                          <span className={styles.rowArrow}>›</span>
-                        </td>
-                        <td className={`${styles.cell} ${styles.tdAcct} ${styles.ro}`}
-                          title={row.qb_short_name ?? undefined}>
-                          {row.qb_account_number ?? '—'}
-                        </td>
-                        <EditCell value={row.task_name} rowId={row.id} field="task_name"
-                          isActive={isA('task_name')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                          onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdTask} />
-                        <EditCell value={row.budgeted_amount} rowId={row.id} field="budgeted_amount" numeric
-                          isActive={isA('budgeted_amount')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                          onCommit={handleCommit} onTabNext={handleTabNext}
-                          className={`${styles.tdMoney} ${(row.source ?? 'template') === 'template' && !row.amount_modified ? styles.amtTemplate : styles.amtModified}`} />
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.budgeted_amount > 0 && row.remaining_budget < 0 ? styles.danger : ''}`}>
-                          {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
-                        </td>
-                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.billed, row.budgeted_amount)}`}>
-                          {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}
-                        </td>
-                        <DC value={row.committed} row={row} cell="committed"
-                          active={isDrillActive && drillTarget?.cell === 'committed'} onDrill={drill} />
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
-                          {row.co_count > 0 ? <span title={`${row.co_count} CO${row.co_count > 1 ? 's' : ''}`}>{money(row.co_value)}</span> : ''}
-                        </td>
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
-                          {money(row.total_commitment)}
-                        </td>
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.fixed_charges)}</td>
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.tm_charges)}</td>
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.expense_charges)}</td>
-                        <DC value={row.billed} row={row} cell="billed"
-                          active={isDrillActive && drillTarget?.cell === 'billed'} onDrill={drill}
-                          className={warnCls(row.billed, row.budgeted_amount)} />
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.amount_due)}</td>
-                        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
-                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.billed, gla_sf)}</td>
-                        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
-                        <EditCell value={row.calculation_method} rowId={row.id} field="calculation_method"
-                          isActive={isA('calculation_method')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                          onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdCalc} ${dc}`} />
-                        <EditCell value={row.consultant} rowId={row.id} field="consultant"
-                          isActive={isA('consultant')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                          onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdText} ${dc}`} />
-                        <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`}>
-                          {row.qb_account_number ?? ''}
-                          {row.has_direct_invoices && <span className={styles.directBadge}>Direct</span>}
-                        </td>
-                        <EditCell value={row.notes} rowId={row.id} field="notes"
-                          isActive={isA('notes')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                          onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdNotes} ${dc}`} />
-                      </tr>
-                    );
+                  ...lks.flatMap(lk => {
+                    const lr = tree.leafRows[lk] ?? [];
+                    const lt = leafTotals[lk] ?? zero();
+                    const lm = tree.leafMeta[lk];
+                    const multiTask = lr.length > 1;
+                    return [
+                      ...lr.map(renderRow),
+                      ...(multiTask ? [
+                        <tr key={`leaf:${lk}:sub`} className={styles.leafSubRow}>
+                          <td />
+                          <td className={styles.leafSubAcct}>{lm.number}</td>
+                          <td className={styles.leafSubLabel}>{lm.label}</td>
+                          <SumCells t={lt} variant="sg" />
+                        </tr>
+                      ] : []),
+                    ];
                   }),
                   <tr key={`grp:${pk}:sub`} className={styles.secSubRow}>
                     <td /><td className={styles.secSubLabel} colSpan={2}>Total — {grpLabel}</td>
