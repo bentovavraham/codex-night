@@ -200,8 +200,6 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
   try {
     const phaseId = Number(req.params.phaseId);
     const lineId  = Number(req.params.lineId);
-    console.log('[drill] phaseId=%d lineId=%d', phaseId, lineId);
-
     // Contracts: primary (phase_budget_line_id = lineId) or partial (cli line items)
     const contractsQ = await pool.query(`
       SELECT
