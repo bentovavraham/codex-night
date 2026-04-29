@@ -624,7 +624,7 @@ export default function BudgetGrid() {
 
       <div className={styles.scrollArea} onClick={() => setActive({ rowId: -1, field: '' })}>
         <table className={styles.table} onClick={e => e.stopPropagation()}>
-          <colgroup><col style={{width:24}}/><col style={{width:200}}/><col style={{width:210}}/><col style={{width:90}}/><col style={{width:88}}/><col style={{width:50}}/><col style={{width:90}}/><col style={{width:76}}/><col style={{width:90}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:76}}/><col style={{width:88}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:64}}/><col style={{width:64}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
+          <colgroup><col style={{width:24}}/><col style={{width:200}}/><col style={{width:210}}/><col style={{width:90}}/><col style={{width:88}}/><col style={{width:64}}/><col style={{width:90}}/><col style={{width:76}}/><col style={{width:90}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:76}}/><col style={{width:88}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:64}}/><col style={{width:64}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
           <thead>
             <tr className={styles.theadGroup}>
               <th colSpan={4} />
