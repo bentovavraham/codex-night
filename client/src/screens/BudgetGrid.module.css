@@ -123,7 +123,37 @@
 .thLeft  { text-align: left; }
 .thRight { text-align: right; }
 
-/* ── Section rows (level 1 — dark charcoal, amber text) ─────────────────── */
+/* ── Category rows (level 1 — terracotta band, white text) ──────────────── */
+
+.catRow {
+  background: var(--accent, #c4522a);
+  cursor: pointer;
+}
+.catRow:hover { background: #b04826; }
+
+.catGutter {
+  padding: 0 0 0 6px;
+  height: 34px;
+  border-bottom: 2px solid #a03d20;
+}
+
+.catLabel {
+  padding: 0 10px;
+  height: 34px;
+  font-size: 11.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: #fff;
+  border-bottom: 2px solid #a03d20;
+  white-space: nowrap;
+}
+
+.catRow td { border-bottom: 2px solid #a03d20; }
+.catRow td.sn { color: rgba(255,255,255,0.75); border-bottom-color: #a03d20; }
+.catRow .chevron { color: rgba(255,255,255,0.8); }
+
+/* ── Section rows (level 2 — dark charcoal, amber text) ─────────────────── */
 
 .secRow {
   background: var(--sidebar-bg);
@@ -132,15 +162,15 @@
 .secRow:hover { background: #262118; }
 
 .secGutter {
-  padding: 0 0 0 6px;
-  height: 30px;
+  padding: 0 0 0 14px;
+  height: 28px;
   border-bottom: 1px solid #3a3028;
 }
 
 .secLabel {
   padding: 0 8px;
-  height: 30px;
-  font-size: 11px;
+  height: 28px;
+  font-size: 10.5px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .06em;

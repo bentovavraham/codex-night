@@ -71,17 +71,24 @@ const INV_TYPE: Record<string, { label: string; bg: string; text: string }> = {
   expense: { label: 'Expense', bg: '#dcfce7', text: '#166534' },
 };
 
-// QB category display labels (parent account → friendly label)
-const QB_CATEGORY_LABEL: Record<string, string> = {
+const CATEGORY_LABEL: Record<string, string> = {
+  land:              'Land',
   entitlement:       'Entitlement',
   construction:      'Construction & Land Development',
   professional_fees: 'Professional Fees',
   g_and_a:           'General & Administrative',
   closing:           'Closing Costs',
   finance:           'Finance',
-  land:              'Land',
   capital:           'Capital Cost',
 };
+
+const CATEGORY_ORDER: Record<string, number> = {
+  land: 1, entitlement: 2, construction: 3, professional_fees: 4,
+  g_and_a: 5, closing: 6, finance: 7, capital: 8,
+};
+
+// Categories collapsed by default (no active budget lines expected)
+const DEFAULT_COLLAPSED = new Set(['cat:land', 'cat:g_and_a', 'cat:closing', 'cat:finance', 'cat:capital']);
 
 const TAB_FIELDS = ['task_name', 'discipline', 'budgeted_amount', 'consultant', 'calculation_method', 'notes'];
 
@@ -324,7 +331,7 @@ export default function BudgetGrid() {
   const gla_sf = (project as any)?.gla_sf ? Number((project as any).gla_sf) : null;
   const gla_ac = (project as any)?.gla_ac ? Number((project as any).gla_ac) : null;
 
-  const [collapsed,    setCollapsed]    = useState<Set<string>>(new Set());
+  const [collapsed,    setCollapsed]    = useState<Set<string>>(new Set(DEFAULT_COLLAPSED));
   const [active,       setActive]       = useState<{ rowId: number; field: string }>({ rowId: -1, field: '' });
   const [showDetails,  setShowDetails]  = useState(false);
   const [hideUnused,   setHideUnused]   = useState(false);
@@ -378,27 +385,33 @@ export default function BudgetGrid() {
     [rows, hideUnused]
   );
 
-  // QB-hierarchy tree: parent_account → leaf_account → rows
+  // QB-hierarchy tree: category → parent_account → leaf_account → rows
   const tree = useMemo(() => {
-    const parentOrder: string[] = [];
+    const catOrder: string[] = [];
+    const catMeta: Record<string, { label: string; sort: number }> = {};
+    const catParents: Record<string, string[]> = {};
+
     const parentMeta: Record<string, { label: string; sort: number; category: string }> = {};
-    // parent → ordered leaf keys
     const leafOrder: Record<string, string[]> = {};
-    // leaf → { label, number, sort }
     const leafMeta: Record<string, { label: string; number: string; sort: number }> = {};
-    // leaf → rows
     const leafRows: Record<string, BudgetRow[]> = {};
 
     for (const r of filteredRows) {
+      const ck = r.qb_category ?? 'other';
       const pk = r.qb_parent_number ?? r.qb_account_number ?? 'unclassified';
       const lk = r.qb_account_number ?? 'unclassified';
 
+      if (!catMeta[ck]) {
+        catOrder.push(ck);
+        catMeta[ck] = { label: CATEGORY_LABEL[ck] ?? ck, sort: CATEGORY_ORDER[ck] ?? 99 };
+        catParents[ck] = [];
+      }
       if (!parentMeta[pk]) {
-        parentOrder.push(pk);
+        catParents[ck].push(pk);
         parentMeta[pk] = {
           label: r.qb_parent_name ?? r.qb_short_name ?? 'Unclassified',
           sort:  r.qb_parent_sort ?? r.qb_sort_order ?? 9999,
-          category: r.qb_category ?? 'other',
+          category: ck,
         };
         leafOrder[pk] = [];
       }
@@ -414,12 +427,26 @@ export default function BudgetGrid() {
       leafRows[lk].push(r);
     }
 
-    parentOrder.sort((a, b) => parentMeta[a].sort - parentMeta[b].sort);
-    for (const pk of parentOrder) {
-      leafOrder[pk].sort((a, b) => leafMeta[a].sort - leafMeta[b].sort);
+    catOrder.sort((a, b) => catMeta[a].sort - catMeta[b].sort);
+    for (const ck of catOrder) {
+      catParents[ck].sort((a, b) => parentMeta[a].sort - parentMeta[b].sort);
+      for (const pk of catParents[ck]) {
+        leafOrder[pk].sort((a, b) => leafMeta[a].sort - leafMeta[b].sort);
+      }
     }
 
-    return { order: parentOrder, meta: parentMeta, leafOrder, leafMeta, leafRows };
+    return { catOrder, catMeta, catParents, parentMeta, leafOrder, leafMeta, leafRows };
+  }, [filteredRows]);
+
+  // Totals by broad category
+  const categoryTotals = useMemo(() => {
+    const t: Record<string, Totals> = {};
+    for (const r of filteredRows) {
+      const ck = r.qb_category ?? 'other';
+      if (!t[ck]) t[ck] = zero();
+      t[ck] = addRow(t[ck], r);
+    }
+    return t;
   }, [filteredRows]);
 
   // Totals by parent account key
@@ -553,12 +580,7 @@ export default function BudgetGrid() {
             </tr>
           </thead>
           <tbody>
-            {tree.order.map(pk => {
-              const grpOpen = !collapsed.has(`grp:${pk}`);
-              const gt = parentTotals[pk] ?? zero();
-              const grpLabel = tree.meta[pk]?.label ?? pk;
-              const lks = tree.leafOrder[pk] ?? [];
-
+            {(() => {
               const renderRow = (row: BudgetRow) => {
                 const isA = (f: string) => active.rowId === row.id && active.field === f;
                 const isDrillActive = drillTarget?.rowId === row.id;
@@ -618,38 +640,60 @@ export default function BudgetGrid() {
                 );
               };
 
-              return [
-                <tr key={`grp:${pk}`} className={styles.secRow} onClick={() => toggle(`grp:${pk}`)}>
-                  <td className={styles.secGutter}><span className={styles.chevron}>{grpOpen ? '▼' : '▶'}</span></td>
-                  <td className={styles.secLabel} colSpan={2}>{grpLabel}</td>
-                  <SumCells t={gt} variant="hdr" />
-                </tr>,
+              return tree.catOrder.flatMap(ck => {
+                const catOpen = !collapsed.has(`cat:${ck}`);
+                const ct = categoryTotals[ck] ?? zero();
+                const catLabel = tree.catMeta[ck]?.label ?? ck;
+                const pks = tree.catParents[ck] ?? [];
 
-                ...(grpOpen ? [
-                  ...lks.flatMap(lk => {
-                    const lr = tree.leafRows[lk] ?? [];
-                    const lt = leafTotals[lk] ?? zero();
-                    const lm = tree.leafMeta[lk];
-                    const multiTask = lr.length > 1;
+                return [
+                  <tr key={`cat:${ck}`} className={styles.catRow} onClick={() => toggle(`cat:${ck}`)}>
+                    <td className={styles.catGutter}><span className={styles.chevron}>{catOpen ? '▼' : '▶'}</span></td>
+                    <td className={styles.catLabel} colSpan={2}>{catLabel}</td>
+                    <SumCells t={ct} variant="hdr" />
+                  </tr>,
+
+                  ...(catOpen ? pks.flatMap(pk => {
+                    const grpOpen = !collapsed.has(`grp:${pk}`);
+                    const gt = parentTotals[pk] ?? zero();
+                    const grpLabel = tree.parentMeta[pk]?.label ?? pk;
+                    const lks = tree.leafOrder[pk] ?? [];
+
                     return [
-                      ...lr.map(renderRow),
-                      ...(multiTask ? [
-                        <tr key={`leaf:${lk}:sub`} className={styles.leafSubRow}>
-                          <td />
-                          <td className={styles.leafSubAcct}>{lm.number}</td>
-                          <td className={styles.leafSubLabel}>{lm.label}</td>
-                          <SumCells t={lt} variant="sg" />
-                        </tr>
+                      <tr key={`grp:${pk}`} className={styles.secRow} onClick={() => toggle(`grp:${pk}`)}>
+                        <td className={styles.secGutter}><span className={styles.chevron}>{grpOpen ? '▼' : '▶'}</span></td>
+                        <td className={styles.secLabel} colSpan={2}>{grpLabel}</td>
+                        <SumCells t={gt} variant="hdr" />
+                      </tr>,
+
+                      ...(grpOpen ? [
+                        ...lks.flatMap(lk => {
+                          const lr = tree.leafRows[lk] ?? [];
+                          const lt = leafTotals[lk] ?? zero();
+                          const lm = tree.leafMeta[lk];
+                          const multiTask = lr.length > 1;
+                          return [
+                            ...lr.map(renderRow),
+                            ...(multiTask ? [
+                              <tr key={`leaf:${lk}:sub`} className={styles.leafSubRow}>
+                                <td />
+                                <td className={styles.leafSubAcct}>{lm.number}</td>
+                                <td className={styles.leafSubLabel}>{lm.label}</td>
+                                <SumCells t={lt} variant="sg" />
+                              </tr>
+                            ] : []),
+                          ];
+                        }),
+                        <tr key={`grp:${pk}:sub`} className={styles.secSubRow}>
+                          <td /><td className={styles.secSubLabel} colSpan={2}>Total — {grpLabel}</td>
+                          <SumCells t={gt} variant="sec" />
+                        </tr>,
                       ] : []),
                     ];
-                  }),
-                  <tr key={`grp:${pk}:sub`} className={styles.secSubRow}>
-                    <td /><td className={styles.secSubLabel} colSpan={2}>Total — {grpLabel}</td>
-                    <SumCells t={gt} variant="sec" />
-                  </tr>,
-                ] : []),
-              ];
-            })}
+                  }) : []),
+                ];
+              });
+            })()}
           </tbody>
           <tfoot>
             <tr className={styles.totalRow}>
