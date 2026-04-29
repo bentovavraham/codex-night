@@ -519,16 +519,16 @@ export default function BudgetGrid() {
         <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
         <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.billed, gla_sf)}</td>
         <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
+        <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`}>
+          {row.qb_codes_used || '—'}
+          {row.has_direct_invoices && <span className={styles.directBadge}>Direct</span>}
+        </td>
         <EditCell value={row.calculation_method} rowId={row.id} field="calculation_method"
           isActive={isA('calculation_method')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
           onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdCalc} ${dc}`} />
         <EditCell value={row.consultant} rowId={row.id} field="consultant"
           isActive={isA('consultant')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
           onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdText} ${dc}`} />
-        <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`}>
-          {row.qb_account_number ?? ''}
-          {row.has_direct_invoices && <span className={styles.directBadge}>Direct</span>}
-        </td>
         <EditCell value={row.notes} rowId={row.id} field="notes"
           isActive={isA('notes')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
           onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdNotes} ${dc}`} />
@@ -653,9 +653,9 @@ export default function BudgetGrid() {
               <th className={`${styles.th} ${styles.thRight}`}>Paid</th>
               <th className={`${styles.th} ${styles.thRight}`}>$/SF</th>
               <th className={`${styles.th} ${styles.thRight}`}>$/AC</th>
+              <th className={`${styles.th} ${styles.thLeft} ${dc}`}>QB Codes Used</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Calc Method</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Consultant</th>
-              <th className={`${styles.th} ${styles.thLeft} ${dc}`}>QB Account</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Notes</th>
             </tr>
           </thead>

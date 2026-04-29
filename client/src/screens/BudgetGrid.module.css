@@ -338,7 +338,7 @@
 .tdMoney { text-align: right; font-family: var(--font-mono); font-size: 11.5px; }
 .tdPct   { text-align: right; font-family: var(--font-mono); font-size: 11.5px; }
 .tdText  { font-size: 11.5px; }
-.tdQb    { font-family: var(--font-mono); font-size: 10.5px; color: #80868b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdQb    { font-family: var(--font-mono); font-size: 10.5px; color: #3c4043; white-space: normal; word-break: break-word; line-height: 1.4; padding-top: 4px; padding-bottom: 4px; }
 .tdNotes { font-size: 11px; color: #5f6368; }
 
 /* account number column in data rows */
