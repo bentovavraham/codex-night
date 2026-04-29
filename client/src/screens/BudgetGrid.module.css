@@ -74,7 +74,7 @@
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: 13px;
   table-layout: fixed;
   font-family: 'Inter', system-ui, sans-serif;
 }
@@ -172,10 +172,11 @@
   padding: 0 8px;
   height: 32px;
   text-align: right;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
   font-weight: 600;
-  color: rgba(255,255,255,0.75);
+  color: rgba(255,255,255,0.85);
   border-bottom: 1px solid #263238;
   white-space: nowrap;
 }
@@ -212,10 +213,11 @@
   padding: 0 8px;
   height: 26px;
   text-align: right;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
   font-weight: 600;
-  color: #3c4043;
+  color: #202124;
   border-bottom: 1px solid #c8cacd;
   white-space: nowrap;
 }
@@ -241,10 +243,11 @@
   padding: 0 8px;
   height: 22px;
   text-align: right;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
   font-weight: 700;
-  color: #3c4043;
+  color: #202124;
   border-top: 1px solid #c8cacd;
   white-space: nowrap;
 }
@@ -283,10 +286,11 @@
   padding: 0 8px;
   height: 22px;
   text-align: right;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
   font-weight: 600;
-  color: #5f6368;
+  color: #3c4043;
   border-top: 1px solid #e0e0e0;
   white-space: nowrap;
 }
@@ -336,8 +340,8 @@
 
 .tdTask  { font-weight: 500; }
 .tdCalc  { font-size: 11px; color: #5f6368; }
-.tdMoney { text-align: right; font-family: var(--font-mono); font-size: 11.5px; }
-.tdPct   { text-align: right; font-family: var(--font-mono); font-size: 11.5px; }
+.tdMoney { text-align: right; font-family: 'Inter', system-ui, sans-serif; font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 500; color: #202124; }
+.tdPct   { text-align: right; font-family: 'Inter', system-ui, sans-serif; font-variant-numeric: tabular-nums; font-size: 13px; }
 .tdText  { font-size: 11.5px; }
 .tdQb    { font-family: var(--font-mono); font-size: 10.5px; color: #3c4043; white-space: normal; word-break: break-word; line-height: 1.4; padding-top: 4px; padding-bottom: 4px; }
 .tdNotes { font-size: 11px; color: #5f6368; }
@@ -504,7 +508,9 @@
 .totalCell {
   padding: 0 8px;
   height: 32px;
-  font-size: 11.5px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
   font-weight: 700;
   color: #202124;
   white-space: nowrap;
