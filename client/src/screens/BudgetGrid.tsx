@@ -481,8 +481,9 @@ export default function BudgetGrid() {
     const isDrillActive = drillTarget?.rowId === row.id;
     return (
       <tr key={row.id} className={`${styles.dataRow} ${row.source === 'user' ? styles.rowUserAdded : ''} ${isDrillActive ? styles.drillActiveRow : ''}`}>
-        <td className={styles.rowGutter} onClick={() => setPanelRow(row)} style={{ cursor: 'pointer' }}>
-          <span className={styles.rowArrow}>›</span>
+        <td className={styles.rowGutter} onClick={() => setPanelRow(row)} style={{ cursor: 'pointer' }}
+          title={row.has_direct_invoices ? 'Has invoices billed directly (no contract)' : undefined}>
+          <span className={`${styles.rowArrow} ${row.has_direct_invoices ? styles.rowArrowDirect : ''}`}>›</span>
         </td>
         <td className={`${styles.cell} ${styles.tdAcct} ${styles.ro}`}>
           <span className={styles.tdAcctNum}>{row.qb_account_number ?? '—'}</span>
@@ -521,7 +522,6 @@ export default function BudgetGrid() {
         <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
         <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`}>
           {row.qb_codes_used || '—'}
-          {row.has_direct_invoices && <span className={styles.directBadge}>Direct</span>}
         </td>
         <EditCell value={row.calculation_method} rowId={row.id} field="calculation_method"
           isActive={isA('calculation_method')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
