@@ -1,11 +1,21 @@
-/* BudgetGrid — mirrors the budget spreadsheet layout */
+/* BudgetGrid — professional financial grid, Google Sheets aesthetic */
+
+/* ── Design tokens (local overrides for the table) ───────────────────────── */
+/* catRow:  #37474f  dark slate-blue  (Material Blue Grey 800)                */
+/* secRow:  #e8eaed  light gray       (Google background-2)                   */
+/* sub:     #f1f3f4  near-white gray                                           */
+/* data:    #ffffff  white                                                     */
+/* border:  #dadce0  Google border                                             */
+/* text-d:  #202124  Google dark text                                          */
+/* text-m:  #3c4043  Google medium text                                        */
+/* text-l:  #5f6368  Google secondary text                                     */
 
 .wrapper {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--bg);
+  background: #fff;
 }
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
@@ -18,6 +28,7 @@
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   gap: 8px;
+  background: var(--bg);
 }
 
 .toolLabel {
@@ -34,7 +45,7 @@
 .tbBtn {
   height: 26px;
   padding: 0 10px;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -42,7 +53,13 @@
   color: var(--text-2);
   cursor: pointer;
 }
-.tbBtn:hover { background: var(--bg-2); }
+.tbBtn:hover { background: var(--surface-2); }
+
+.tbBtnActive {
+  background: #37474f !important;
+  color: #fff !important;
+  border-color: #37474f !important;
+}
 
 /* ── Scroll area ─────────────────────────────────────────────────────────── */
 
@@ -57,54 +74,41 @@
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 12.5px;
   table-layout: fixed;
+  font-family: 'Inter', system-ui, sans-serif;
 }
 
-/* ── Column widths ───────────────────────────────────────────────────────── */
-
-.cTask       { width: 240px; }
-.cDisc       { width: 120px; }
-.cCalc       { width: 160px; }
-.cMoney      { width: 100px; }
-.cConsultant { width: 110px; }
-.cPct        { width: 52px; }
-.cQb         { width: 150px; }
-.cNotes      { width: 180px; }
-
-/* ── Header ──────────────────────────────────────────────────────────────── */
+/* ── Sticky header ───────────────────────────────────────────────────────── */
 
 .theadGroup {
   position: sticky;
   top: 0;
   z-index: 11;
-  background: var(--bg-2);
 }
-.theadGroup th { background: var(--bg-2, #f0ece6); }
+.theadGroup th { background: #f8f9fa; }
 
 .thGroup {
   padding: 0 8px;
-  height: 20px;
+  height: 18px;
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .08em;
-  color: var(--accent);
+  color: #5f6368;
   text-align: center;
-  border-bottom: 1px solid var(--border);
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  border-bottom: 1px solid #dadce0;
+  border-left: 1px solid #dadce0;
+  border-right: 1px solid #dadce0;
   white-space: nowrap;
-  background: var(--bg-2, #f0ece6);
+  background: #f8f9fa;
 }
-
-.thGroupAlt { color: var(--amber); }
+.thGroupAlt { color: #5f6368; }
 
 .thead {
   position: sticky;
-  top: 20px;
+  top: 18px;
   z-index: 10;
-  background: var(--bg-2);
 }
 
 .th {
@@ -113,240 +117,259 @@
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--text-3);
-  border-bottom: 2px solid var(--border-strong);
+  letter-spacing: .05em;
+  color: #5f6368;
+  border-bottom: 2px solid #c8cacd;
   white-space: nowrap;
   user-select: none;
-  background: var(--bg-2, #f0ece6);
+  background: #f8f9fa;
 }
 .thLeft  { text-align: left; }
 .thRight { text-align: right; }
 
-/* ── Category rows (level 1 — terracotta band, white text) ──────────────── */
+/* ── Level 1: Root account rows (1600 Land, 1700 Entitlement…) ──────────── */
 
 .catRow {
-  background: var(--accent, #c4522a);
+  background: #37474f;
   cursor: pointer;
 }
-.catRow:hover { background: #b04826; }
+.catRow:hover { background: #2e3c43; }
 
 .catGutter {
-  padding: 0 0 0 6px;
-  height: 34px;
-  border-bottom: 2px solid #a03d20;
+  padding: 0 0 0 8px;
+  height: 32px;
+  border-bottom: 1px solid #263238;
 }
 
 .catLabel {
   padding: 0 10px;
-  height: 34px;
-  font-size: 11.5px;
-  font-weight: 800;
+  height: 32px;
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: .09em;
-  color: #fff;
-  border-bottom: 2px solid #a03d20;
+  letter-spacing: .07em;
+  color: #ffffff;
+  border-bottom: 1px solid #263238;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.catRow td { border-bottom: 1px solid #263238; }
+.catRow .chevron { color: rgba(255,255,255,0.7); font-size: 9px; }
+
+/* account number tag inside catLabel / secLabel */
+.acctNum {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: .03em;
+  margin-right: 10px;
+  opacity: 0.65;
+}
+
+/* number cells for root rows — light text on dark background */
+.rootNum {
+  padding: 0 8px;
+  height: 32px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.75);
+  border-bottom: 1px solid #263238;
   white-space: nowrap;
 }
 
-.catRow td { border-bottom: 2px solid #a03d20; }
-.catRow td.sn { color: rgba(255,255,255,0.75); border-bottom-color: #a03d20; }
-.catRow .chevron { color: rgba(255,255,255,0.8); }
-
-/* ── Section rows (level 2 — dark charcoal, amber text) ─────────────────── */
+/* ── Level 2: Sub-group rows (1710 Survey, 1720 Engineering…) ────────────── */
 
 .secRow {
-  background: var(--sidebar-bg);
+  background: #e8eaed;
   cursor: pointer;
 }
-.secRow:hover { background: #262118; }
+.secRow:hover { background: #dadce0; }
 
 .secGutter {
-  padding: 0 0 0 14px;
-  height: 28px;
-  border-bottom: 1px solid #3a3028;
+  padding: 0 0 0 18px;
+  height: 26px;
+  border-bottom: 1px solid #c8cacd;
 }
 
 .secLabel {
   padding: 0 8px;
-  height: 28px;
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--amber);
-  border-bottom: 1px solid #3a3028;
-  white-space: nowrap;
-}
-
-.secCell {
-  padding: 0 8px;
-  height: 30px;
-  border-bottom: 1px solid #3a3028;
-}
-
-.secNum {
-  padding: 0 8px;
-  height: 30px;
-  text-align: right;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-2);
-  border-bottom: 1px solid #3a3028;
-  white-space: nowrap;
-}
-
-/* ── Sub-group rows (level 2 — lighter, italic label) ───────────────────── */
-
-.sgRow {
-  background: #f0ece6;
-  cursor: pointer;
-  border-bottom: 1px solid var(--border);
-}
-.sgRow:hover { background: #e8e4de; }
-
-.sgGutter {
-  padding: 0 0 0 14px;
-  height: 26px;
-  border-bottom: 1px solid var(--border);
-}
-
-.sgLabel {
-  padding: 0 8px 0 4px;
   height: 26px;
   font-size: 11px;
   font-weight: 600;
-  font-style: italic;
-  color: var(--text-2);
-  letter-spacing: .01em;
-  border-bottom: 1px solid var(--border);
+  color: #202124;
+  border-bottom: 1px solid #c8cacd;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sgNum {
-  padding: 0 8px;
-  height: 26px;
-  text-align: right;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-3);
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-
-.sgCell {
-  padding: 0;
-  height: 26px;
-  border-bottom: 1px solid var(--border);
-}
-
-.chevron {
-  font-size: 8px;
-  color: var(--text-3);
   vertical-align: middle;
 }
 
-/* ── Row gutter (indent for data rows) ──────────────────────────────────── */
+.secRow .chevron { color: #5f6368; font-size: 9px; }
+
+/* number cells for sub-group rows — dark text on light gray */
+.grpNum {
+  padding: 0 8px;
+  height: 26px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: #3c4043;
+  border-bottom: 1px solid #c8cacd;
+  white-space: nowrap;
+}
+
+/* ── Sub-group total rows ────────────────────────────────────────────────── */
+
+.secSubRow { background: #f1f3f4; }
+
+.secSubLabel {
+  padding: 0 8px 0 28px;
+  height: 22px;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: #5f6368;
+  border-top: 1px solid #c8cacd;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.secSubNum {
+  padding: 0 8px;
+  height: 22px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: #3c4043;
+  border-top: 1px solid #c8cacd;
+  white-space: nowrap;
+}
+
+/* ── Leaf account subtotal rows ─────────────────────────────────────────── */
+
+.leafSubRow {
+  background: #f8f9fa;
+  border-top: 1px solid #e0e0e0;
+  border-bottom: 1px solid #dadce0;
+}
+
+.leafSubAcct {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #5f6368;
+  letter-spacing: .02em;
+  padding: 0 8px;
+  white-space: nowrap;
+  height: 22px;
+  vertical-align: middle;
+}
+
+.leafSubLabel {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #5f6368;
+  font-style: italic;
+  padding: 0 8px;
+  height: 22px;
+  vertical-align: middle;
+}
+
+.sgSubNum {
+  padding: 0 8px;
+  height: 22px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: #5f6368;
+  border-top: 1px solid #e0e0e0;
+  white-space: nowrap;
+}
+
+/* ── Chevron (shared) ────────────────────────────────────────────────────── */
+
+.chevron {
+  font-size: 9px;
+  vertical-align: middle;
+  display: inline-block;
+  width: 12px;
+}
+
+/* ── Row gutter ──────────────────────────────────────────────────────────── */
+
 .rowGutter {
   padding: 0;
-  border-right: 3px solid transparent;
+  border-right: 2px solid transparent;
 }
+.rowGutter:hover { border-right-color: #c8cacd; }
 
 /* ── Data rows ───────────────────────────────────────────────────────────── */
 
-.dataRow { border-bottom: 1px solid var(--border); }
-.dataRow:hover { background: var(--bg-2); }
-.lineClickable { cursor: pointer; }
-.rowArrow { font-size: 12px; color: var(--text-4); line-height: 1; }
+.dataRow {
+  border-bottom: 1px solid #e8eaed;
+  background: #ffffff;
+}
+.dataRow:hover { background: #f8f9fa; }
+.rowArrow { font-size: 12px; color: #c8cacd; line-height: 1; }
+.dataRow:hover .rowArrow { color: #80868b; }
 
 /* ── Cells ───────────────────────────────────────────────────────────────── */
 
 .cell {
   padding: 0 8px;
-  height: var(--row-md);
+  height: 30px;
   vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-1);
-  border-right: 1px solid var(--border);
+  color: #202124;
+  border-right: 1px solid #f1f3f4;
 }
 .cell:last-child { border-right: none; }
-
-/* editable cells show text cursor on hover */
 .cell:not(.ro):hover { cursor: text; }
 
 .tdTask  { font-weight: 500; }
-.tdDisc  { font-size: 11px; color: var(--text-2); }
-.tdAcct  { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--accent, #c4522a); letter-spacing: .02em; }
-
-/* ── Leaf account subtotal rows ───────────────────────────────────────────── */
-.leafSubRow {
-  background: #ebe6df;
-  border-top: 1px solid #d4cec6;
-  border-bottom: 2px solid #c8c2ba;
-}
-.leafSubAcct {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--accent, #c4522a);
-  letter-spacing: .02em;
-  padding: 0 8px;
-  white-space: nowrap;
-}
-.leafSubLabel {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-1);
-  font-style: italic;
-  padding: 0 8px;
-}
-.tdCalc  { font-size: 11px; color: var(--text-3); }
+.tdCalc  { font-size: 11px; color: #5f6368; }
 .tdMoney { text-align: right; font-family: var(--font-mono); font-size: 11.5px; }
 .tdPct   { text-align: right; font-family: var(--font-mono); font-size: 11.5px; }
 .tdText  { font-size: 11.5px; }
-.tdQb    { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tdNotes { font-size: 11px; color: var(--text-3); }
+.tdQb    { font-family: var(--font-mono); font-size: 10.5px; color: #80868b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdNotes { font-size: 11px; color: #5f6368; }
 
-/* section number cells (used in section/sg rows) */
-.sn  { padding: 0 8px; text-align: right; font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text-2); border-bottom: 1px solid #3a3028; white-space: nowrap; height: 30px; }
-.sgn { padding: 0 8px; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--text-2); border-bottom: 1px solid var(--border); white-space: nowrap; height: 26px; }
-
-/* Dark section header rows need light number text */
-.secRow td.sn { color: rgba(255,255,255,0.82); border-bottom-color: #3a3028; }
-/* Sub-group rows: dark text on light background */
-.sgRow td.sn  { color: var(--text-1); border-bottom-color: var(--border); font-weight: 600; }
+/* account number column in data rows */
+.tdAcct {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: #5f6368;
+  letter-spacing: .02em;
+}
 
 /* read-only computed cells */
-.ro { background: var(--bg); color: var(--text-1); }
+.ro { background: #ffffff; color: #202124; }
 .dataRow:hover .ro { background: transparent; }
 
 /* detail columns — hidden until toggled */
 .detailHidden { display: none; }
 
-/* editable cell indicator — pale yellow on hover (Excel/QB pattern) */
+/* editable cell indicator */
 .editableCell {
-  border-bottom: 1px dashed rgba(196, 82, 42, 0.25) !important;
+  border-bottom: 1px dashed #c8cacd !important;
 }
-.editableCell:hover { background: var(--editable-bg); cursor: text; }
-
-/* active toolbar button */
-.tbBtnActive {
-  background: var(--accent) !important;
-  color: #fff !important;
-  border-color: var(--accent) !important;
-}
+.editableCell:hover { background: #fffde7; cursor: text; }
+.cellEmpty { color: #c8cacd; }
 
 /* editing state */
 .editing {
   padding: 0 !important;
-  outline: 2px solid var(--accent);
+  outline: 2px solid #1a73e8;
   outline-offset: -2px;
-  background: #fff9f5 !important;
+  background: #e8f0fe !important;
 }
 
 .editInput {
@@ -357,43 +380,98 @@
   background: transparent;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: #1a1208;
+  color: #202124;
   outline: none;
 }
 
-/* empty/hint */
-.empty  { color: var(--text-4); }
-.hint   { font-size: 10.5px; color: var(--text-4); font-style: italic; }
+/* ── Budgeted amount states ───────────────────────────────────────────────── */
 
-/* ── QB Code picker ──────────────────────────────────────────────────────── */
-
-.qbSelect {
-  width: 100%;
-  height: 100%;
-  background: transparent;
-  border: none;
-  font-size: 11px;
-  color: var(--text-2);
-  cursor: pointer;
-  outline: none;
-  font-family: var(--font-mono);
+.amtTemplate { color: #202124 !important; }
+.amtModified {
+  color: #202124 !important;
+  border-left: 2px solid #1a73e8 !important;
 }
-.qbSelect:hover { color: var(--text-1); }
-.qbSelect:focus { outline: 1px solid var(--accent); }
+
+/* user-added rows */
+.rowUserAdded { background: #e8f0fe !important; }
+.rowUserAdded:hover { background: #d2e3fc !important; }
 
 /* ── Status colors ───────────────────────────────────────────────────────── */
 
-.danger { color: var(--status-overdue) !important; font-weight: 600; }
-.warn   { color: var(--amber) !important; }
+.danger { color: #d93025 !important; font-weight: 600; }
+.warn   { color: #f29900 !important; }
 
-/* ── Total row ───────────────────────────────────────────────────────────── */
+/* ── Direct invoice indicator ────────────────────────────────────────────── */
+
+.directBadge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  background: #e8eaed;
+  color: #5f6368;
+  vertical-align: middle;
+}
+
+/* ── Drill-down ──────────────────────────────────────────────────────────── */
+
+.drillable { cursor: pointer; }
+.drillable:hover { background: #e8f0fe !important; color: #1a73e8 !important; text-decoration: underline; text-underline-offset: 2px; }
+.drillActive { background: #d2e3fc !important; color: #1967d2 !important; font-weight: 700; outline: 2px solid #1a73e8; outline-offset: -2px; }
+.drillActiveRow { background: #f0f7ff !important; }
+.drillHdr { color: #1a73e8 !important; }
+.drillHint { font-size: 11px; color: var(--text-2); display: flex; align-items: center; gap: 8px; flex: 1; margin-left: 16px; }
+.drillHint strong { color: var(--text-1); }
+.drillClearBtn { font-size: 10px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-2); cursor: pointer; color: var(--text-2); }
+.drillClearBtn:hover { background: var(--bg-3); }
+
+/* ── Drill panel ─────────────────────────────────────────────────────────── */
+
+.drillOverlay { position: fixed; inset: 0; z-index: 400; pointer-events: none; }
+.drillPanel { pointer-events: all; position: fixed; top: 48px; right: 0; bottom: 0; width: 620px; background: var(--bg, #faf8f5); border-left: 1px solid var(--border); box-shadow: -4px 0 24px rgba(0,0,0,.12); display: flex; flex-direction: column; z-index: 401; font-size: 12px; }
+.drillHeader { display: flex; align-items: flex-start; justify-content: space-between; padding: 14px 16px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.drillTitle { font-size: 13px; font-weight: 700; color: var(--text-1); }
+.drillSub { font-size: 10.5px; color: var(--text-3); margin-top: 2px; text-transform: uppercase; letter-spacing: .05em; }
+.drillClose { background: none; border: none; font-size: 14px; cursor: pointer; color: var(--text-3); padding: 0 2px; line-height: 1; }
+.drillClose:hover { color: var(--text-1); }
+.drillBody { flex: 1; overflow-y: auto; padding: 0; }
+.drillLoading { padding: 24px 16px; color: var(--text-3); }
+.drillEmpty { padding: 24px 16px; color: var(--text-3); font-style: italic; }
+.drillTable { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.drillTable thead tr { border-bottom: 1px solid var(--border); }
+.drillTable thead th { padding: 5px 12px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); text-align: left; white-space: nowrap; }
+.drillTable thead th.drillAmt { text-align: right; }
+.drillRow { border-bottom: 1px solid var(--border); }
+.drillRow:hover { background: var(--surface-2); }
+.drillRow td { padding: 7px 12px; vertical-align: middle; }
+.drillVendor { font-weight: 600; color: var(--text-1); }
+.drillRef { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); white-space: nowrap; }
+.drillAmt { text-align: right !important; white-space: nowrap; }
+.drillAmtBold { font-family: var(--font-mono); font-weight: 700; color: var(--text-1); }
+.drillAmtDim  { font-family: var(--font-mono); color: var(--text-3); font-size: 10.5px; }
+.drillBadge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.drillPartial { display: inline-block; margin-left: 6px; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 3px; padding: 0 5px; }
+.drillTotal td { padding: 8px 12px; font-weight: 700; font-size: 11.5px; border-top: 2px solid var(--border); color: var(--text-1); }
+.drillTotal .drillAmt { font-family: var(--font-mono); }
+.drillContractRef { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-2); }
+.drillDirectBadge { display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 3px; padding: 1px 5px; }
+.drillSubtotalRow td { padding: 4px 12px; font-size: 10.5px; color: var(--text-3); border-top: 1px dotted var(--border); }
+.drillSubtotalLabel { font-style: italic; }
+.drillPdfBtn { font-size: 10px; font-weight: 600; padding: 2px 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface-2); color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.drillPdfBtn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ── Grand total row (sticky bottom) ────────────────────────────────────── */
 
 .totalRow td {
   position: sticky;
   bottom: 0;
   z-index: 4;
-  background: var(--bg-2, #f0ece6);
-  border-top: 2px solid var(--border-strong);
+  background: #e8eaed;
+  border-top: 2px solid #c8cacd;
 }
 
 .totalLabel {
@@ -403,7 +481,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .06em;
-  color: var(--text-1);
+  color: #202124;
 }
 
 .totalCell {
@@ -411,7 +489,7 @@
   height: 32px;
   font-size: 11.5px;
   font-weight: 700;
-  color: var(--text-1);
+  color: #202124;
   white-space: nowrap;
 }
 
@@ -427,12 +505,11 @@
   color: var(--text-3);
 }
 
-.splashMsg  { font-size: 13px; }
-.splashErr  { font-size: 12px; color: var(--status-overdue); }
+.splashMsg { font-size: 13px; }
 
 .initBtn {
   padding: 9px 24px;
-  background: var(--accent);
+  background: #37474f;
   color: #fff;
   border: none;
   border-radius: 5px;
@@ -441,135 +518,10 @@
   cursor: pointer;
   letter-spacing: .01em;
 }
-.initBtn:hover    { background: #b34820; }
+.initBtn:hover    { background: #2e3c43; }
 .initBtn:disabled { opacity: .5; cursor: not-allowed; }
 
-/* ── Section bottom subtotal row (dark, like header) ────────────────────── */
+/* ── Misc ────────────────────────────────────────────────────────────────── */
 
-.secSubRow { background: #222018; }
-
-.secSubLabel {
-  padding: 0 8px 0 20px;
-  height: 28px;
-  font-size: 9.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  color: var(--amber);
-  border-top: 2px solid #3a3028;
-  white-space: nowrap;
-}
-
-.secSubNum {
-  padding: 0 8px;
-  height: 28px;
-  text-align: right;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  color: rgba(255,255,255,0.85);
-  border-top: 2px solid #3a3028;
-  white-space: nowrap;
-}
-
-/* ── Sub-group bottom subtotal row (light, like sg header) ──────────────── */
-
-.sgSubRow { background: #e4dfd8; }
-
-.sgSubLabel {
-  padding: 0 8px 0 28px;
-  height: 24px;
-  font-size: 9.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--text-2);
-  border-top: 2px solid var(--border-2);
-  white-space: nowrap;
-}
-
-.sgSubNum {
-  padding: 0 8px;
-  height: 24px;
-  text-align: right;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-1);
-  border-top: 2px solid var(--border-2);
-  white-space: nowrap;
-}
-
-/* ── Source / modification visual states ─────────────────────────────────── */
-
-/* Template row, amount untouched */
-.amtTemplate { color: var(--text-1) !important; }
-
-/* Template row, amount edited by user — black text + terracotta left border */
-.amtModified {
-  color: var(--text-1) !important;
-  border-left: 2px solid var(--accent) !important;
-}
-
-/* User-added row — faint warm amber row tint */
-.rowUserAdded { background: #fdf6ec !important; }
-.rowUserAdded:hover { background: #faeedd !important; }
-
-/* ── Direct invoice indicator */
-.directBadge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  background: #fef3cd;
-  color: #856404;
-  vertical-align: middle;
-}
-
-/* ── Drill-down ──────────────────────────────────────────────────────────── */
-.drillable { cursor: pointer; }
-.drillable:hover { background: #fff8e6 !important; color: #c4522a !important; text-decoration: underline; text-underline-offset: 2px; }
-.drillActive { background: #fff3d6 !important; color: #c4522a !important; font-weight: 700; outline: 2px solid #e8921a; outline-offset: -2px; }
-.drillActiveRow { background: #fffdf5 !important; }
-.drillHdr { color: #c4522a !important; }
-.drillHint { font-size: 11px; color: var(--text-2); display: flex; align-items: center; gap: 8px; flex: 1; margin-left: 16px; }
-.drillHint strong { color: var(--text-1); }
-.drillClearBtn { font-size: 10px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-2); cursor: pointer; color: var(--text-2); }
-.drillClearBtn:hover { background: var(--bg-3); }
-
-.drillOverlay { position: fixed; inset: 0; z-index: 400; pointer-events: none; }
-.drillPanel { pointer-events: all; position: fixed; top: 48px; right: 0; bottom: 0; width: 620px; background: var(--bg-1, #faf8f5); border-left: 2px solid #e8921a; box-shadow: -4px 0 24px rgba(0,0,0,.12); display: flex; flex-direction: column; z-index: 401; font-size: 12px; }
-.drillHeader { display: flex; align-items: flex-start; justify-content: space-between; padding: 14px 16px 12px; border-bottom: 1px solid var(--border); background: #fff9ef; }
-.drillTitle { font-size: 13px; font-weight: 700; color: var(--text-1); }
-.drillSub { font-size: 10.5px; color: var(--text-3); margin-top: 2px; text-transform: uppercase; letter-spacing: .05em; }
-.drillClose { background: none; border: none; font-size: 14px; cursor: pointer; color: var(--text-3); padding: 0 2px; line-height: 1; }
-.drillClose:hover { color: var(--text-1); }
-.drillBody { flex: 1; overflow-y: auto; padding: 0; }
-.drillLoading { padding: 24px 16px; color: var(--text-3); }
-.drillEmpty { padding: 24px 16px; color: var(--text-3); font-style: italic; }
-.drillTable { width: 100%; border-collapse: collapse; font-size: 11.5px; }
-.drillTable thead tr { border-bottom: 1px solid var(--border); }
-.drillTable thead th { padding: 5px 12px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); text-align: left; white-space: nowrap; }
-.drillTable thead th.drillAmt { text-align: right; }
-.drillRow { border-bottom: 1px solid var(--border); }
-.drillRow:hover { background: var(--bg-2); }
-.drillRow td { padding: 7px 12px; vertical-align: middle; }
-.drillVendor { font-weight: 600; color: var(--text-1); }
-.drillRef { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); white-space: nowrap; }
-.drillAmt { text-align: right !important; white-space: nowrap; }
-.drillAmtBold { font-family: var(--font-mono); font-weight: 700; color: var(--text-1); }
-.drillAmtDim  { font-family: var(--font-mono); color: var(--text-3); font-size: 10.5px; }
-.drillBadge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
-.drillPartial { display: inline-block; margin-left: 6px; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 3px; padding: 0 5px; }
-.drillTotal td { padding: 8px 12px; font-weight: 700; font-size: 11.5px; border-top: 2px solid var(--border); color: var(--text-1); }
-.drillTotal .drillAmt { font-family: var(--font-mono); }
-.drillContractRef { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-2); }
-.drillDirectBadge { display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 3px; padding: 1px 5px; }
-.drillSubtotalRow td { padding: 4px 12px; font-size: 10.5px; color: var(--text-3); border-top: 1px dotted var(--border); }
-.drillSubtotalLabel { font-style: italic; }
-.drillPdfBtn { font-size: 10px; font-weight: 600; padding: 2px 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-2); color: var(--text-2); cursor: pointer; white-space: nowrap; }
-.drillPdfBtn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.empty { color: #c8cacd; }
+.hint  { font-size: 10.5px; color: #80868b; font-style: italic; }

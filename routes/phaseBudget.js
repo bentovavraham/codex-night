@@ -696,7 +696,7 @@ router.get('/qb-accounts', requireAuth, async (req, res, next) => {
   try {
     const result = await pool.query(
       `SELECT id, account_number, full_name, short_name, parent_id, category, sort_order, is_leaf
-       FROM qb_accounts WHERE is_leaf = true ORDER BY sort_order`
+       FROM qb_accounts ORDER BY sort_order`
     );
     res.json(result.rows);
   } catch (err) { next(err); }

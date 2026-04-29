@@ -19,7 +19,6 @@ export interface BudgetRow {
   consultant: string | null;
   notes: string | null;
   sort_order: number;
-  // invoice columns
   fixed_charges: number;
   tm_charges: number;
   expense_charges: number;
@@ -27,7 +26,6 @@ export interface BudgetRow {
   amount_due: number;
   paid: number;
   remaining_budget: number;
-  // contract columns
   committed: number;
   co_count: number;
   co_value: number;
@@ -38,7 +36,6 @@ export interface BudgetRow {
   has_direct_invoices: boolean;
   source: 'template' | 'user';
   amount_modified: boolean;
-  // QB account hierarchy
   qb_account_id: number | null;
   qb_account_number: string | null;
   qb_short_name: string | null;
@@ -50,9 +47,20 @@ export interface BudgetRow {
   qb_category: string | null;
 }
 
+interface QbAccount {
+  id: number;
+  account_number: string;
+  full_name: string;
+  short_name: string;
+  parent_id: number | null;
+  category: string;
+  sort_order: number;
+  is_leaf: boolean;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const usd  = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const usd    = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const money  = (n: number) => n === 0 ? '' : usd.format(n);
 const moneyD = (n: number) => n === 0 ? '—' : usd.format(n);
 const remPct = (spent: number, budget: number) => budget > 0 ? `${Math.round(((budget - spent) / budget) * 100)}%` : '—';
@@ -71,26 +79,10 @@ const INV_TYPE: Record<string, { label: string; bg: string; text: string }> = {
   expense: { label: 'Expense', bg: '#dcfce7', text: '#166534' },
 };
 
-const CATEGORY_LABEL: Record<string, string> = {
-  land:              'Land',
-  entitlement:       'Entitlement',
-  construction:      'Construction & Land Development',
-  professional_fees: 'Professional Fees',
-  g_and_a:           'General & Administrative',
-  closing:           'Closing Costs',
-  finance:           'Finance',
-  capital:           'Capital Cost',
-};
+// Root account numbers collapsed by default
+const DEFAULT_COLLAPSED = new Set(['1600', '1880', '1920', '1950', '1999']);
 
-const CATEGORY_ORDER: Record<string, number> = {
-  land: 1, entitlement: 2, construction: 3, professional_fees: 4,
-  g_and_a: 5, closing: 6, finance: 7, capital: 8,
-};
-
-// Categories collapsed by default (no active budget lines expected)
-const DEFAULT_COLLAPSED = new Set(['cat:land', 'cat:g_and_a', 'cat:closing', 'cat:finance', 'cat:capital']);
-
-const TAB_FIELDS = ['task_name', 'discipline', 'budgeted_amount', 'consultant', 'calculation_method', 'notes'];
+const TAB_FIELDS = ['task_name', 'budgeted_amount', 'consultant', 'calculation_method', 'notes'];
 
 // ─── Editable cell ────────────────────────────────────────────────────────────
 
@@ -194,12 +186,8 @@ function DrillPanel({ phaseId, target, onClose }: {
               ? <div className={styles.drillEmpty}>No invoices billed against this line.</div>
               : <table className={styles.drillTable}>
                   <thead><tr>
-                    <th>Invoice #</th>
-                    <th>Vendor</th>
-                    <th>Date</th>
-                    <th>Type</th>
-                    <th>Contract</th>
-                    <th>Status</th>
+                    <th>Invoice #</th><th>Vendor</th><th>Date</th><th>Type</th>
+                    <th>Contract</th><th>Status</th>
                     <th className={styles.drillAmt}>Allocated</th>
                     <th className={styles.drillAmt}>Inv. Total</th>
                     <th />
@@ -331,17 +319,23 @@ export default function BudgetGrid() {
   const gla_sf = (project as any)?.gla_sf ? Number((project as any).gla_sf) : null;
   const gla_ac = (project as any)?.gla_ac ? Number((project as any).gla_ac) : null;
 
-  const [collapsed,    setCollapsed]    = useState<Set<string>>(new Set(DEFAULT_COLLAPSED));
-  const [active,       setActive]       = useState<{ rowId: number; field: string }>({ rowId: -1, field: '' });
-  const [showDetails,  setShowDetails]  = useState(false);
-  const [hideUnused,   setHideUnused]   = useState(false);
-  const [panelRow,     setPanelRow]     = useState<BudgetRow | null>(null);
-  const [drillTarget,  setDrillTarget]  = useState<DrillTarget | null>(null);
+  const [collapsed,   setCollapsed]   = useState<Set<string>>(new Set(DEFAULT_COLLAPSED));
+  const [active,      setActive]      = useState<{ rowId: number; field: string }>({ rowId: -1, field: '' });
+  const [showDetails, setShowDetails] = useState(false);
+  const [hideUnused,  setHideUnused]  = useState(false);
+  const [panelRow,    setPanelRow]    = useState<BudgetRow | null>(null);
+  const [drillTarget, setDrillTarget] = useState<DrillTarget | null>(null);
 
   const { data: rows = [], isLoading, error } = useQuery<BudgetRow[]>({
     queryKey: ['budget', phaseIdNum],
     queryFn: () => api.getBudget(phaseIdNum),
     enabled: !!phaseIdNum,
+  });
+
+  const { data: qbAccounts = [] } = useQuery<QbAccount[]>({
+    queryKey: ['qb-accounts'],
+    queryFn: () => api.listQbAccounts(),
+    staleTime: Infinity,
   });
 
   const initMutation = useMutation({
@@ -376,8 +370,6 @@ export default function BudgetGrid() {
     setDrillTarget(prev => prev?.rowId === t.rowId && prev?.cell === t.cell ? null : t);
   }
 
-  // A row is "unused" when it has no contracted amount and no billed invoices.
-  // User-added rows are always shown even if empty.
   const filteredRows = useMemo(() =>
     hideUnused
       ? rows.filter(r => r.committed > 0 || r.billed > 0 || r.source === 'user')
@@ -385,91 +377,55 @@ export default function BudgetGrid() {
     [rows, hideUnused]
   );
 
-  // QB-hierarchy tree: category → parent_account → leaf_account → rows
-  const tree = useMemo(() => {
-    const catOrder: string[] = [];
-    const catMeta: Record<string, { label: string; sort: number }> = {};
-    const catParents: Record<string, string[]> = {};
+  // QB account tree structures
+  const qbById = useMemo(() =>
+    new Map<number, QbAccount>(qbAccounts.map(a => [a.id, a])),
+    [qbAccounts]
+  );
 
-    const parentMeta: Record<string, { label: string; sort: number; category: string }> = {};
-    const leafOrder: Record<string, string[]> = {};
-    const leafMeta: Record<string, { label: string; number: string; sort: number }> = {};
-    const leafRows: Record<string, BudgetRow[]> = {};
+  const qbChildrenOf = useMemo(() => {
+    const m = new Map<number, QbAccount[]>();
+    for (const a of qbAccounts) {
+      if (a.parent_id !== null) {
+        if (!m.has(a.parent_id)) m.set(a.parent_id, []);
+        m.get(a.parent_id)!.push(a);
+      }
+    }
+    for (const children of m.values()) children.sort((a, b) => a.sort_order - b.sort_order);
+    return m;
+  }, [qbAccounts]);
 
+  const qbRoots = useMemo(() =>
+    qbAccounts.filter(a => a.parent_id === null).sort((a, b) => a.sort_order - b.sort_order),
+    [qbAccounts]
+  );
+
+  // Rows by qb_account_id (for leaf slots)
+  const rowsByLeafId = useMemo(() => {
+    const m = new Map<number, BudgetRow[]>();
     for (const r of filteredRows) {
-      const ck = r.qb_category ?? 'other';
-      const pk = r.qb_parent_number ?? r.qb_account_number ?? 'unclassified';
-      const lk = r.qb_account_number ?? 'unclassified';
-
-      if (!catMeta[ck]) {
-        catOrder.push(ck);
-        catMeta[ck] = { label: CATEGORY_LABEL[ck] ?? ck, sort: CATEGORY_ORDER[ck] ?? 99 };
-        catParents[ck] = [];
-      }
-      if (!parentMeta[pk]) {
-        catParents[ck].push(pk);
-        parentMeta[pk] = {
-          label: r.qb_parent_name ?? r.qb_short_name ?? 'Unclassified',
-          sort:  r.qb_parent_sort ?? r.qb_sort_order ?? 9999,
-          category: ck,
-        };
-        leafOrder[pk] = [];
-      }
-      if (!leafRows[lk]) {
-        leafRows[lk] = [];
-        leafMeta[lk] = {
-          label:  r.qb_short_name ?? lk,
-          number: r.qb_account_number ?? lk,
-          sort:   r.qb_sort_order ?? 9999,
-        };
-        leafOrder[pk].push(lk);
-      }
-      leafRows[lk].push(r);
-    }
-
-    catOrder.sort((a, b) => catMeta[a].sort - catMeta[b].sort);
-    for (const ck of catOrder) {
-      catParents[ck].sort((a, b) => parentMeta[a].sort - parentMeta[b].sort);
-      for (const pk of catParents[ck]) {
-        leafOrder[pk].sort((a, b) => leafMeta[a].sort - leafMeta[b].sort);
+      if (r.qb_account_id != null) {
+        if (!m.has(r.qb_account_id)) m.set(r.qb_account_id, []);
+        m.get(r.qb_account_id)!.push(r);
       }
     }
-
-    return { catOrder, catMeta, catParents, parentMeta, leafOrder, leafMeta, leafRows };
+    return m;
   }, [filteredRows]);
 
-  // Totals by broad category
-  const categoryTotals = useMemo(() => {
-    const t: Record<string, Totals> = {};
+  // Totals per account, rolled up to all ancestors
+  const acctTotals = useMemo(() => {
+    const t = new Map<number, Totals>();
     for (const r of filteredRows) {
-      const ck = r.qb_category ?? 'other';
-      if (!t[ck]) t[ck] = zero();
-      t[ck] = addRow(t[ck], r);
+      if (r.qb_account_id == null) continue;
+      let cur: QbAccount | undefined = qbById.get(r.qb_account_id);
+      while (cur) {
+        if (!t.has(cur.id)) t.set(cur.id, zero());
+        t.set(cur.id, addRow(t.get(cur.id)!, r));
+        cur = cur.parent_id != null ? qbById.get(cur.parent_id) : undefined;
+      }
     }
     return t;
-  }, [filteredRows]);
-
-  // Totals by parent account key
-  const parentTotals = useMemo(() => {
-    const t: Record<string, Totals> = {};
-    for (const r of filteredRows) {
-      const pk = r.qb_parent_number ?? r.qb_account_number ?? 'unclassified';
-      if (!t[pk]) t[pk] = zero();
-      t[pk] = addRow(t[pk], r);
-    }
-    return t;
-  }, [filteredRows]);
-
-  // Totals by leaf account key
-  const leafTotals = useMemo(() => {
-    const t: Record<string, Totals> = {};
-    for (const r of filteredRows) {
-      const lk = r.qb_account_number ?? 'unclassified';
-      if (!t[lk]) t[lk] = zero();
-      t[lk] = addRow(t[lk], r);
-    }
-    return t;
-  }, [filteredRows]);
+  }, [filteredRows, qbById]);
 
   const grand = useMemo(() => filteredRows.reduce((a, r) => addRow(a, r), zero()), [filteredRows]);
 
@@ -493,8 +449,12 @@ export default function BudgetGrid() {
 
   const dc = showDetails ? '' : styles.detailHidden;
 
-  const SumCells = ({ t, variant }: { t: Totals; variant: 'sec' | 'sg' | 'hdr' }) => {
-    const cls = variant === 'sec' ? styles.secSubNum : variant === 'sg' ? styles.sgSubNum : styles.sn;
+  const SumCells = ({ t, variant }: { t: Totals; variant: 'root' | 'grp' | 'sub' | 'leaf' }) => {
+    const cls =
+      variant === 'root' ? styles.rootNum :
+      variant === 'sub'  ? styles.secSubNum :
+      variant === 'leaf' ? styles.sgSubNum :
+      styles.grpNum;
     const amtDue = t.billed - t.paid;
     return <>
       <td className={cls}>{moneyD(t.budgeted)}</td>
@@ -514,6 +474,125 @@ export default function BudgetGrid() {
       <td className={`${cls} ${dc}`} /><td className={`${cls} ${dc}`} />
       <td className={`${cls} ${dc}`} /><td className={`${cls} ${dc}`} />
     </>;
+  };
+
+  const renderRow = (row: BudgetRow) => {
+    const isA = (f: string) => active.rowId === row.id && active.field === f;
+    const isDrillActive = drillTarget?.rowId === row.id;
+    return (
+      <tr key={row.id} className={`${styles.dataRow} ${row.source === 'user' ? styles.rowUserAdded : ''} ${isDrillActive ? styles.drillActiveRow : ''}`}>
+        <td className={styles.rowGutter} onClick={() => setPanelRow(row)} style={{ cursor: 'pointer' }}>
+          <span className={styles.rowArrow}>›</span>
+        </td>
+        <td className={`${styles.cell} ${styles.tdAcct} ${styles.ro}`} title={row.qb_short_name ?? undefined}>
+          {row.qb_account_number ?? '—'}
+        </td>
+        <EditCell value={row.task_name} rowId={row.id} field="task_name"
+          isActive={isA('task_name')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+          onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdTask} />
+        <EditCell value={row.budgeted_amount} rowId={row.id} field="budgeted_amount" numeric
+          isActive={isA('budgeted_amount')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+          onCommit={handleCommit} onTabNext={handleTabNext}
+          className={`${styles.tdMoney} ${(row.source ?? 'template') === 'template' && !row.amount_modified ? styles.amtTemplate : styles.amtModified}`} />
+        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.budgeted_amount > 0 && row.remaining_budget < 0 ? styles.danger : ''}`}>
+          {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
+        </td>
+        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.billed, row.budgeted_amount)}`}>
+          {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}
+        </td>
+        <DC value={row.committed} row={row} cell="committed"
+          active={isDrillActive && drillTarget?.cell === 'committed'} onDrill={drill} />
+        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
+          {row.co_count > 0 ? <span title={`${row.co_count} CO${row.co_count > 1 ? 's' : ''}`}>{money(row.co_value)}</span> : ''}
+        </td>
+        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
+          {money(row.total_commitment)}
+        </td>
+        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.fixed_charges)}</td>
+        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.tm_charges)}</td>
+        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.expense_charges)}</td>
+        <DC value={row.billed} row={row} cell="billed"
+          active={isDrillActive && drillTarget?.cell === 'billed'} onDrill={drill}
+          className={warnCls(row.billed, row.budgeted_amount)} />
+        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.amount_due)}</td>
+        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
+        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.billed, gla_sf)}</td>
+        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
+        <EditCell value={row.calculation_method} rowId={row.id} field="calculation_method"
+          isActive={isA('calculation_method')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+          onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdCalc} ${dc}`} />
+        <EditCell value={row.consultant} rowId={row.id} field="consultant"
+          isActive={isA('consultant')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+          onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdText} ${dc}`} />
+        <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`}>
+          {row.qb_account_number ?? ''}
+          {row.has_direct_invoices && <span className={styles.directBadge}>Direct</span>}
+        </td>
+        <EditCell value={row.notes} rowId={row.id} field="notes"
+          isActive={isA('notes')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
+          onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdNotes} ${dc}`} />
+      </tr>
+    );
+  };
+
+  // Recursive account tree renderer
+  // depth 0 = root accounts (1600, 1700…), depth 1 = sub-groups (1710, 1720…), depth 2 = leaf nodes
+  const renderAccts = (accounts: QbAccount[], depth: number): React.ReactNode[] => {
+    return accounts.flatMap(acct => {
+      const children = qbChildrenOf.get(acct.id) ?? [];
+      const leafRows = rowsByLeafId.get(acct.id) ?? [];
+      const t = acctTotals.get(acct.id) ?? zero();
+      const key = acct.account_number;
+      const isOpen = !collapsed.has(key);
+      const label = acct.short_name;
+      const acctTag = (
+        <span className={styles.acctNum}>{acct.account_number}</span>
+      );
+
+      if (depth === 0) {
+        // Root: category band
+        return [
+          <tr key={`root:${key}`} className={styles.catRow} onClick={() => toggle(key)}>
+            <td className={styles.catGutter}><span className={styles.chevron}>{isOpen ? '▾' : '▸'}</span></td>
+            <td className={styles.catLabel} colSpan={2}>{acctTag}{label}</td>
+            <SumCells t={t} variant="root" />
+          </tr>,
+          ...(isOpen ? renderAccts(children, 1) : []),
+        ];
+      }
+
+      if (children.length > 0) {
+        // Sub-group: collapsible group row
+        return [
+          <tr key={`grp:${key}`} className={styles.secRow} onClick={() => toggle(key)}>
+            <td className={styles.secGutter}><span className={styles.chevron}>{isOpen ? '▾' : '▸'}</span></td>
+            <td className={styles.secLabel} colSpan={2}>{acctTag}{label}</td>
+            <SumCells t={t} variant="grp" />
+          </tr>,
+          ...(isOpen ? [
+            ...renderAccts(children, depth + 1),
+            <tr key={`grp:${key}:sub`} className={styles.secSubRow}>
+              <td /><td className={styles.secSubLabel} colSpan={2}>{acct.account_number} — Total</td>
+              <SumCells t={t} variant="sub" />
+            </tr>,
+          ] : []),
+        ];
+      }
+
+      // Leaf account: task rows + optional subtotal
+      const multiTask = leafRows.length > 1;
+      return [
+        ...leafRows.map(renderRow),
+        ...(multiTask ? [
+          <tr key={`leaf:${key}:sub`} className={styles.leafSubRow}>
+            <td />
+            <td className={styles.leafSubAcct}>{acct.account_number}</td>
+            <td className={styles.leafSubLabel}>{label} — Total</td>
+            <SumCells t={t} variant="leaf" />
+          </tr>,
+        ] : []),
+      ];
+    });
   };
 
   return (
@@ -580,120 +659,7 @@ export default function BudgetGrid() {
             </tr>
           </thead>
           <tbody>
-            {(() => {
-              const renderRow = (row: BudgetRow) => {
-                const isA = (f: string) => active.rowId === row.id && active.field === f;
-                const isDrillActive = drillTarget?.rowId === row.id;
-                return (
-                  <tr key={row.id} className={`${styles.dataRow} ${row.source === 'user' ? styles.rowUserAdded : ''} ${isDrillActive ? styles.drillActiveRow : ''}`}>
-                    <td className={styles.rowGutter} onClick={() => setPanelRow(row)} style={{ cursor: 'pointer' }}>
-                      <span className={styles.rowArrow}>›</span>
-                    </td>
-                    <td className={`${styles.cell} ${styles.tdAcct} ${styles.ro}`} title={row.qb_short_name ?? undefined}>
-                      {row.qb_account_number ?? '—'}
-                    </td>
-                    <EditCell value={row.task_name} rowId={row.id} field="task_name"
-                      isActive={isA('task_name')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                      onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdTask} />
-                    <EditCell value={row.budgeted_amount} rowId={row.id} field="budgeted_amount" numeric
-                      isActive={isA('budgeted_amount')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                      onCommit={handleCommit} onTabNext={handleTabNext}
-                      className={`${styles.tdMoney} ${(row.source ?? 'template') === 'template' && !row.amount_modified ? styles.amtTemplate : styles.amtModified}`} />
-                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.budgeted_amount > 0 && row.remaining_budget < 0 ? styles.danger : ''}`}>
-                      {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
-                    </td>
-                    <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.billed, row.budgeted_amount)}`}>
-                      {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}
-                    </td>
-                    <DC value={row.committed} row={row} cell="committed"
-                      active={isDrillActive && drillTarget?.cell === 'committed'} onDrill={drill} />
-                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
-                      {row.co_count > 0 ? <span title={`${row.co_count} CO${row.co_count > 1 ? 's' : ''}`}>{money(row.co_value)}</span> : ''}
-                    </td>
-                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
-                      {money(row.total_commitment)}
-                    </td>
-                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.fixed_charges)}</td>
-                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.tm_charges)}</td>
-                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.expense_charges)}</td>
-                    <DC value={row.billed} row={row} cell="billed"
-                      active={isDrillActive && drillTarget?.cell === 'billed'} onDrill={drill}
-                      className={warnCls(row.billed, row.budgeted_amount)} />
-                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.amount_due)}</td>
-                    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
-                    <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.billed, gla_sf)}</td>
-                    <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
-                    <EditCell value={row.calculation_method} rowId={row.id} field="calculation_method"
-                      isActive={isA('calculation_method')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                      onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdCalc} ${dc}`} />
-                    <EditCell value={row.consultant} rowId={row.id} field="consultant"
-                      isActive={isA('consultant')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                      onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdText} ${dc}`} />
-                    <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`}>
-                      {row.qb_account_number ?? ''}
-                      {row.has_direct_invoices && <span className={styles.directBadge}>Direct</span>}
-                    </td>
-                    <EditCell value={row.notes} rowId={row.id} field="notes"
-                      isActive={isA('notes')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-                      onCommit={handleCommit} onTabNext={handleTabNext} className={`${styles.tdNotes} ${dc}`} />
-                  </tr>
-                );
-              };
-
-              return tree.catOrder.flatMap(ck => {
-                const catOpen = !collapsed.has(`cat:${ck}`);
-                const ct = categoryTotals[ck] ?? zero();
-                const catLabel = tree.catMeta[ck]?.label ?? ck;
-                const pks = tree.catParents[ck] ?? [];
-
-                return [
-                  <tr key={`cat:${ck}`} className={styles.catRow} onClick={() => toggle(`cat:${ck}`)}>
-                    <td className={styles.catGutter}><span className={styles.chevron}>{catOpen ? '▼' : '▶'}</span></td>
-                    <td className={styles.catLabel} colSpan={2}>{catLabel}</td>
-                    <SumCells t={ct} variant="hdr" />
-                  </tr>,
-
-                  ...(catOpen ? pks.flatMap(pk => {
-                    const grpOpen = !collapsed.has(`grp:${pk}`);
-                    const gt = parentTotals[pk] ?? zero();
-                    const grpLabel = tree.parentMeta[pk]?.label ?? pk;
-                    const lks = tree.leafOrder[pk] ?? [];
-
-                    return [
-                      <tr key={`grp:${pk}`} className={styles.secRow} onClick={() => toggle(`grp:${pk}`)}>
-                        <td className={styles.secGutter}><span className={styles.chevron}>{grpOpen ? '▼' : '▶'}</span></td>
-                        <td className={styles.secLabel} colSpan={2}>{grpLabel}</td>
-                        <SumCells t={gt} variant="hdr" />
-                      </tr>,
-
-                      ...(grpOpen ? [
-                        ...lks.flatMap(lk => {
-                          const lr = tree.leafRows[lk] ?? [];
-                          const lt = leafTotals[lk] ?? zero();
-                          const lm = tree.leafMeta[lk];
-                          const multiTask = lr.length > 1;
-                          return [
-                            ...lr.map(renderRow),
-                            ...(multiTask ? [
-                              <tr key={`leaf:${lk}:sub`} className={styles.leafSubRow}>
-                                <td />
-                                <td className={styles.leafSubAcct}>{lm.number}</td>
-                                <td className={styles.leafSubLabel}>{lm.label}</td>
-                                <SumCells t={lt} variant="sg" />
-                              </tr>
-                            ] : []),
-                          ];
-                        }),
-                        <tr key={`grp:${pk}:sub`} className={styles.secSubRow}>
-                          <td /><td className={styles.secSubLabel} colSpan={2}>Total — {grpLabel}</td>
-                          <SumCells t={gt} variant="sec" />
-                        </tr>,
-                      ] : []),
-                    ];
-                  }) : []),
-                ];
-              });
-            })()}
+            {qbRoots.length > 0 ? renderAccts(qbRoots, 0) : null}
           </tbody>
           <tfoot>
             <tr className={styles.totalRow}>

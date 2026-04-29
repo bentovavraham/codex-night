@@ -49,7 +49,7 @@
   --status-draft:            #9ca3af;
 
   /* ── Typography ──────────────────────────────────── */
-  --font-sans: Arial, Helvetica, sans-serif;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --border-strong: #bfb8ae;
   --editable-bg: #fffbeb;
   --font-mono: 'SF Mono', ui-monospace, 'Cascadia Code', 'Fira Code', Consolas, monospace;
