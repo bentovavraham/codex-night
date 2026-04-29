@@ -373,9 +373,17 @@ router.post('/phases/:phaseId/budget/init', requireAuth, async (req, res, next) 
     const numToId = {};
     for (const a of accts) numToId[a.account_number] = a.id;
 
+    // All leaf QB accounts — COA drives completeness
+    const { rows: leaves } = await pool.query(
+      'SELECT id, account_number, short_name FROM qb_accounts WHERE is_leaf = true ORDER BY sort_order'
+    );
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Step 1: insert template-defined tasks (with specific names/amounts)
+      const coveredAcctIds = new Set();
       for (let i = 0; i < TEMPLATE.length; i++) {
         const t = TEMPLATE[i];
         const qbId = t.account_number ? numToId[t.account_number] ?? null : null;
@@ -385,7 +393,21 @@ router.post('/phases/:phaseId/budget/init', requireAuth, async (req, res, next) 
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'template', $8)`,
           [phaseId, t.task_name, t.discipline, t.section, t.sub_group || null, t.default_amount || 0, i + 1, qbId]
         );
+        if (qbId) coveredAcctIds.add(qbId);
       }
+
+      // Step 2: auto-fill any leaf account not yet represented
+      let sortIdx = TEMPLATE.length + 1;
+      for (const leaf of leaves) {
+        if (coveredAcctIds.has(leaf.id)) continue;
+        await client.query(
+          `INSERT INTO phase_budget_lines
+             (phase_id, task_name, budgeted_amount, sort_order, source, qb_account_id)
+           VALUES ($1, $2, 0, $3, 'template', $4)`,
+          [phaseId, leaf.short_name, sortIdx++, leaf.id]
+        );
+      }
+
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -394,7 +416,8 @@ router.post('/phases/:phaseId/budget/init', requireAuth, async (req, res, next) 
       client.release();
     }
 
-    res.json({ ok: true, count: TEMPLATE.length });
+    const total = await pool.query('SELECT COUNT(*) FROM phase_budget_lines WHERE phase_id=$1', [phaseId]);
+    res.json({ ok: true, count: Number(total.rows[0].count) });
   } catch (err) { next(err); }
 });
 
