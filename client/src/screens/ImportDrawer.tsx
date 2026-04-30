@@ -834,11 +834,11 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                             />
                           </td>
                           <td className={styles.rColDesc}>
-                            <span style={{ fontSize: 11.5, color: '#1a1714', lineHeight: 1.4, display: 'block' }}>
+                            <span style={{ fontSize: 12, color: '#1a1714', lineHeight: 1.4, display: 'block', fontWeight: 450 }}>
                               {li.person && <span style={{ fontWeight: 700, marginRight: 6, color: '#3d2e27' }}>{li.person}</span>}
                               {li.description}
                             </span>
-                            {li.hours != null && <span style={{ fontSize: 10.5, color: '#8a7f74', marginTop: 1, display: 'block' }}>{li.hours}h @ ${li.rate}/h</span>}
+                            {li.billing_type === 'tm' && li.hours > 0 && <span style={{ fontSize: 10.5, color: '#8a7f74', marginTop: 1, display: 'block' }}>{li.hours}h @ ${li.rate}/h</span>}
                           </td>
                           <td className={`${styles.rColAmt} ${styles.right} ${styles.mono}`} style={{ fontSize: 11.5, color: '#1a1714', fontWeight: 600 }}>
                             {usd2.format(Number(li.amount) || 0)}
