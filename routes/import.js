@@ -546,6 +546,24 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
       }
     }
 
+    // Compute recon_status immediately if we have a linked QB transaction
+    if (invoiceId && item.suggested_qb_txn_id) {
+      const txnRes = await client.query(
+        'SELECT amount, qb_gl_code FROM qb_transactions WHERE id=$1', [item.suggested_qb_txn_id]
+      );
+      const txn = txnRes.rows[0];
+      if (txn) {
+        const invAmount = Number(formData.amount) || 0;
+        const pmGlAccount = pmGlId
+          ? (await client.query('SELECT account_number FROM qb_accounts WHERE id=$1', [pmGlId])).rows[0]?.account_number
+          : null;
+        let recon = 'matched';
+        if (Math.abs(invAmount - Number(txn.amount)) >= 0.02) recon = 'amount_mismatch';
+        else if (pmGlAccount && txn.qb_gl_code && pmGlAccount !== txn.qb_gl_code) recon = 'gl_mismatch';
+        await client.query('UPDATE invoices SET recon_status=$1 WHERE id=$2', [recon, invoiceId]);
+      }
+    }
+
     await client.query(
       `UPDATE import_queue SET status='confirmed', confirmed_contract_id=$1, confirmed_invoice_id=$2, updated_at=NOW() WHERE id=$3`,
       [contractId, invoiceId, item.id]
