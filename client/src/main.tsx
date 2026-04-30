@@ -16,6 +16,7 @@ import InvoicesTab from './screens/InvoicesTab';
 import ContractsTab from './screens/ContractsTab';
 import ImportPage from './screens/ImportPage';
 import AuditTab from './screens/AuditTab';
+import LoginScreen from './screens/LoginScreen';
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -26,6 +27,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={qc}>
       <BrowserRouter>
         <Routes>
+          <Route path="/login" element={<LoginScreen />} />
           <Route path="/" element={<AppShell />}>
             <Route index element={<TypeSelect />} />
             <Route path="projects" element={<ProjectList />} />
