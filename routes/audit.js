@@ -193,7 +193,7 @@ router.get('/:phaseId/audit', async (req, res) => {
          qa_active.account_number     AS active_gl_code,
          qa_active.full_name          AS active_gl_name
        FROM invoices i
-       JOIN contracts c    ON c.id = i.contract_id
+       LEFT JOIN contracts c    ON c.id = i.contract_id
        LEFT JOIN qb_transactions qt   ON qt.id = i.qb_transaction_id
        LEFT JOIN qb_accounts qa_pm    ON qa_pm.id = i.pm_validated_gl_id
        LEFT JOIN LATERAL (
@@ -203,7 +203,7 @@ router.get('/:phaseId/audit', async (req, res) => {
           WHERE ili.invoice_id = i.id
           LIMIT 1
        ) qa_active ON true
-       WHERE c.phase_id = $1
+       WHERE (i.phase_id = $1 OR c.phase_id = $1)
        ORDER BY i.invoice_date DESC NULLS LAST, i.id DESC`,
       [phaseId]
     );
@@ -234,9 +234,9 @@ router.get('/:phaseId/audit', async (req, res) => {
          COUNT(*) FILTER (WHERE i.recon_status = 'missing_in_qb')   AS cnt_missing_qb,
          COUNT(*) FILTER (WHERE i.qb_transaction_id IS NULL)        AS cnt_unmatched
        FROM invoices i
-       JOIN contracts c ON c.id = i.contract_id
+       LEFT JOIN contracts c ON c.id = i.contract_id
        LEFT JOIN qb_transactions qt ON qt.id = i.qb_transaction_id
-       WHERE c.phase_id = $1`,
+       WHERE (i.phase_id = $1 OR c.phase_id = $1)`,
       [phaseId]
     );
 
