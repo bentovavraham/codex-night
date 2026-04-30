@@ -516,69 +516,97 @@
   color: var(--text-3); background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .rTable { width: 100%; border-collapse: collapse; font-size: 11.5px; table-layout: fixed; }
-.rThead { background: var(--surface); }
+.rThead { background: #f2ede8; }
 .rThead th {
-  padding: 5px 8px; font-size: 9.5px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .06em; color: var(--text-3); border-bottom: 1px solid var(--border);
+  padding: 6px 8px; font-size: 9px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .09em; color: #8a7f74; border-bottom: 2px solid #d4cdc4;
   white-space: nowrap; overflow: hidden;
 }
-.rTrow { border-bottom: 1px solid var(--border); }
+.rTrow { border-bottom: 1px solid #ede8e2; }
+.rTrow:hover { background: #faf8f6; }
 .rTrow:last-child { border-bottom: none; }
 .rTrowFlagged { background: rgba(232,146,26,0.07); }
-.rTrowFlagged td:first-child { border-left: 2px solid #e8921a; }
-.rColBudgetLine { width: 160px; padding: 4px 6px; overflow: hidden; }
-.rColType  { width: 52px; padding: 4px 4px; overflow: hidden; }
-.rColGl    { width: 260px; min-width: 260px; padding: 4px 4px; }
-.rColDesc  { padding: 4px 8px; }
-.rColAmt   { width: 72px; padding: 4px 6px; overflow: hidden; }
+.rTrowFlagged td:first-child { border-left: 3px solid #e8921a; }
+.rColBudgetLine { width: 160px; padding: 6px 8px; overflow: hidden; }
+.rColType  { width: 60px; padding: 8px 6px; vertical-align: top; }
+.rColGl    { width: 240px; min-width: 240px; padding: 5px 6px; vertical-align: top; }
+.rColDesc  { padding: 8px 10px; vertical-align: top; }
+.rColAmt   { width: 78px; padding: 8px 8px; overflow: hidden; vertical-align: top; }
+
+/* ── Type badge ── */
+.rTypeBadge {
+  display: inline-block;
+  font-size: 9.5px; font-weight: 800; letter-spacing: .06em;
+  padding: 2px 6px; border-radius: 3px;
+  text-transform: uppercase;
+}
+.rTypeBadgeFixed { background: #dbeafe; color: #1e40af; }
+.rTypeBadgeTm    { background: #ede9fe; color: #5b21b6; }
+.rTypeBadgeExp   { background: #fef3c7; color: #92400e; }
 
 /* ── Inline GL Picker ── */
 .inglTrigger {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
-  min-height: 32px; padding: 4px 6px;
-  border: 1px solid var(--border); border-radius: 3px;
-  cursor: pointer; background: #fff; font-size: 11px; width: 100%;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  min-height: 38px; padding: 5px 7px;
+  border: 1px solid #d4cdc4; border-radius: 4px;
+  cursor: pointer; background: #fafaf9; width: 100%; box-sizing: border-box;
+  transition: border-color .12s, background .12s;
 }
 .inglTrigger:hover { border-color: var(--accent); background: #fdf8f6; }
 .inglTriggerAi {
   background: #fffbeb !important;
-  border-color: #fde68a !important;
+  border-color: #fbbf24 !important;
 }
 .inglTriggerAi:hover { border-color: #d97706 !important; background: #fef3cd !important; }
 .inglAiBadge {
-  font-size: 9px; font-weight: 700; flex-shrink: 0; line-height: 1;
+  font-size: 9px; font-weight: 800; flex-shrink: 0; line-height: 1;
 }
 .aiLegend {
   font-size: 9.5px; font-weight: 400; color: #92400e;
   text-transform: none; letter-spacing: 0; margin-left: 10px; font-style: italic;
 }
-.inglTopRow { display: flex; align-items: center; gap: 5px; width: 100%; }
-.inglCode { font-family: monospace; font-weight: 700; color: var(--text-1); font-size: 11px; flex-shrink: 0; }
-.inglName { color: var(--text-2); font-size: 10.5px; white-space: normal; line-height: 1.3; flex: 1; font-weight: 500; }
-.inglEmpty { color: var(--text-4); font-style: italic; font-size: 11px; }
+.inglTopRow { display: flex; align-items: center; gap: 6px; width: 100%; }
+.inglCode {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 800; color: #1a1714; font-size: 11.5px; flex-shrink: 0;
+  letter-spacing: .02em;
+}
+.inglNamePath {
+  font-size: 9.5px; color: #a89f96; line-height: 1.2;
+  white-space: normal; font-weight: 400;
+}
+.inglNameLeaf {
+  font-size: 11px; color: #2d2420; font-weight: 600;
+  white-space: normal; line-height: 1.3;
+}
+.inglEmpty { color: #b0a59c; font-style: italic; font-size: 11px; }
 .inglClear {
   margin-left: auto; background: none; border: none; cursor: pointer;
-  color: var(--text-3); font-size: 10px; padding: 0 2px; flex-shrink: 0;
+  color: #b0a59c; font-size: 11px; padding: 0 2px; flex-shrink: 0;
+  line-height: 1;
 }
+.inglClear:hover { color: #c0392b; }
 .inglDropdown {
   position: fixed; z-index: 2000;
-  background: #fff; border: 1px solid var(--border); border-radius: 4px;
-  box-shadow: 0 4px 14px rgba(0,0,0,.13);
-  min-width: 320px;
+  background: #fff; border: 1px solid #d4cdc4; border-radius: 5px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.14);
+  min-width: 340px;
 }
 .inglSearch {
   width: 100%; box-sizing: border-box;
-  padding: 6px 10px; border: none; border-bottom: 1px solid var(--border);
-  font-size: 12px; outline: none;
+  padding: 8px 12px; border: none; border-bottom: 1px solid #e8e0d8;
+  font-size: 12px; outline: none; background: #fafaf9;
+  border-radius: 5px 5px 0 0;
 }
-.inglList { max-height: 200px; overflow-y: auto; }
+.inglList { max-height: 240px; overflow-y: auto; }
 .inglOption {
-  display: flex; align-items: baseline; gap: 8px;
-  padding: 5px 10px; cursor: pointer; font-size: 11px;
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 6px 12px; cursor: pointer; font-size: 11px;
+  border-bottom: 1px solid #f2ede8;
 }
-.inglOption:hover { background: #e8f0fe; }
-.inglNoMatch { padding: 8px 10px; color: var(--text-3); font-style: italic; font-size: 11px; }
-.rColDel   { width: 24px; padding: 4px 2px; }
+.inglOption:hover { background: #fdf8f6; }
+.inglNoMatch { padding: 10px 12px; color: #a89f96; font-style: italic; font-size: 11px; }
+.rColDel   { width: 28px; padding: 6px 2px; vertical-align: top; }
 .rTypeSelect {
   width: 100%; font-size: 11px; padding: 2px 4px;
   border: 1px solid var(--border); border-radius: 2px;
@@ -602,10 +630,6 @@
   color: var(--text-4); cursor: pointer; font-size: 11px; border-radius: 2px;
 }
 .rDelBtn:hover { color: var(--status-rejected, #c0392b); background: #fde0dc; }
-.rTypeBadge {
-  font-size: 9px; font-weight: 700; text-transform: uppercase;
-  background: var(--bg-2, #eee); border-radius: 2px; padding: 1px 4px; color: var(--text-3);
-}
 .tmTag {
   font-size: 9.5px; font-weight: 700; color: #1e40af;
   background: #dbeafe; padding: 1px 5px; border-radius: 2px;

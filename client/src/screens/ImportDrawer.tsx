@@ -245,16 +245,22 @@ function InlineGlPicker({ accounts, value, onChange, isSuggested, suggestionReas
         onClick={openPicker}
         title={isSuggested && suggestionReason ? `AI suggestion (${suggestionConfidence}): ${suggestionReason}` : undefined}
       >
-        {selected ? (
-          <>
-            <div className={styles.inglTopRow}>
-              {isSuggested && <span className={styles.inglAiBadge} style={{ color: confColor }}>✦</span>}
-              <span className={styles.inglCode}>{selected.account_number}</span>
-              <button className={styles.inglClear} onClick={e => { e.stopPropagation(); onChange(null); }}>✕</button>
-            </div>
-            <span className={styles.inglName}>{selected.full_name}</span>
-          </>
-        ) : (
+        {selected ? (() => {
+          const parts = selected.full_name.split(':');
+          const leaf = parts.pop()!.trim();
+          const path = parts.map(p => p.trim()).join(' › ');
+          return (
+            <>
+              <div className={styles.inglTopRow}>
+                {isSuggested && <span className={styles.inglAiBadge} style={{ color: confColor }}>✦</span>}
+                <span className={styles.inglCode}>{selected.account_number}</span>
+                <button className={styles.inglClear} onClick={e => { e.stopPropagation(); onChange(null); }}>✕</button>
+              </div>
+              {path && <span className={styles.inglNamePath}>{path}</span>}
+              <span className={styles.inglNameLeaf}>{leaf}</span>
+            </>
+          );
+        })() : (
           <span className={styles.inglEmpty}>Set GL…</span>
         )}
       </div>
@@ -809,7 +815,9 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                       {invoiceLines.map((li, i) => (
                         <tr key={i} className={styles.rTrow}>
                           <td className={styles.rColType}>
-                            <span className={styles.rTypeBadge}>{li.billing_type.toUpperCase()}</span>
+                            <span className={`${styles.rTypeBadge} ${li.billing_type === 'tm' ? styles.rTypeBadgeTm : li.billing_type === 'expense' ? styles.rTypeBadgeExp : styles.rTypeBadgeFixed}`}>
+                              {li.billing_type === 'tm' ? 'T&M' : li.billing_type.toUpperCase()}
+                            </span>
                           </td>
                           <td className={styles.rColGl}>
                             <InlineGlPicker
@@ -825,12 +833,14 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                               })}
                             />
                           </td>
-                          <td className={styles.rColDesc} style={{ color: 'var(--text-2)', fontSize: 11 }}>
-                            {li.person && <span style={{ fontWeight: 600, marginRight: 6 }}>{li.person}</span>}
-                            {li.description}
-                            {li.hours && <span style={{ color: 'var(--text-4)', marginLeft: 6 }}>{li.hours}h @ ${li.rate}/h</span>}
+                          <td className={styles.rColDesc}>
+                            <span style={{ fontSize: 11.5, color: '#1a1714', lineHeight: 1.4, display: 'block' }}>
+                              {li.person && <span style={{ fontWeight: 700, marginRight: 6, color: '#3d2e27' }}>{li.person}</span>}
+                              {li.description}
+                            </span>
+                            {li.hours != null && <span style={{ fontSize: 10.5, color: '#8a7f74', marginTop: 1, display: 'block' }}>{li.hours}h @ ${li.rate}/h</span>}
                           </td>
-                          <td className={`${styles.rColAmt} ${styles.right} ${styles.mono}`} style={{ fontSize: 11 }}>
+                          <td className={`${styles.rColAmt} ${styles.right} ${styles.mono}`} style={{ fontSize: 11.5, color: '#1a1714', fontWeight: 600 }}>
                             {usd2.format(Number(li.amount) || 0)}
                           </td>
                         </tr>
