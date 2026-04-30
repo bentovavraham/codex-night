@@ -81,6 +81,81 @@
 .btnSecondary:hover { background: var(--bg-2); }
 .btnSecondary:disabled { opacity: .5; cursor: default; }
 
+.btnImport {
+  border-color: var(--primary, #c4522a);
+  color: var(--primary, #c4522a);
+  font-weight: 600;
+}
+.btnImport:hover { background: rgba(196,82,42,.06); }
+
+/* ── Filter bar ──────────────────────────────────────────────────────────── */
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg);
+  flex-wrap: wrap;
+}
+
+.filterInput {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  width: 180px;
+  background: #fff;
+  color: var(--text-1);
+}
+.filterInput:focus { outline: none; border-color: var(--primary, #c4522a); }
+
+.filterDate {
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text-1);
+}
+.filterDate:focus { outline: none; border-color: var(--primary, #c4522a); }
+
+.filterDateSep {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.sortBtn {
+  font-size: 11px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.sortBtn:hover { background: var(--bg-2); }
+.sortActive {
+  background: #e8f0fe;
+  border-color: #4285f4;
+  color: #1a73e8;
+  font-weight: 600;
+}
+
+.clearFiltersBtn {
+  font-size: 11px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  margin-left: auto;
+}
+.clearFiltersBtn:hover { background: var(--bg-2); color: var(--text-1); }
+
 /* ── Import feedback ─────────────────────────────────────────────────────── */
 
 .importOk {

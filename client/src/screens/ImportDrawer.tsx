@@ -25,6 +25,7 @@ interface ImportItem {
 interface Props {
   phaseId: number;
   onClose: () => void;
+  onConfirmed?: () => void;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -675,6 +676,7 @@ function QueueCard({ item, onClick, onFlipType, onRetry, onDiscard }: {
 
 function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
   const [dragging, setDragging] = useState(false);
+  const [folderMode, setFolderMode] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const justDropped = useRef(false);
 
@@ -690,32 +692,59 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
   }, [onFiles]);
 
   return (
-    <div
-      className={`${styles.dropZone} ${dragging ? styles.dropZoneDragging : ''}`}
-      onDragEnter={e => { e.preventDefault(); setDragging(true); }}
-      onDragOver={e => { e.preventDefault(); setDragging(true); }}
-      onDragLeave={e => { e.preventDefault(); setDragging(false); }}
-      onDrop={handleDrop}
-      onClick={() => { if (!justDropped.current) inputRef.current?.click(); }}
-    >
-      <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple hidden
-        onChange={e => { const files = Array.from(e.target.files || []).filter(isPdf); if (files.length) onFiles(files); e.target.value = ''; }} />
-      <div className={styles.dropIcon}>↑</div>
-      <div className={styles.dropText}>Drop PDFs here or click to browse</div>
-      <div className={styles.dropSub}>Contracts and invoices — mixed OK</div>
+    <div>
+      <div
+        className={`${styles.dropZone} ${dragging ? styles.dropZoneDragging : ''}`}
+        onDragEnter={e => { e.preventDefault(); setDragging(true); }}
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={e => { e.preventDefault(); setDragging(false); }}
+        onDrop={handleDrop}
+        onClick={() => { if (!justDropped.current) inputRef.current?.click(); }}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          multiple
+          hidden
+          {...(folderMode ? { webkitdirectory: '' } : {})}
+          onChange={e => {
+            const files = Array.from(e.target.files || []).filter(isPdf);
+            if (files.length) onFiles(files);
+            e.target.value = '';
+          }}
+        />
+        <div className={styles.dropIcon}>↑</div>
+        <div className={styles.dropText}>
+          {folderMode ? 'Click to select a folder of PDFs' : 'Drop PDFs here or click to browse'}
+        </div>
+        <div className={styles.dropSub}>Contracts and invoices — mixed OK</div>
+      </div>
+      <div className={styles.dropModeRow}>
+        <label className={styles.dropModeLabel}>
+          <input
+            type="checkbox"
+            checked={folderMode}
+            onChange={e => setFolderMode(e.target.checked)}
+          />
+          <span>Select entire folder</span>
+        </label>
+      </div>
     </div>
   );
 }
 
 // ── Main Drawer ──────────────────────────────────────────────────────────────
 
-export function ImportDrawer({ phaseId, onClose }: Props) {
+export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
   const queryClient = useQueryClient();
   const [reviewItem, setReviewItem] = useState<ImportItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [batchConfirming, setBatchConfirming] = useState(false);
+  const [batchMsg, setBatchMsg] = useState<string | null>(null);
   const uploadingRef = useRef(false);
 
   const { data: queue = [], refetch } = useQuery<ImportItem[]>({
@@ -779,12 +808,30 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
       queryClient.invalidateQueries({ queryKey: ['budget', phaseId] });
       queryClient.invalidateQueries({ queryKey: ['phaseContracts', phaseId] });
       queryClient.invalidateQueries({ queryKey: ['invoices', phaseId] });
+      onConfirmed?.();
       setReviewItem(null);
     } catch (err: any) {
       console.error('Confirm failed:', err);
       throw err;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleBatchConfirmHigh = async () => {
+    setBatchConfirming(true);
+    setBatchMsg(null);
+    try {
+      const r = await api.confirmBatchHighConfidence(phaseId);
+      await refetch();
+      queryClient.invalidateQueries({ queryKey: ['budget', phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['invoices', phaseId] });
+      onConfirmed?.();
+      setBatchMsg(`Confirmed ${r.confirmed} of ${r.total}${r.failed ? ` (${r.failed} failed)` : ''}.`);
+    } catch (err: any) {
+      setBatchMsg(`Error: ${err.message}`);
+    } finally {
+      setBatchConfirming(false);
     }
   };
 
@@ -839,12 +886,28 @@ export function ImportDrawer({ phaseId, onClose }: Props) {
             {uploadError && <div className={styles.uploadErr}>{uploadError}</div>}
           </div>
 
+          {/* Batch confirm message */}
+          {batchMsg && (
+            <div className={styles.uploadErr} style={{ background: batchMsg.startsWith('Error') ? undefined : '#e8f5e9', color: batchMsg.startsWith('Error') ? undefined : '#2e7d32', borderColor: batchMsg.startsWith('Error') ? undefined : '#c8e6c9' }}>
+              {batchMsg}
+            </div>
+          )}
+
           {/* Pending section */}
           {pending.length > 0 && (
             <div className={styles.section}>
               <div className={styles.sectionHead}>
                 Pending
                 <span className={styles.sectionCount}>{pending.length}</span>
+                {pending.some(i => i.status === 'needs_review' && i.match_confidence === 'high') && (
+                  <button
+                    className={styles.batchConfirmBtn}
+                    onClick={handleBatchConfirmHigh}
+                    disabled={batchConfirming}
+                  >
+                    {batchConfirming ? 'Confirming…' : '✓ Confirm All High-Confidence'}
+                  </button>
+                )}
               </div>
               {pending.map(item => (
                 <QueueCard

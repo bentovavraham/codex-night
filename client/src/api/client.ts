@@ -119,6 +119,7 @@ export const api = {
   clearFailedImports:  (phaseId: number) => request<any>('POST', `/api/phases/${phaseId}/import/clear-failed`),
   reprocessImports:    (phaseId: number) => request<any>('POST', `/api/phases/${phaseId}/import/reprocess`),
   checkImportDuplicates: (id: number) => request<{ matches: any[] }>('GET', `/api/import-queue/${id}/duplicates`),
+  confirmBatchHighConfidence: (phaseId: number) => request<{ confirmed: number; failed: number; total: number }>('POST', `/api/phases/${phaseId}/import/confirm-batch-high`),
 
   // Audit
   getAudit: (phaseId: number) => request<any>('GET', `/api/phases/${phaseId}/audit`),

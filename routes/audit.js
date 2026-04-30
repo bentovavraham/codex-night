@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const XLSX = require('xlsx');
 const pool = require('../db/pool');
+const { extractQbTransactions } = require('../lib/extract');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -51,33 +52,65 @@ function reconStatus(inv, txn) {
 }
 
 // ── POST /api/phases/:phaseId/audit/qb-import ─────────────────────────────────
-// Accept an Excel file, parse it, insert qb_transactions, auto-match invoices.
-router.post('/:phaseId/qb-import', upload.single('file'), async (req, res) => {
+// Accept Excel (.xlsx/.xls/.csv) or PDF QB Transaction Report.
+// Parses rows, inserts into qb_transactions, auto-matches invoices.
+router.post('/:phaseId/audit/qb-import', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const phaseId = Number(req.params.phaseId);
   const userId  = req.session?.userId;
 
   try {
-    const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: false });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-    if (!rows.length) return res.status(400).json({ error: 'Spreadsheet is empty' });
+    // Build a normalized array of row objects regardless of source format
+    let normalizedRows;
 
-    const headers = Object.keys(rows[0]);
+    const isPdf = req.file.mimetype === 'application/pdf' ||
+                  req.file.originalname?.toLowerCase().endsWith('.pdf');
+
+    if (isPdf) {
+      const { transactions } = await extractQbTransactions(req.file.buffer);
+      if (!transactions.length) return res.status(400).json({ error: 'No transactions found in PDF' });
+      // Map Claude output directly — already in the right shape
+      normalizedRows = transactions.map(t => ({
+        vendor:    t.vendor_name,
+        refNum:    t.ref_number,
+        memo:      t.memo,
+        glCode:    t.qb_gl_code,
+        glName:    t.qb_gl_name,
+        qbProject: t.qb_project,
+        txnDate:   t.txn_date,
+        amount:    t.amount,
+        paid:      t.paid_amount,
+        balance:   t.open_balance,
+        isPaid:    t.is_paid,
+        rawRow:    t,
+      }));
+    } else {
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: false });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      if (!rows.length) return res.status(400).json({ error: 'Spreadsheet is empty' });
+
+      const headers = Object.keys(rows[0]);
+      normalizedRows = rows.map(row => {
+        const vendor    = pick(row, headers, 'Vendor', 'Vendor Name', 'Name', 'Payee');
+        const refNum    = pick(row, headers, 'Ref No.', 'RefNo', 'Invoice Number', 'Num', 'Reference', 'Invoice #', 'Bill No');
+        const memo      = pick(row, headers, 'Memo', 'Description', 'Memo/Description', 'Desc');
+        const glCode    = pick(row, headers, 'Account', 'GL Code', 'Account Number', 'Acct');
+        const glName    = pick(row, headers, 'Account Name', 'GL Name', 'Account Description');
+        const qbProject = pick(row, headers, 'Customer', 'Job', 'Customer:Job', 'Project', 'Class');
+        const txnDate   = parseDate(pick(row, headers, 'Date', 'Txn Date', 'Transaction Date', 'Invoice Date'));
+        const amount    = parseAmount(pick(row, headers, 'Amount', 'Total', 'Original Amount', 'Billed'));
+        const paid      = parseAmount(pick(row, headers, 'Paid Amount', 'Paid', 'Paid To Date', 'Amount Paid'));
+        const balance   = parseAmount(pick(row, headers, 'Open Balance', 'Balance', 'Balance Due', 'Outstanding'));
+        const isPaid    = balance != null ? Math.abs(balance) < 0.02 : (paid != null && amount != null && Math.abs(paid - amount) < 0.02);
+        return { vendor, refNum, memo, glCode, glName, qbProject, txnDate, amount, paid, balance, isPaid, rawRow: row };
+      });
+    }
+
     let inserted = 0, skipped = 0, matched = 0;
 
-    for (const row of rows) {
-      const vendor    = pick(row, headers, 'Vendor', 'Vendor Name', 'Name', 'Payee');
-      const refNum    = pick(row, headers, 'Ref No.', 'RefNo', 'Invoice Number', 'Num', 'Reference', 'Invoice #', 'Bill No');
-      const memo      = pick(row, headers, 'Memo', 'Description', 'Memo/Description', 'Desc');
-      const glCode    = pick(row, headers, 'Account', 'GL Code', 'Account Number', 'Acct');
-      const glName    = pick(row, headers, 'Account Name', 'GL Name', 'Account Description');
-      const qbProject = pick(row, headers, 'Customer', 'Job', 'Customer:Job', 'Project', 'Class');
-      const txnDate   = parseDate(pick(row, headers, 'Date', 'Txn Date', 'Transaction Date', 'Invoice Date'));
-      const amount    = parseAmount(pick(row, headers, 'Amount', 'Total', 'Original Amount', 'Billed'));
-      const paid      = parseAmount(pick(row, headers, 'Paid Amount', 'Paid', 'Paid To Date', 'Amount Paid'));
-      const balance   = parseAmount(pick(row, headers, 'Open Balance', 'Balance', 'Balance Due', 'Outstanding'));
-      const isPaid    = balance != null ? Math.abs(balance) < 0.02 : (paid != null && amount != null && Math.abs(paid - amount) < 0.02);
+    for (const r of normalizedRows) {
+      const { vendor, refNum, memo, glCode, glName, qbProject, txnDate, amount, paid, balance, isPaid, rawRow } = r;
 
       if (!vendor && !refNum && !amount) { skipped++; continue; }
 
@@ -92,14 +125,14 @@ router.post('/:phaseId/qb-import', upload.single('file'), async (req, res) => {
         [phaseId, txnDate, String(vendor||'').trim(), String(refNum||'').trim(),
          String(memo||'').trim(), String(glCode||'').trim(), String(glName||'').trim(),
          String(qbProject||'').trim(), amount, paid || 0, balance, isPaid,
-         JSON.stringify(row), userId]
+         JSON.stringify(rawRow), userId]
       );
 
       if (!result.rows.length) { skipped++; continue; }
       inserted++;
       const txnId = result.rows[0].id;
 
-      // Auto-match: find an invoice in this phase with same ref_number + vendor
+      // Auto-match: find an invoice in this phase with same ref_number
       if (refNum) {
         const matchRes = await pool.query(
           `UPDATE invoices i
@@ -130,7 +163,7 @@ router.post('/:phaseId/qb-import', upload.single('file'), async (req, res) => {
 // ── GET /api/phases/:phaseId/audit ───────────────────────────────────────────
 // Returns the audit table: invoices joined with their QB transaction match.
 // Also returns QB transactions with no matched invoice (missing source).
-router.get('/:phaseId', async (req, res) => {
+router.get('/:phaseId/audit', async (req, res) => {
   const phaseId = Number(req.params.phaseId);
   try {
     // Matched invoices + their QB data
@@ -253,7 +286,7 @@ router.post('/invoices/:id/validate-gl', async (req, res) => {
 
 // ── GET /api/phases/:phaseId/audit/correction-report ─────────────────────────
 // CSV export of all discrepancies for Carla.
-router.get('/:phaseId/correction-report', async (req, res) => {
+router.get('/:phaseId/audit/correction-report', async (req, res) => {
   const phaseId = Number(req.params.phaseId);
   try {
     const result = await pool.query(

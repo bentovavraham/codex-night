@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { ImportDrawer } from './ImportDrawer';
 import styles from './AuditTab.module.css';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -126,6 +127,11 @@ export default function AuditTab() {
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [filter, setFilter]       = useState<'all' | 'issues'>('all');
+  const [showImport, setShowImport] = useState(false);
+  const [vendorFilter, setVendorFilter] = useState('');
+  const [dateFrom, setDateFrom]     = useState('');
+  const [dateTo, setDateTo]         = useState('');
+  const [sortAmt, setSortAmt]       = useState<'asc' | 'desc' | null>(null);
 
   const { data, isLoading, error } = useQuery<AuditData>({
     queryKey: ['audit', pid],
@@ -165,9 +171,38 @@ export default function AuditTab() {
   if (error)     return <div className={styles.error}>Error loading audit data</div>;
 
   const d = data!;
-  const invoices = filter === 'issues'
-    ? d.invoices.filter(i => i.recon_status && i.recon_status !== 'matched')
-    : d.invoices;
+
+  const applyFilters = (rows: AuditInvoice[]) => {
+    let r = filter === 'issues'
+      ? rows.filter(i => i.recon_status && i.recon_status !== 'matched')
+      : rows;
+    if (vendorFilter.trim())
+      r = r.filter(i => i.vendor_name.toLowerCase().includes(vendorFilter.trim().toLowerCase()));
+    if (dateFrom)
+      r = r.filter(i => i.invoice_date && i.invoice_date >= dateFrom);
+    if (dateTo)
+      r = r.filter(i => i.invoice_date && i.invoice_date <= dateTo);
+    if (sortAmt)
+      r = [...r].sort((a, b) => sortAmt === 'asc'
+        ? (a.folder_amount ?? 0) - (b.folder_amount ?? 0)
+        : (b.folder_amount ?? 0) - (a.folder_amount ?? 0));
+    return r;
+  };
+
+  const invoices = applyFilters(d.invoices);
+
+  const unmatchedQb = (() => {
+    let r = d.unmatched_qb;
+    if (vendorFilter.trim())
+      r = r.filter((t: any) => String(t.vendor_name || '').toLowerCase().includes(vendorFilter.trim().toLowerCase()));
+    if (dateFrom)
+      r = r.filter((t: any) => t.txn_date && t.txn_date >= dateFrom);
+    if (dateTo)
+      r = r.filter((t: any) => t.txn_date && t.txn_date <= dateTo);
+    if (sortAmt)
+      r = [...r].sort((a: any, b: any) => sortAmt === 'asc' ? (a.amount ?? 0) - (b.amount ?? 0) : (b.amount ?? 0) - (a.amount ?? 0));
+    return r;
+  })();
 
   const t = d.totals;
 
@@ -193,16 +228,59 @@ export default function AuditTab() {
           {!d.has_qb_data && (
             <span className={styles.noQbHint}>No QB data yet — import an Excel export to begin reconciliation</span>
           )}
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={handleImport} />
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.pdf" style={{ display: 'none' }} onChange={handleImport} />
           <button className={styles.btnSecondary} onClick={() => fileRef.current?.click()} disabled={importing}>
-            {importing ? 'Importing…' : '↑ Import QB Excel'}
+            {importing ? 'Importing…' : '↑ Import QB Export'}
           </button>
           {d.has_qb_data && (
             <button className={styles.btnSecondary} onClick={() => api.downloadCorrectionReport(pid)}>
               ↓ Correction Report
             </button>
           )}
+          <button className={`${styles.btnSecondary} ${styles.btnImport}`} onClick={() => setShowImport(true)}>
+            ↑ Import Invoices
+          </button>
         </div>
+      </div>
+
+      {/* ── Filter bar ── */}
+      <div className={styles.filterBar}>
+        <input
+          className={styles.filterInput}
+          placeholder="Filter by vendor…"
+          value={vendorFilter}
+          onChange={e => setVendorFilter(e.target.value)}
+        />
+        <input
+          className={styles.filterDate}
+          type="date"
+          value={dateFrom}
+          onChange={e => setDateFrom(e.target.value)}
+          title="Date from"
+        />
+        <span className={styles.filterDateSep}>–</span>
+        <input
+          className={styles.filterDate}
+          type="date"
+          value={dateTo}
+          onChange={e => setDateTo(e.target.value)}
+          title="Date to"
+        />
+        <button
+          className={`${styles.sortBtn} ${sortAmt === 'asc' ? styles.sortActive : ''}`}
+          onClick={() => setSortAmt(s => s === 'asc' ? null : 'asc')}
+          title="Sort by amount ascending"
+        >Amt ↑</button>
+        <button
+          className={`${styles.sortBtn} ${sortAmt === 'desc' ? styles.sortActive : ''}`}
+          onClick={() => setSortAmt(s => s === 'desc' ? null : 'desc')}
+          title="Sort by amount descending"
+        >Amt ↓</button>
+        {(vendorFilter || dateFrom || dateTo || sortAmt) && (
+          <button className={styles.clearFiltersBtn} onClick={() => { setVendorFilter(''); setDateFrom(''); setDateTo(''); setSortAmt(null); }}>
+            Clear filters
+          </button>
+        )}
       </div>
 
       {importMsg && (
@@ -305,13 +383,12 @@ export default function AuditTab() {
             })}
           </tbody>
         </table>
-      </div>
 
       {/* ── Unmatched QB transactions ── */}
-      {d.unmatched_qb.length > 0 && (
+      {unmatchedQb.length > 0 && (
         <div className={styles.unmatchedSection}>
           <div className={styles.unmatchedHeader}>
-            QB transactions with no source document ({d.unmatched_qb.length})
+            QB transactions with no source document ({unmatchedQb.length}{d.unmatched_qb.length !== unmatchedQb.length ? ` of ${d.unmatched_qb.length}` : ''})
           </div>
           <table className={styles.table}>
             <thead>
@@ -325,7 +402,7 @@ export default function AuditTab() {
               </tr>
             </thead>
             <tbody>
-              {d.unmatched_qb.map(txn => (
+              {unmatchedQb.map((txn: any) => (
                 <tr key={txn.id} className={`${styles.row} ${styles.unmatchedRow}`}>
                   <td className={styles.td}>{txn.txn_date?.slice(0, 10) || '—'}</td>
                   <td className={styles.td}>{txn.vendor_name || '—'}</td>
@@ -346,6 +423,16 @@ export default function AuditTab() {
             </tbody>
           </table>
         </div>
+      )}
+      </div>
+
+      {/* ── Import drawer ── */}
+      {showImport && (
+        <ImportDrawer
+          phaseId={pid}
+          onClose={() => setShowImport(false)}
+          onConfirmed={() => qc.invalidateQueries({ queryKey: ['audit', pid] })}
+        />
       )}
     </div>
   );

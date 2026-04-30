@@ -722,4 +722,79 @@ router.delete('/import-queue/:id', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/phases/:phaseId/import/confirm-batch-high
+// Batch-confirms all needs_review items with match_confidence='high' using extracted_data directly.
+router.post('/phases/:phaseId/import/confirm-batch-high', requireAuth, async (req, res, next) => {
+  const phaseId = Number(req.params.phaseId);
+  try {
+    const items = (await pool.query(
+      `SELECT * FROM import_queue WHERE phase_id=$1 AND status='needs_review' AND match_confidence='high'`,
+      [phaseId]
+    )).rows;
+
+    const phaseRes = await pool.query('SELECT project_id FROM phases WHERE id=$1', [phaseId]);
+    const projectId = phaseRes.rows[0]?.project_id;
+
+    let confirmed = 0, failed = 0;
+
+    for (const item of items) {
+      const client = await pool.connect();
+      try {
+        const ext = item.extracted_data || {};
+        const lineId = item.suggested_budget_line_id || null;
+
+        await client.query('BEGIN');
+        let contractId = null, invoiceId = null;
+
+        if (item.doc_type === 'contract') {
+          const r = await client.query(
+            `INSERT INTO contracts (project_id, phase_budget_line_id, vendor_name, description, total_value,
+               contract_date, reference_number, status, file_reference, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+            [projectId, lineId, ext.vendor_name || 'Unknown', ext.description || ext.summary || null,
+             Number(ext.total_value) || 0, ext.contract_date || null, ext.reference_number || null,
+             'active', item.file_reference, req.session.userId]
+          );
+          contractId = r.rows[0].id;
+          const lineItems = ext.line_items || [];
+          for (let idx = 0; idx < lineItems.length; idx++) {
+            const li = lineItems[idx];
+            await client.query(
+              `INSERT INTO contract_line_items
+                 (contract_id, sort_order, billing_type, description, budgeted_amount, phase_budget_line_id)
+               VALUES ($1,$2,$3,$4,$5,$6)`,
+              [contractId, idx, li.billing_type || 'fixed', li.description || '',
+               Number(li.budgeted_amount) || 0, li.suggested_budget_line_id || null]
+            );
+          }
+        } else {
+          const r = await client.query(
+            `INSERT INTO invoices (project_id, phase_budget_line_id, contract_id, vendor_name, invoice_number,
+               amount, invoice_date, description, status, file_reference, invoice_type, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+            [projectId, lineId, null, ext.vendor_name || 'Unknown', ext.invoice_number || '',
+             Number(ext.amount) || 0, ext.invoice_date || null, ext.description || null,
+             'pending', item.file_reference, ext.invoice_type || 'fixed', req.session.userId]
+          );
+          invoiceId = r.rows[0].id;
+        }
+
+        await client.query(
+          `UPDATE import_queue SET status='confirmed', confirmed_contract_id=$1, confirmed_invoice_id=$2, updated_at=NOW() WHERE id=$3`,
+          [contractId, invoiceId, item.id]
+        );
+        await client.query('COMMIT');
+        confirmed++;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        failed++;
+      } finally {
+        client.release();
+      }
+    }
+
+    res.json({ confirmed, failed, total: items.length });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
