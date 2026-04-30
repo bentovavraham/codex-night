@@ -197,8 +197,9 @@ function InlineBudgetLinePicker({ lines, value, onChange }: {
 
 // ── Inline GL Code Picker (portal-based, for line item rows) ────────────────
 
-function InlineGlPicker({ accounts, value, onChange }: {
+function InlineGlPicker({ accounts, value, onChange, isSuggested, suggestionReason, suggestionConfidence }: {
   accounts: QbAccount[]; value: number | null; onChange: (id: number | null) => void;
+  isSuggested?: boolean; suggestionReason?: string | null; suggestionConfidence?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -234,11 +235,19 @@ function InlineGlPicker({ accounts, value, onChange }: {
     return () => document.removeEventListener('mousedown', onOut);
   }, [open]);
 
+  const confColor = suggestionConfidence === 'high' ? '#15803d' : suggestionConfidence === 'medium' ? '#92400e' : '#6b7280';
+
   return (
     <>
-      <div ref={triggerRef} className={styles.inglTrigger} onClick={openPicker}>
+      <div
+        ref={triggerRef}
+        className={`${styles.inglTrigger} ${isSuggested ? styles.inglTriggerAi : ''}`}
+        onClick={openPicker}
+        title={isSuggested && suggestionReason ? `AI suggestion (${suggestionConfidence}): ${suggestionReason}` : undefined}
+      >
         {selected ? (
           <>
+            {isSuggested && <span className={styles.inglAiBadge} style={{ color: confColor }}>✦</span>}
             <span className={styles.inglCode}>{selected.account_number}</span>
             <span className={styles.inglName}>{selected.full_name}</span>
             <button className={styles.inglClear} onClick={e => { e.stopPropagation(); onChange(null); }}>✕</button>
@@ -329,6 +338,9 @@ interface InvLineItem {
   hours: string;
   rate: string;
   qb_account_id: number | null;
+  is_ai_suggested: boolean;
+  suggestion_confidence: string | null;
+  suggestion_reason: string | null;
 }
 
 function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, onBack, saving }: {
@@ -410,15 +422,22 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   const [invoiceType, setInvoiceType] = useState('fixed');
   const [invoiceStatus, setInvoiceStatus] = useState('pending');
   const [invoiceLines, setInvoiceLines] = useState<InvLineItem[]>(() =>
-    (ext.line_items || []).map((li: any) => ({
-      billing_type: li.billing_type || 'fixed',
-      description: li.description || '',
-      amount: li.amount != null ? String(li.amount) : li.budgeted_amount != null ? String(li.budgeted_amount) : '',
-      person: li.person || '',
-      hours: li.hours != null ? String(li.hours) : '',
-      rate: li.rate != null ? String(li.rate) : '',
-      qb_account_id: li.qb_account_id ?? null,
-    }))
+    (ext.line_items || []).map((li: any) => {
+      const aiId = li.suggested_qb_account_id ?? null;
+      const hasAi = aiId != null;
+      return {
+        billing_type: li.billing_type || 'fixed',
+        description: li.description || '',
+        amount: li.amount != null ? String(li.amount) : li.budgeted_amount != null ? String(li.budgeted_amount) : '',
+        person: li.person || '',
+        hours: li.hours != null ? String(li.hours) : '',
+        rate: li.rate != null ? String(li.rate) : '',
+        qb_account_id: li.qb_account_id ?? aiId,
+        is_ai_suggested: hasAi && (li.qb_account_id == null),
+        suggestion_confidence: li.qb_suggestion_confidence ?? null,
+        suggestion_reason: li.qb_suggestion_reason ?? null,
+      };
+    })
   );
 
   // Duplicate check
@@ -763,7 +782,12 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
               {/* Invoice line items — editable with GL code */}
               {invoiceLines.length > 0 ? (
                 <div className={styles.rSection}>
-                  <div className={styles.rSectionTitle}>Line Items — assign GL codes</div>
+                  <div className={styles.rSectionTitle}>
+                    Line Items — assign GL codes
+                    {invoiceLines.some(l => l.is_ai_suggested) && (
+                      <span className={styles.aiLegend}>✦ AI suggestion — hover for reason, click to override</span>
+                    )}
+                  </div>
                   <table className={styles.rTable}>
                     <thead>
                       <tr className={styles.rThead}>
@@ -783,8 +807,13 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                             <InlineGlPicker
                               accounts={qbAccounts}
                               value={li.qb_account_id}
+                              isSuggested={li.is_ai_suggested}
+                              suggestionReason={li.suggestion_reason}
+                              suggestionConfidence={li.suggestion_confidence}
                               onChange={id => setInvoiceLines(lines => {
-                                const n = [...lines]; n[i] = { ...n[i], qb_account_id: id }; return n;
+                                const n = [...lines];
+                                n[i] = { ...n[i], qb_account_id: id, is_ai_suggested: false };
+                                return n;
                               })}
                             />
                           </td>
