@@ -484,7 +484,7 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
     const lineId = formData.phase_budget_line_id || item.suggested_budget_line_id || null;
 
     await client.query('BEGIN');
-    let contractId = null, invoiceId = null;
+    let contractId = null, invoiceId = null, pmGlId = null;
 
     if (item.doc_type === 'contract') {
       const phaseRes = await client.query('SELECT project_id FROM phases WHERE id=$1', [item.phase_id]);
@@ -516,7 +516,7 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
       const phaseRes = await client.query('SELECT project_id FROM phases WHERE id=$1', [item.phase_id]);
       const projectId = phaseRes.rows[0]?.project_id;
       // Determine PM validated GL from header or first line item
-      const pmGlId = formData.qb_account_id
+      pmGlId = formData.qb_account_id
         ? Number(formData.qb_account_id)
         : (Array.isArray(formData.line_items) && formData.line_items[0]?.qb_account_id
             ? Number(formData.line_items[0].qb_account_id) : null);
