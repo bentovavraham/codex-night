@@ -533,8 +533,13 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
           })),
         };
     confirmingRef.current = true;
-    try { await onConfirm(formData); }
-    finally { confirmingRef.current = false; }
+    try {
+      await onConfirm(formData);
+    } catch (err: any) {
+      setSaveError(err?.message || 'Save failed — check your connection and try again.');
+    } finally {
+      confirmingRef.current = false;
+    }
   }
 
   return (
