@@ -10,10 +10,13 @@ These rules prevent bad invoices from entering the audit table. They are enforce
 
 **What it means:** The system identified that the invoice's filename or extracted content references a different known project than the one you're importing into.
 
-**How it is detected:**
-- Filename is checked for known project keywords (e.g. `Richwood`, `Howell`, `Forman`)
-- Extracted invoice text (client name, job number, site address) is checked
-- Both are compared against the current phase's project AND all other known projects
+**How it is detected (in priority order):**
+
+1. **Vendor's internal job number** (strongest signal) — the vendor's own project/job number (e.g. "Project No. 24117") is extracted from the PDF. If this number has been seen before on a confirmed invoice, the system knows exactly which project it belongs to. Same number on a different project's import queue → immediate mismatch.
+2. **Filename keywords** — the uploaded filename is checked against each project's keyword list (e.g. `Richwood`, `Howell`, `Forman`)
+3. **Extracted invoice text** — client name, site address, job number pulled from the invoice body are checked against all project keyword lists
+
+All three are checked against the current phase's project AND all other known projects. A match to any other project triggers `mismatch`.
 
 **Enforcement:**
 - UI: The "Confirm & Save" button is not rendered at all. Only "Discard" is available.
@@ -43,6 +46,19 @@ These rules prevent bad invoices from entering the audit table. They are enforce
 
 **Enforcement:**
 - UI: A warning lists the matching invoice(s). The PM must check *"I acknowledge this may be a duplicate"* before confirming.
+
+---
+
+## How Vendor Job Numbers Are Learned
+
+Every time an invoice is confirmed, the system records:
+- The vendor's name
+- The vendor's internal job number (extracted from the PDF)
+- Which project it was confirmed into
+
+This is stored in the `vendor_project_map` table. After the first confirmed Hammer invoice with job# 24117 on Richwood, every future Hammer invoice showing job# 24117 — regardless of filename — will be confirmed as Richwood. A Hammer invoice showing job# 24124 in the Richwood queue will immediately be flagged as a mismatch (it belongs to Forman/Howell).
+
+The mapping builds automatically. You do not need to configure it — it learns from your own confirmations.
 
 ---
 

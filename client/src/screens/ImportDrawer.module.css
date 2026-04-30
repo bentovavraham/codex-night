@@ -778,6 +778,12 @@
   background: #fef3cd; padding: 1px 5px; border-radius: 2px; flex-shrink: 0;
   border: 1px solid #e8d888; cursor: default;
 }
+.discardedToggle { color: #6b7280; }
+.holdingBinNote {
+  font-size: 11px; color: #6b7280; background: #f9fafb;
+  border: 1px solid #e5e7eb; border-radius: 4px;
+  padding: 6px 10px; margin: 0 0 6px;
+}
 
 /* ── Section head color variants ── */
 .sectionDot {

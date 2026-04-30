@@ -114,7 +114,8 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
       [phaseId]
     );
     const phaseProject = phaseProjectRes.rows[0] || null;
-    const allProjects = (await pool.query('SELECT name, keywords FROM projects')).rows;
+    const allProjects = (await pool.query('SELECT id, name, keywords FROM projects')).rows;
+    const vendorJobMap = (await pool.query('SELECT vendor_name, vendor_job_number, project_id FROM vendor_project_map')).rows;
 
     const phaseContracts = (await pool.query(`
       SELECT DISTINCT c.id, c.vendor_name, c.reference_number, c.total_value, c.status
@@ -263,7 +264,7 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
 
           if (phaseProject) {
             const aliases = phaseProject.keywords || [];
-            const pm = matchProject(extracted.project_clues, phaseProject.name, aliases, item.original_filename || '', allProjects);
+            const pm = matchProject(extracted.project_clues, phaseProject.name, aliases, item.original_filename || '', allProjects, vendorJobMap, extracted.vendor_name || '', extracted.vendor_job_number || '', phaseProject.id);
             projectMatchResult = pm.match;
             identifiedProject = extracted.project_clues || null;
           }
@@ -420,7 +421,8 @@ router.post('/phases/:phaseId/import/rematch-qb', requireAuth, async (req, res, 
       [phaseId]
     );
     const phaseProject = phaseProjectRes.rows[0] || null;
-    const allProjects = (await pool.query('SELECT name, keywords FROM projects')).rows;
+    const allProjects = (await pool.query('SELECT id, name, keywords FROM projects')).rows;
+    const vendorJobMap = (await pool.query('SELECT vendor_name, vendor_job_number, project_id FROM vendor_project_map')).rows;
     const itemsWithFilenames = (await pool.query(
       `SELECT id, extracted_data, original_filename FROM import_queue WHERE phase_id=$1 AND status='needs_review' AND doc_type='invoice'`,
       [phaseId]
@@ -433,7 +435,7 @@ router.post('/phases/:phaseId/import/rematch-qb', requireAuth, async (req, res, 
       let pm = { match: null, reason: null };
       if (phaseProject) {
         const aliases = phaseProject.keywords || [];
-        pm = matchProject(ext.project_clues, phaseProject.name, aliases, item.original_filename || '', allProjects);
+        pm = matchProject(ext.project_clues, phaseProject.name, aliases, item.original_filename || '', allProjects, vendorJobMap, ext.vendor_name || '', ext.vendor_job_number || '', phaseProject.id);
       }
 
       await pool.query(
@@ -564,6 +566,22 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
         if (Math.abs(invAmount - Number(txn.amount)) >= 0.02) recon = 'amount_mismatch';
         else if (pmGlAccount && txn.qb_gl_code && pmGlAccount !== txn.qb_gl_code) recon = 'gl_mismatch';
         await client.query('UPDATE invoices SET recon_status=$1 WHERE id=$2', [recon, invoiceId]);
+      }
+    }
+
+    // Learn vendor job number → project mapping from confirmed invoices
+    const ext = item.extracted_data || {};
+    const vjn = String(ext.vendor_job_number || '').trim();
+    const vname = String(formData.vendor_name || ext.vendor_name || '').trim();
+    if (vjn && vname && item.phase_id) {
+      const phaseProjectForMap = (await client.query('SELECT project_id FROM phases WHERE id=$1', [item.phase_id])).rows[0];
+      if (phaseProjectForMap) {
+        await client.query(`
+          INSERT INTO vendor_project_map (vendor_name, vendor_job_number, project_id, confirmed_count)
+          VALUES ($1, $2, $3, 1)
+          ON CONFLICT (vendor_name, vendor_job_number)
+          DO UPDATE SET confirmed_count = vendor_project_map.confirmed_count + 1, updated_at = NOW()
+        `, [vname, vjn, phaseProjectForMap.project_id]);
       }
     }
 

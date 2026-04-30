@@ -564,3 +564,16 @@ DO $$ BEGIN
   ALTER TABLE projects ADD COLUMN keywords TEXT[];
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
+
+-- Learned mapping: vendor internal job number → project
+-- Populated automatically when invoices are confirmed.
+CREATE TABLE IF NOT EXISTS vendor_project_map (
+  id              SERIAL PRIMARY KEY,
+  vendor_name     TEXT    NOT NULL,
+  vendor_job_number TEXT  NOT NULL,
+  project_id      INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  confirmed_count INTEGER NOT NULL DEFAULT 1,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (vendor_name, vendor_job_number)
+);

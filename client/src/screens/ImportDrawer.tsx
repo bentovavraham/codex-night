@@ -1030,6 +1030,7 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
   const [reviewItem, setReviewItem] = useState<ImportItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
+  const [discardedOpen, setDiscardedOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [batchConfirming, setBatchConfirming] = useState(false);
@@ -1060,7 +1061,9 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
   });
 
   const pending = queue.filter(i => i.status !== 'confirmed' && i.status !== 'discarded');
-  const done = queue.filter(i => i.status === 'confirmed' || i.status === 'discarded');
+  const confirmed = queue.filter(i => i.status === 'confirmed');
+  const discarded = queue.filter(i => i.status === 'discarded');
+  const done = [...confirmed, ...discarded];
   const failedCount = pending.filter(i => i.status === 'failed').length;
 
   // Tier split for needs_review items
@@ -1376,19 +1379,42 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
             </div>
           )}
 
-          {/* Done section */}
-          {done.length > 0 && (
+          {/* Confirmed section */}
+          {confirmed.length > 0 && (
             <div className={styles.section}>
               <button className={styles.doneToggle} onClick={() => setDoneOpen(o => !o)}>
-                <span>{doneOpen ? '▾' : '▸'} Done</span>
-                <span className={styles.sectionCount}>{done.length}</span>
+                <span>{doneOpen ? '▾' : '▸'} ✓ Confirmed</span>
+                <span className={styles.sectionCount}>{confirmed.length}</span>
               </button>
-              {doneOpen && done.map(item => (
+              {doneOpen && confirmed.map(item => (
                 <QueueCard key={item.id} item={item}
                   onClick={() => {}} onFlipType={() => {}}
                   onRetry={() => retryMutation.mutate(item.id)}
                   onDiscard={() => discardOneMutation.mutate(item.id)} />
               ))}
+            </div>
+          )}
+
+          {/* Discarded holding bin */}
+          {discarded.length > 0 && (
+            <div className={styles.section}>
+              <button className={`${styles.doneToggle} ${styles.discardedToggle}`} onClick={() => setDiscardedOpen(o => !o)}>
+                <span>{discardedOpen ? '▾' : '▸'} 🗑 Discarded / Rejected</span>
+                <span className={styles.sectionCount}>{discarded.length}</span>
+              </button>
+              {discardedOpen && (
+                <>
+                  <div className={styles.holdingBinNote}>
+                    These were removed from the active queue. Wrong-project invoices should be re-imported into the correct phase.
+                  </div>
+                  {discarded.map(item => (
+                    <QueueCard key={item.id} item={item}
+                      onClick={() => {}} onFlipType={() => {}}
+                      onRetry={() => retryMutation.mutate(item.id)}
+                      onDiscard={() => discardOneMutation.mutate(item.id)} />
+                  ))}
+                </>
+              )}
             </div>
           )}
 
