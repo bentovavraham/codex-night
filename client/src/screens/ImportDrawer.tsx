@@ -542,7 +542,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
       {/* Left: PDF */}
       <div className={styles.reviewPdfPane}>
         {pdfSrc
-          ? <iframe src={pdfSrc} className={styles.reviewPdfFrame} title="Document" />
+          ? <embed src={`${pdfSrc}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`} type="application/pdf" className={styles.reviewPdfFrame} />
           : <div className={styles.reviewNoPdf}>No PDF available</div>}
       </div>
 
