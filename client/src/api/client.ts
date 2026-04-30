@@ -103,9 +103,10 @@ export const api = {
   },
 
   // Import queue
-  importFiles: async (phaseId: number, files: File[]) => {
+  importFiles: async (phaseId: number, files: File[], sourceBatch?: string) => {
     const form = new FormData();
     files.forEach(f => form.append('files', f));
+    if (sourceBatch) form.append('source_batch', sourceBatch);
     const res = await fetch(`/api/phases/${phaseId}/import`, { method: 'POST', credentials: 'same-origin', body: form });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);

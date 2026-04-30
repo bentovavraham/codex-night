@@ -75,6 +75,8 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ error: 'No files uploaded' });
 
+    const sourceBatch = req.body.source_batch || null;
+
     // Save each file to Postgres and create queue entries
     const queueItems = [];
     for (const file of files) {
@@ -83,9 +85,9 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
         mimeType: file.mimetype || 'application/pdf',
       });
       const r = await pool.query(
-        `INSERT INTO import_queue (phase_id, original_filename, file_reference, status, created_by)
-         VALUES ($1, $2, $3, 'queued', $4) RETURNING *`,
-        [phaseId, file.originalname, saved.reference, req.session.userId]
+        `INSERT INTO import_queue (phase_id, original_filename, file_reference, status, source_batch, created_by)
+         VALUES ($1, $2, $3, 'queued', $4, $5) RETURNING *`,
+        [phaseId, file.originalname, saved.reference, sourceBatch, req.session.userId]
       );
       queueItems.push({ ...r.rows[0], _buffer: file.buffer });
     }
@@ -393,11 +395,11 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
       const projectId = phaseRes.rows[0]?.project_id;
       const r = await client.query(
         `INSERT INTO contracts (project_id, phase_budget_line_id, vendor_name, description, total_value,
-          contract_date, reference_number, status, file_reference, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+          contract_date, reference_number, status, file_reference, source_batch, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
         [projectId, lineId, formData.vendor_name, formData.description, Number(formData.total_value)||0,
          formData.contract_date||null, formData.reference_number||null,
-         formData.status||'active', item.file_reference, req.session.userId]
+         formData.status||'active', item.file_reference, item.source_batch||null, req.session.userId]
       );
       contractId = r.rows[0].id;
 
@@ -419,12 +421,12 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
       const projectId = phaseRes.rows[0]?.project_id;
       const r = await client.query(
         `INSERT INTO invoices (project_id, phase_budget_line_id, contract_id, vendor_name, invoice_number, amount,
-          invoice_date, description, status, file_reference, invoice_type, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+          invoice_date, description, status, file_reference, invoice_type, source_batch, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
         [projectId, lineId, formData.contract_id||null, formData.vendor_name, formData.invoice_number||'',
          Number(formData.amount)||0, formData.invoice_date||null, formData.description||null,
          formData.status||'pending', item.file_reference, formData.invoice_type||'fixed',
-         req.session.userId]
+         item.source_batch||null, req.session.userId]
       );
       invoiceId = r.rows[0].id;
       // Save invoice line items
@@ -749,11 +751,11 @@ router.post('/phases/:phaseId/import/confirm-batch-high', requireAuth, async (re
         if (item.doc_type === 'contract') {
           const r = await client.query(
             `INSERT INTO contracts (project_id, phase_budget_line_id, vendor_name, description, total_value,
-               contract_date, reference_number, status, file_reference, created_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+               contract_date, reference_number, status, file_reference, source_batch, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
             [projectId, lineId, ext.vendor_name || 'Unknown', ext.description || ext.summary || null,
              Number(ext.total_value) || 0, ext.contract_date || null, ext.reference_number || null,
-             'active', item.file_reference, req.session.userId]
+             'active', item.file_reference, item.source_batch || null, req.session.userId]
           );
           contractId = r.rows[0].id;
           const lineItems = ext.line_items || [];
@@ -770,11 +772,12 @@ router.post('/phases/:phaseId/import/confirm-batch-high', requireAuth, async (re
         } else {
           const r = await client.query(
             `INSERT INTO invoices (project_id, phase_budget_line_id, contract_id, vendor_name, invoice_number,
-               amount, invoice_date, description, status, file_reference, invoice_type, created_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+               amount, invoice_date, description, status, file_reference, invoice_type, source_batch, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
             [projectId, lineId, null, ext.vendor_name || 'Unknown', ext.invoice_number || '',
              Number(ext.amount) || 0, ext.invoice_date || null, ext.description || null,
-             'pending', item.file_reference, ext.invoice_type || 'fixed', req.session.userId]
+             'pending', item.file_reference, ext.invoice_type || 'fixed',
+             item.source_batch || null, req.session.userId]
           );
           invoiceId = r.rows[0].id;
         }

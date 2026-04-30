@@ -70,6 +70,21 @@
 }
 .dropModeLabel input { cursor: pointer; }
 
+.batchLabelRow {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 8px;
+}
+.batchLabelText {
+  font-size: 11px; color: var(--text-3); white-space: nowrap; flex-shrink: 0;
+}
+.batchLabelInput {
+  flex: 1; font-size: 12px; padding: 4px 8px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: #fff; color: var(--text-1);
+}
+.batchLabelInput:focus { outline: none; border-color: var(--accent); }
+.batchLabelInput::placeholder { color: var(--text-4); font-style: italic; font-size: 11px; }
+
 .uploadingMsg {
   display: flex; align-items: center; justify-content: center; gap: 10px;
   height: 72px; font-size: 12px; color: var(--text-3);

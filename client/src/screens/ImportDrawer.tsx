@@ -674,7 +674,7 @@ function QueueCard({ item, onClick, onFlipType, onRetry, onDiscard }: {
 
 // ── Drop Zone ────────────────────────────────────────────────────────────────
 
-function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
+function DropZone({ onFiles }: { onFiles: (files: File[], detectedFolder?: string) => void }) {
   const [dragging, setDragging] = useState(false);
   const [folderMode, setFolderMode] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -709,8 +709,14 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
           hidden
           {...(folderMode ? { webkitdirectory: '' } : {})}
           onChange={e => {
-            const files = Array.from(e.target.files || []).filter(isPdf);
-            if (files.length) onFiles(files);
+            const all = Array.from(e.target.files || []);
+            const files = all.filter(isPdf);
+            if (!files.length) { e.target.value = ''; return; }
+            // Extract top-level folder name from webkitRelativePath e.g. "HammerInvoices/file.pdf"
+            const folder = folderMode && all[0]?.webkitRelativePath
+              ? all[0].webkitRelativePath.split('/')[0]
+              : undefined;
+            onFiles(files, folder);
             e.target.value = '';
           }}
         />
@@ -745,6 +751,7 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [batchConfirming, setBatchConfirming] = useState(false);
   const [batchMsg, setBatchMsg] = useState<string | null>(null);
+  const [batchLabel, setBatchLabel] = useState('');
   const uploadingRef = useRef(false);
 
   const { data: queue = [], refetch } = useQuery<ImportItem[]>({
@@ -783,12 +790,15 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
     onSuccess: () => refetch(),
   });
 
-  const handleFiles = async (files: File[]) => {
+  const handleFiles = async (files: File[], detectedFolder?: string) => {
     if (!files.length) { setUploadError('No PDF files detected.'); return; }
     if (uploadingRef.current) return;
     uploadingRef.current = true;
     setUploadError(null); setUploading(true);
-    try { await api.importFiles(phaseId, files); await refetch(); }
+    // Auto-fill batch label from folder name if not already set
+    const label = batchLabel.trim() || detectedFolder || '';
+    if (detectedFolder && !batchLabel.trim()) setBatchLabel(detectedFolder);
+    try { await api.importFiles(phaseId, files, label || undefined); await refetch(); }
     catch (err: any) { setUploadError(err?.message || 'Upload failed'); }
     finally { setUploading(false); uploadingRef.current = false; }
   };
@@ -883,6 +893,15 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
             {uploading
               ? <div className={styles.uploadingMsg}><div className={styles.spinner} /> Uploading…</div>
               : <DropZone onFiles={handleFiles} />}
+            <div className={styles.batchLabelRow}>
+              <label className={styles.batchLabelText}>Source / folder label</label>
+              <input
+                className={styles.batchLabelInput}
+                placeholder="e.g. Hammer Invoices — auto-filled from folder name"
+                value={batchLabel}
+                onChange={e => setBatchLabel(e.target.value)}
+              />
+            </div>
             {uploadError && <div className={styles.uploadErr}>{uploadError}</div>}
           </div>
 
