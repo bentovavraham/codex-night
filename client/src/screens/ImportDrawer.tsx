@@ -180,6 +180,79 @@ function InlineBudgetLinePicker({ lines, value, onChange }: {
   );
 }
 
+// ── Inline GL Code Picker (portal-based, for line item rows) ────────────────
+
+function InlineGlPicker({ accounts, value, onChange }: {
+  accounts: QbAccount[]; value: number | null; onChange: (id: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selected = accounts.find(a => a.id === value) ?? null;
+
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase();
+    return accounts.filter(a =>
+      !q || a.account_number.toLowerCase().includes(q) || a.full_name.toLowerCase().includes(q)
+    ).slice(0, 40);
+  }, [accounts, query]);
+
+  function openPicker() {
+    if (!triggerRef.current) return;
+    const r = triggerRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 2, left: r.left, width: Math.max(r.width, 280) });
+    setQuery('');
+    setOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 20);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function onOut(e: MouseEvent) {
+      if (triggerRef.current?.contains(e.target as Node)) return;
+      if ((e.target as Element)?.closest?.('[data-ingl-dp]')) return;
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', onOut);
+    return () => document.removeEventListener('mousedown', onOut);
+  }, [open]);
+
+  return (
+    <>
+      <div ref={triggerRef} className={styles.inglTrigger} onClick={openPicker}>
+        {selected ? (
+          <>
+            <span className={styles.inglCode}>{selected.account_number}</span>
+            <span className={styles.inglName}>{selected.full_name}</span>
+            <button className={styles.inglClear} onClick={e => { e.stopPropagation(); onChange(null); }}>✕</button>
+          </>
+        ) : (
+          <span className={styles.inglEmpty}>Set GL…</span>
+        )}
+      </div>
+      {open && createPortal(
+        <div data-ingl-dp className={styles.inglDropdown} style={{ top: pos.top, left: pos.left, width: pos.width }}>
+          <input ref={inputRef} className={styles.inglSearch} value={query}
+            onChange={e => setQuery(e.target.value)} placeholder="Code or name…" />
+          <div className={styles.inglList}>
+            {filtered.map(a => (
+              <div key={a.id} className={styles.inglOption}
+                onMouseDown={() => { onChange(a.id); setOpen(false); }}>
+                <span className={styles.inglCode}>{a.account_number}</span>
+                <span className={styles.inglName}>{a.full_name}</span>
+              </div>
+            ))}
+            {!filtered.length && <div className={styles.inglNoMatch}>No match</div>}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 // ── Duplicate Warning Banner ──────────────────────────────────────────────────
 
 function DupBanner({ matches, acknowledged, onAck }: {
@@ -223,6 +296,8 @@ function DupBanner({ matches, acknowledged, onAck }: {
 
 // ── Full-Screen Review Overlay ────────────────────────────────────────────────
 
+interface QbAccount { id: number; account_number: string; full_name: string; }
+
 interface LineItem {
   billing_type: 'fixed' | 'tm' | 'expense';
   description: string;
@@ -231,9 +306,20 @@ interface LineItem {
   differs_from_primary?: boolean;
 }
 
-function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving }: {
+interface InvLineItem {
+  billing_type: string;
+  description: string;
+  amount: string;
+  person: string;
+  hours: string;
+  rate: string;
+  qb_account_id: number | null;
+}
+
+function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, onBack, saving }: {
   item: ImportItem;
   budgetLines: any[];
+  qbAccounts: QbAccount[];
   onConfirm: (formData: any) => Promise<void>;
   onDiscard: () => Promise<void>;
   onBack: () => void;
@@ -245,9 +331,12 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
   // Common fields
   const [vendor, setVendor] = useState(ext.vendor_name || '');
   const [description, setDescription] = useState(ext.description || ext.summary || '');
+  // Contract budget line (contracts only)
   const [budgetLineId, setBudgetLineId] = useState<number | null>(
-    ext.suggested_primary_budget_line_id ?? item.suggested_budget_line_id ?? null
+    isContract ? (ext.suggested_primary_budget_line_id ?? item.suggested_budget_line_id ?? null) : null
   );
+  // Invoice GL code (top-level, used when no line items)
+  const [glAccountId, setGlAccountId] = useState<number | null>(null);
   const [reviewed, setReviewed] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -301,6 +390,17 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
   const [invoiceDate, setInvoiceDate] = useState(ext.invoice_date || '');
   const [invoiceType, setInvoiceType] = useState('fixed');
   const [invoiceStatus, setInvoiceStatus] = useState('pending');
+  const [invoiceLines, setInvoiceLines] = useState<InvLineItem[]>(() =>
+    (ext.line_items || []).map((li: any) => ({
+      billing_type: li.billing_type || 'fixed',
+      description: li.description || '',
+      amount: li.amount != null ? String(li.amount) : li.budgeted_amount != null ? String(li.budgeted_amount) : '',
+      person: li.person || '',
+      hours: li.hours != null ? String(li.hours) : '',
+      rate: li.rate != null ? String(li.rate) : '',
+      qb_account_id: li.qb_account_id ?? null,
+    }))
+  );
 
   // Duplicate check
   const [dupMatches, setDupMatches] = useState<any[]>([]);
@@ -344,21 +444,42 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
     if (confirmingRef.current) return;
     setSaveError(null);
     if (!vendor.trim()) return setSaveError('Vendor name is required.');
-    if (!hasLineItems && !budgetLineId) return setSaveError('Budget line is required when there are no contract tasks.');
+    if (isContract && !hasLineItems && !budgetLineId) return setSaveError('Budget line is required when there are no contract tasks.');
     if (!reviewed) return setSaveError('Please confirm you have reviewed the details.');
     if (dupBlocked) return setSaveError('Please acknowledge the duplicate warning.');
 
-    const base = { vendor_name: vendor.trim(), description, phase_budget_line_id: budgetLineId };
     const formData = isContract
-      ? { ...base, total_value: Number(totalValue) || 0, contract_date: contractDate || null,
-          reference_number: referenceNumber || null, status: contractStatus,
+      ? {
+          vendor_name: vendor.trim(), description,
+          phase_budget_line_id: budgetLineId,
+          total_value: Number(totalValue) || 0,
+          contract_date: contractDate || null,
+          reference_number: referenceNumber || null,
+          status: contractStatus,
           line_items: lineItems.filter(li => li.description.trim()).map(li => ({
             billing_type: li.billing_type, description: li.description,
             budgeted_amount: Number(li.budgeted_amount) || 0,
             phase_budget_line_id: li.phase_budget_line_id ?? null,
-          })) }
-      : { ...base, invoice_number: invoiceNumber, amount: Number(amount) || 0,
-          invoice_date: invoiceDate || null, invoice_type: invoiceType, status: invoiceStatus };
+          })),
+        }
+      : {
+          vendor_name: vendor.trim(), description,
+          qb_account_id: glAccountId,
+          invoice_number: invoiceNumber,
+          amount: Number(amount) || 0,
+          invoice_date: invoiceDate || null,
+          invoice_type: invoiceType,
+          status: invoiceStatus,
+          line_items: invoiceLines.map(li => ({
+            billing_type: li.billing_type,
+            description: li.description,
+            amount: Number(li.amount) || 0,
+            person: li.person || null,
+            hours: li.hours ? Number(li.hours) : null,
+            rate: li.rate ? Number(li.rate) : null,
+            qb_account_id: li.qb_account_id ?? null,
+          })),
+        };
     confirmingRef.current = true;
     try { await onConfirm(formData); }
     finally { confirmingRef.current = false; }
@@ -408,14 +529,14 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
               placeholder="Who is this from?" />
           </div>
 
-          {/* Budget line — only required for simple contracts with no task breakdown */}
-          {!hasLineItems && (
+          {/* Budget line — contracts only */}
+          {isContract && !hasLineItems && (
             <div className={styles.rGroup}>
               <label className={styles.rLabel}>Task / Budget Line <span className={styles.rRequired}>required</span></label>
               <BudgetLinePicker lines={budgetLines} value={budgetLineId} onChange={setBudgetLineId} />
             </div>
           )}
-          {hasLineItems && (
+          {isContract && hasLineItems && (
             <div className={styles.rGroup}>
               <label className={styles.rLabel}>Fallback Budget Line <span className={styles.rFallbackHint}>used only for tasks with no specific assignment</span></label>
               <BudgetLinePicker lines={budgetLines} value={budgetLineId} onChange={setBudgetLineId} />
@@ -567,23 +688,33 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
                   onChange={e => setDescription(e.target.value)} rows={3} placeholder="What is this invoice for?" />
               </div>
 
-              {/* Line items — read-only preview */}
-              {ext.line_items?.length > 0 && (
+              {/* Invoice line items — editable with GL code */}
+              {invoiceLines.length > 0 ? (
                 <div className={styles.rSection}>
-                  <div className={styles.rSectionTitle}>Line Items ({ext.line_items.length})</div>
+                  <div className={styles.rSectionTitle}>Line Items — assign GL codes</div>
                   <table className={styles.rTable}>
                     <thead>
                       <tr className={styles.rThead}>
                         <th className={styles.rColType}>TYPE</th>
+                        <th className={styles.rColGl}>GL CODE</th>
                         <th className={styles.rColDesc}>DESCRIPTION</th>
                         <th className={`${styles.rColAmt} ${styles.right}`}>AMOUNT</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {ext.line_items.map((li: any, i: number) => (
+                      {invoiceLines.map((li, i) => (
                         <tr key={i} className={styles.rTrow}>
                           <td className={styles.rColType}>
-                            <span className={styles.rTypeBadge}>{(li.billing_type || 'fixed').toUpperCase()}</span>
+                            <span className={styles.rTypeBadge}>{li.billing_type.toUpperCase()}</span>
+                          </td>
+                          <td className={styles.rColGl}>
+                            <InlineGlPicker
+                              accounts={qbAccounts}
+                              value={li.qb_account_id}
+                              onChange={id => setInvoiceLines(lines => {
+                                const n = [...lines]; n[i] = { ...n[i], qb_account_id: id }; return n;
+                              })}
+                            />
                           </td>
                           <td className={styles.rColDesc} style={{ color: 'var(--text-2)', fontSize: 11 }}>
                             {li.person && <span style={{ fontWeight: 600, marginRight: 6 }}>{li.person}</span>}
@@ -591,12 +722,18 @@ function ReviewOverlay({ item, budgetLines, onConfirm, onDiscard, onBack, saving
                             {li.hours && <span style={{ color: 'var(--text-4)', marginLeft: 6 }}>{li.hours}h @ ${li.rate}/h</span>}
                           </td>
                           <td className={`${styles.rColAmt} ${styles.right} ${styles.mono}`} style={{ fontSize: 11 }}>
-                            {usd2.format(Number(li.amount || li.budgeted_amount || 0))}
+                            {usd2.format(Number(li.amount) || 0)}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+              ) : (
+                /* No line items — single top-level GL code */
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>GL Code</label>
+                  <InlineGlPicker accounts={qbAccounts} value={glAccountId} onChange={setGlAccountId} />
                 </div>
               )}
             </>
@@ -769,6 +906,11 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
     queryFn: () => api.listBudgetLines(phaseId),
   });
 
+  const { data: qbAccounts = [] } = useQuery<QbAccount[]>({
+    queryKey: ['qb-accounts'],
+    queryFn: () => api.listQbAccounts(),
+  });
+
   const pending = queue.filter(i => i.status !== 'confirmed' && i.status !== 'discarded');
   const done = queue.filter(i => i.status === 'confirmed' || i.status === 'discarded');
   const failedCount = pending.filter(i => i.status === 'failed').length;
@@ -860,6 +1002,7 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
         <ReviewOverlay
           item={liveReviewItem}
           budgetLines={budgetLines}
+          qbAccounts={qbAccounts as QbAccount[]}
           onConfirm={handleConfirm}
           onDiscard={handleDiscard}
           onBack={() => setReviewItem(null)}
