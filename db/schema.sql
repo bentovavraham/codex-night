@@ -499,3 +499,62 @@ DO $$ BEGIN
   ALTER TABLE phase_budget_lines DROP CONSTRAINT IF EXISTS phase_budget_lines_phase_id_qb_account_id_key;
 EXCEPTION WHEN others THEN NULL;
 END $$;
+
+-- ── Audit Mode ────────────────────────────────────────────────────────────────
+
+-- Project aliases: one project can be known by multiple names
+-- (e.g. "Richwood" = "Madison Marquette" = "Madison").
+-- Used when matching imported invoices to a project.
+CREATE TABLE IF NOT EXISTS project_aliases (
+    id         SERIAL PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    alias      VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (alias)
+);
+CREATE INDEX IF NOT EXISTS idx_project_aliases_project ON project_aliases(project_id);
+
+-- Raw QuickBooks transactions imported from an Excel export.
+-- One row per QB bill/expense line. Multiple imports are additive;
+-- re-importing the same ref_number + vendor is ignored (ON CONFLICT DO NOTHING).
+CREATE TABLE IF NOT EXISTS qb_transactions (
+    id              SERIAL PRIMARY KEY,
+    phase_id        INTEGER NOT NULL REFERENCES phases(id) ON DELETE CASCADE,
+    txn_date        DATE,
+    vendor_name     VARCHAR(255),
+    ref_number      VARCHAR(128),          -- QB invoice/bill number
+    memo            TEXT,
+    qb_gl_code      VARCHAR(32),           -- GL code as entered in QB
+    qb_gl_name      VARCHAR(255),          -- GL account name from QB
+    qb_project      VARCHAR(255),          -- Customer/Job field from QB
+    amount          NUMERIC(14,2),
+    paid_amount     NUMERIC(14,2) DEFAULT 0,
+    open_balance    NUMERIC(14,2),
+    is_paid         BOOLEAN NOT NULL DEFAULT FALSE,
+    raw_row         JSONB,                 -- original Excel row for reference
+    imported_by     INTEGER REFERENCES users(id),
+    imported_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (phase_id, vendor_name, ref_number, amount)
+);
+CREATE INDEX IF NOT EXISTS idx_qb_txn_phase   ON qb_transactions(phase_id);
+CREATE INDEX IF NOT EXISTS idx_qb_txn_vendor  ON qb_transactions(LOWER(vendor_name));
+CREATE INDEX IF NOT EXISTS idx_qb_txn_ref     ON qb_transactions(ref_number);
+
+-- Link each invoice to a matched QB transaction (set during auto-match or manual link).
+DO $$ BEGIN
+  ALTER TABLE invoices ADD COLUMN qb_transaction_id INTEGER REFERENCES qb_transactions(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+-- PM-validated correct GL account for this invoice (may differ from what QB has).
+DO $$ BEGIN
+  ALTER TABLE invoices ADD COLUMN pm_validated_gl_id INTEGER REFERENCES qb_accounts(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+-- Reconciliation status computed (or overridden) per invoice.
+-- matched | amount_mismatch | gl_mismatch | missing_in_qb | missing_source | duplicate
+DO $$ BEGIN
+  ALTER TABLE invoices ADD COLUMN recon_status VARCHAR(32);
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;

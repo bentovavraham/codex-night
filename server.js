@@ -81,6 +81,10 @@ app.use('/api', phaseBudgetRoutes);             // /phases/:phaseId/budget, /bud
 const importRoutes = require('./routes/import');
 app.use('/api', importRoutes);                  // /phases/:phaseId/import, /import-queue/:id
 
+const auditRoutes = require('./routes/audit');
+app.use('/api/phases', auditRoutes);            // /phases/:phaseId/audit, /phases/:phaseId/audit/qb-import
+app.use('/api/audit', auditRoutes);             // /api/audit/invoices/:id/validate-gl
+
 // --- Static SPA ---
 const clientDist = path.join(__dirname, 'client', 'dist');
 const hasClientBuild = fs.existsSync(path.join(clientDist, 'index.html'));

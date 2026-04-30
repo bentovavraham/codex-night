@@ -119,4 +119,20 @@ export const api = {
   clearFailedImports:  (phaseId: number) => request<any>('POST', `/api/phases/${phaseId}/import/clear-failed`),
   reprocessImports:    (phaseId: number) => request<any>('POST', `/api/phases/${phaseId}/import/reprocess`),
   checkImportDuplicates: (id: number) => request<{ matches: any[] }>('GET', `/api/import-queue/${id}/duplicates`),
+
+  // Audit
+  getAudit: (phaseId: number) => request<any>('GET', `/api/phases/${phaseId}/audit`),
+  validateGl: (invoiceId: number, glAccountId: number | null) =>
+    request<any>('POST', `/api/audit/invoices/${invoiceId}/validate-gl`, { gl_account_id: glAccountId }),
+  importQbExcel: async (phaseId: number, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`/api/phases/${phaseId}/audit/qb-import`, { method: 'POST', credentials: 'same-origin', body: form });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    return payload;
+  },
+  downloadCorrectionReport: (phaseId: number) => {
+    window.location.href = `/api/phases/${phaseId}/audit/correction-report`;
+  },
 };

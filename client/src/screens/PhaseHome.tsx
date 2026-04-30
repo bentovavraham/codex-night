@@ -7,6 +7,7 @@ const TABS = [
   { to: 'budget',      label: 'Budget' },
   { to: 'contracts',   label: 'Contracts' },
   { to: 'invoices',    label: 'Invoices' },
+  { to: 'audit',       label: 'Audit' },
   { to: 'alerts',      label: 'Alerts' },
   { to: 'history',     label: 'History' },
   { to: 'import',      label: '↑ Import' },
