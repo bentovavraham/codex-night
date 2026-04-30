@@ -774,6 +774,8 @@
 .sectionHeadGreen { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
 .sectionHeadAmber { background: #fffbeb; color: #92400e; border-color: #fde68a; }
 .sectionHeadGray  { background: #f9fafb; color: #6b7280; border-color: #e5e7eb; }
+.sectionHeadRed   { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+.wrongProjectNote { font-size: 11px; color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; border-radius: 4px; padding: 6px 10px; margin: 0 0 6px; }
 
 /* ── Re-match QB button ── */
 .rematchBtn {

@@ -110,11 +110,11 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
 
     // Project info for project matching
     const phaseProjectRes = await pool.query(
-      'SELECT pr.id, pr.name FROM projects pr JOIN phases ph ON ph.project_id=pr.id WHERE ph.id=$1',
+      'SELECT pr.id, pr.name, pr.keywords FROM projects pr JOIN phases ph ON ph.project_id=pr.id WHERE ph.id=$1',
       [phaseId]
     );
     const phaseProject = phaseProjectRes.rows[0] || null;
-    const allProjects = (await pool.query('SELECT name FROM projects')).rows.map(r => r.name);
+    const allProjects = (await pool.query('SELECT name, keywords FROM projects')).rows;
 
     const phaseContracts = (await pool.query(`
       SELECT DISTINCT c.id, c.vendor_name, c.reference_number, c.total_value, c.status
@@ -262,7 +262,8 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
           qbMatchReason = qbMatch.reason;
 
           if (phaseProject) {
-            const pm = matchProject(extracted.project_clues, phaseProject.name, []);
+            const aliases = phaseProject.keywords || [];
+            const pm = matchProject(extracted.project_clues, phaseProject.name, aliases, item.original_filename || '', allProjects);
             projectMatchResult = pm.match;
             identifiedProject = extracted.project_clues || null;
           }
@@ -409,28 +410,31 @@ router.get('/phases/:phaseId/import-queue', requireAuth, async (req, res, next) 
 router.post('/phases/:phaseId/import/rematch-qb', requireAuth, async (req, res, next) => {
   const phaseId = Number(req.params.phaseId);
   try {
-    const items = (await pool.query(
-      `SELECT id, extracted_data FROM import_queue WHERE phase_id=$1 AND status='needs_review' AND doc_type='invoice'`,
-      [phaseId]
-    )).rows;
-
     const qbTransactions = (await pool.query(
       'SELECT id, vendor_name, ref_number, amount, txn_date, qb_gl_code FROM qb_transactions WHERE phase_id=$1',
       [phaseId]
     )).rows;
 
     const phaseProjectRes = await pool.query(
-      'SELECT pr.id, pr.name FROM projects pr JOIN phases ph ON ph.project_id=pr.id WHERE ph.id=$1',
+      'SELECT pr.id, pr.name, pr.keywords FROM projects pr JOIN phases ph ON ph.project_id=pr.id WHERE ph.id=$1',
       [phaseId]
     );
     const phaseProject = phaseProjectRes.rows[0] || null;
+    const allProjects = (await pool.query('SELECT name, keywords FROM projects')).rows;
+    const itemsWithFilenames = (await pool.query(
+      `SELECT id, extracted_data, original_filename FROM import_queue WHERE phase_id=$1 AND status='needs_review' AND doc_type='invoice'`,
+      [phaseId]
+    )).rows;
 
     let updated = 0;
-    for (const item of items) {
+    for (const item of itemsWithFilenames) {
       const ext = item.extracted_data || {};
       const qbMatch = matchQbTransaction(ext, qbTransactions);
       let pm = { match: null, reason: null };
-      if (phaseProject) pm = matchProject(ext.project_clues, phaseProject.name, []);
+      if (phaseProject) {
+        const aliases = phaseProject.keywords || [];
+        pm = matchProject(ext.project_clues, phaseProject.name, aliases, item.original_filename || '', allProjects);
+      }
 
       await pool.query(
         `UPDATE import_queue SET
@@ -442,7 +446,7 @@ router.post('/phases/:phaseId/import/rematch-qb', requireAuth, async (req, res, 
       );
       updated++;
     }
-    res.json({ updated, total_items: items.length, qb_transactions_loaded: qbTransactions.length });
+    res.json({ updated, total_items: itemsWithFilenames.length, qb_transactions_loaded: qbTransactions.length });
   } catch (err) { next(err); }
 });
 
@@ -506,14 +510,19 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
     } else {
       const phaseRes = await client.query('SELECT project_id FROM phases WHERE id=$1', [item.phase_id]);
       const projectId = phaseRes.rows[0]?.project_id;
+      // Determine PM validated GL from header or first line item
+      const pmGlId = formData.qb_account_id
+        ? Number(formData.qb_account_id)
+        : (Array.isArray(formData.line_items) && formData.line_items[0]?.qb_account_id
+            ? Number(formData.line_items[0].qb_account_id) : null);
       const r = await client.query(
         `INSERT INTO invoices (project_id, phase_id, phase_budget_line_id, contract_id, vendor_name, invoice_number, amount,
-          invoice_date, description, status, file_reference, invoice_type, qb_account_id, qb_transaction_id, source_batch, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+          invoice_date, description, status, file_reference, invoice_type, qb_account_id, pm_validated_gl_id, qb_transaction_id, source_batch, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
         [projectId, item.phase_id, lineId, formData.contract_id||null, formData.vendor_name, formData.invoice_number||'',
          Number(formData.amount)||0, formData.invoice_date||null, formData.description||null,
          'approved', item.file_reference, formData.invoice_type||'fixed',
-         formData.qb_account_id ? Number(formData.qb_account_id) : null,
+         pmGlId, pmGlId,
          item.suggested_qb_txn_id || null,
          item.source_batch||null, req.session.userId]
       );

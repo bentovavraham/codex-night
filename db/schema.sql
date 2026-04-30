@@ -558,3 +558,9 @@ DO $$ BEGIN
   ALTER TABLE invoices ADD COLUMN recon_status VARCHAR(32);
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
+
+-- Project keyword aliases for import matching (e.g. "Richwood,North Harrison,24117")
+DO $$ BEGIN
+  ALTER TABLE projects ADD COLUMN keywords TEXT[];
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;

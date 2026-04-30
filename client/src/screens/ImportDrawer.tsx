@@ -1037,17 +1037,20 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
   const done = queue.filter(i => i.status === 'confirmed' || i.status === 'discarded');
   const failedCount = pending.filter(i => i.status === 'failed').length;
 
-  // 3-tier split for needs_review items
+  // Tier split for needs_review items
   const processing = pending.filter(i => i.status === 'queued' || i.status === 'extracting');
   const failedItems = pending.filter(i => i.status === 'failed');
   const needsReview = pending.filter(i => i.status === 'needs_review');
-  const tier1Matched = needsReview.filter(i =>
-    i.doc_type === 'invoice' && i.qb_match_confidence === 'high' && i.project_match !== 'uncertain'
+  // Wrong project: filename or clues clearly identify a different project
+  const tierWrongProject = needsReview.filter(i => i.project_match === 'mismatch');
+  const needsReviewRight = needsReview.filter(i => i.project_match !== 'mismatch');
+  const tier1Matched = needsReviewRight.filter(i =>
+    i.doc_type === 'invoice' && i.qb_match_confidence === 'high'
   );
-  const tier3NoMatch = needsReview.filter(i =>
-    i.doc_type === 'invoice' && i.qb_match_confidence === 'none' && i.project_match !== 'uncertain'
+  const tier3NoMatch = needsReviewRight.filter(i =>
+    i.doc_type === 'invoice' && i.qb_match_confidence === 'none'
   );
-  const tier2Review = needsReview.filter(i =>
+  const tier2Review = needsReviewRight.filter(i =>
     !tier1Matched.includes(i) && !tier3NoMatch.includes(i)
   );
 
@@ -1222,6 +1225,7 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
                 <div className={styles.queueStatRow}><span className={styles.queueStatDot} style={{ background: '#16a34a' }} /><span>{tier1Matched.length} QB matched</span></div>
                 <div className={styles.queueStatRow}><span className={styles.queueStatDot} style={{ background: '#d97706' }} /><span>{tier2Review.length} needs review</span></div>
                 <div className={styles.queueStatRow}><span className={styles.queueStatDot} style={{ background: '#9ca3af' }} /><span>{tier3NoMatch.length} no QB match</span></div>
+                {tierWrongProject.length > 0 && <div className={styles.queueStatRow}><span className={styles.queueStatDot} style={{ background: '#dc2626' }} /><span>{tierWrongProject.length} wrong project</span></div>}
                 {processing.length > 0 && <div className={styles.queueStatRow}><span className={styles.queueStatDot} style={{ background: '#3b82f6' }} /><span>{processing.length} processing…</span></div>}
                 {failedItems.length > 0 && <div className={styles.queueStatRow}><span className={styles.queueStatDot} style={{ background: '#c0392b' }} /><span>{failedItems.length} failed</span></div>}
               </div>
@@ -1298,6 +1302,26 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
                 <span className={styles.sectionCount}>{tier3NoMatch.length}</span>
               </div>
               {tier3NoMatch.map(item => (
+                <QueueCard key={item.id} item={item}
+                  onClick={() => setReviewItem(item)} onFlipType={() => handleFlipType(item)}
+                  onRetry={() => retryMutation.mutate(item.id)}
+                  onDiscard={() => discardOneMutation.mutate(item.id)} />
+              ))}
+            </div>
+          )}
+
+          {/* Wrong Project */}
+          {tierWrongProject.length > 0 && (
+            <div className={styles.section}>
+              <div className={`${styles.sectionHead} ${styles.sectionHeadRed}`}>
+                <span className={styles.sectionDot} style={{ background: '#dc2626' }} />
+                ✗ Wrong Project
+                <span className={styles.sectionCount}>{tierWrongProject.length}</span>
+              </div>
+              <div className={styles.wrongProjectNote}>
+                These invoices appear to belong to a different project based on the filename or invoice content. Discard them or move them to the correct phase.
+              </div>
+              {tierWrongProject.map(item => (
                 <QueueCard key={item.id} item={item}
                   onClick={() => setReviewItem(item)} onFlipType={() => handleFlipType(item)}
                   onRetry={() => retryMutation.mutate(item.id)}
