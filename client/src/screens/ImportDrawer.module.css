@@ -362,11 +362,21 @@
 }
 
 .reviewDragHandle {
-  width: 5px; flex-shrink: 0; cursor: col-resize;
+  width: 8px; flex-shrink: 0; cursor: col-resize;
   background: var(--border);
   transition: background 0.15s;
+  position: relative;
 }
-.reviewDragHandle:hover { background: var(--accent); }
+.reviewDragHandle::after {
+  content: '';
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px; height: 32px; border-radius: 2px;
+  background: var(--text-4);
+  transition: background 0.15s;
+}
+.reviewDragHandle:hover { background: rgba(196,82,42,0.12); }
+.reviewDragHandle:hover::after { background: var(--accent); }
 
 .reviewFormPane {
   /* width is controlled via inline style (resizable) */
@@ -387,6 +397,17 @@
   background: transparent; color: var(--text-2); cursor: pointer; white-space: nowrap; flex-shrink: 0;
 }
 .reviewBackBtn:hover { border-color: var(--accent); color: var(--accent); }
+
+.reviewSnapBtns {
+  display: flex; align-items: center; gap: 2px; flex-shrink: 0; margin-left: auto;
+}
+.snapBtn {
+  width: 26px; height: 26px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: transparent; color: var(--text-3); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.snapBtn:hover { background: var(--bg-2); color: var(--text-1); border-color: var(--text-3); }
 .reviewBarTitle {
   display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
 }

@@ -340,16 +340,16 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   const [reviewed, setReviewed] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Resizable form pane
-  const [formWidth, setFormWidth] = useState(() => Math.min(520, Math.round(window.innerWidth * 0.45)));
+  // Resizable form pane — default 50%, min 480px, max 90%
+  const [formWidth, setFormWidth] = useState(() => Math.max(600, Math.round(window.innerWidth * 0.50)));
   const dragState = useRef<{ active: boolean; startX: number; startW: number }>({ active: false, startX: 0, startW: 0 });
 
   useEffect(() => {
     function onMove(e: MouseEvent) {
       if (!dragState.current.active) return;
       const delta = dragState.current.startX - e.clientX;
-      const maxW = window.innerWidth - 200;
-      setFormWidth(Math.max(340, Math.min(maxW, dragState.current.startW + delta)));
+      const maxW = Math.round(window.innerWidth * 0.92);
+      setFormWidth(Math.max(480, Math.min(maxW, dragState.current.startW + delta)));
     }
     function onUp() {
       if (!dragState.current.active) return;
@@ -367,6 +367,10 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     e.preventDefault();
+  }
+
+  function snapWidth(pct: number) {
+    setFormWidth(Math.round(window.innerWidth * pct));
   }
 
   // Contract fields
@@ -505,6 +509,11 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
           <div className={styles.reviewBarTitle}>
             <TypeChip type={item.doc_type} />
             <span className={styles.reviewBarFile} title={item.original_filename}>{item.original_filename}</span>
+          </div>
+          <div className={styles.reviewSnapBtns}>
+            <button className={styles.snapBtn} onClick={() => snapWidth(0.50)} title="50%">½</button>
+            <button className={styles.snapBtn} onClick={() => snapWidth(0.65)} title="65%">⅔</button>
+            <button className={styles.snapBtn} onClick={() => snapWidth(0.85)} title="85%">⅘</button>
           </div>
           {pdfSrc && (
             <a href={pdfSrc} target="_blank" rel="noopener noreferrer" className={styles.openPdfBtn}
