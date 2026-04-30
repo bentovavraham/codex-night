@@ -292,35 +292,80 @@ function DupBanner({ matches, acknowledged, onAck }: {
 }) {
   if (!matches.length) return null;
   const exact = matches.filter(m => m.match_type === 'exact');
-  const fuzzy = matches.filter(m => m.match_type === 'fuzzy');
+  const hasExact = exact.length > 0;
 
   return (
-    <div className={`${styles.dupBanner} ${exact.length ? styles.dupBannerExact : styles.dupBannerFuzzy}`}>
+    <div className={`${styles.dupBanner} ${hasExact ? styles.dupBannerExact : styles.dupBannerFuzzy}`}>
       <div className={styles.dupTitle}>
-        {exact.length ? '⚠ Possible Duplicate Detected' : '~ Similar Record Found'}
+        {hasExact ? '⚠ This invoice is already in the system' : '~ Similar invoice found — please review'}
+      </div>
+      <div className={styles.dupSubtitle}>
+        {hasExact
+          ? 'The same vendor + invoice number was already confirmed. Importing it again would create a duplicate entry in the Audit tab. You should Discard this one.'
+          : 'A similar invoice (same vendor, close amount/date) was found. Verify this is a different invoice before confirming.'}
       </div>
       <div className={styles.dupList}>
-        {matches.map((m, i) => (
-          <div key={i} className={styles.dupRow}>
-            <span className={`${styles.dupTag} ${m.match_type === 'exact' ? styles.dupTagExact : styles.dupTagFuzzy}`}>
-              {m.match_type === 'exact' ? 'EXACT' : 'SIMILAR'}
-            </span>
-            <span className={styles.dupDetail}>
-              {m.vendor_name} — {m.invoice_number || m.reference_number || '—'} — {usd2.format(Number(m.amount))}
-              {(m.invoice_date || m.contract_date) && ` — ${String(m.invoice_date || m.contract_date).slice(0, 10)}`}
-            </span>
-            <span className={`${styles.dupStatus}`}>{m.status}</span>
-            <span className={styles.dupReason}>{m.reason}</span>
-          </div>
-        ))}
+        {matches.map((m, i) => {
+          const docDate = (m.invoice_date || m.contract_date || '').toString().slice(0, 10);
+          const confirmedDate = m.confirmed_at ? new Date(m.confirmed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+          const location = [m.project_name, m.phase_name].filter(Boolean).join(' / ') || 'Unknown phase';
+          const refNum = m.invoice_number || m.reference_number || '—';
+
+          return (
+            <div key={i} className={styles.dupCard}>
+              <div className={styles.dupCardHeader}>
+                <span className={`${styles.dupTag} ${m.match_type === 'exact' ? styles.dupTagExact : styles.dupTagFuzzy}`}>
+                  {m.match_type === 'exact' ? 'EXACT MATCH' : 'SIMILAR'}
+                </span>
+                <span className={styles.dupCardStatus} data-status={m.status}>{m.status?.toUpperCase()}</span>
+              </div>
+              <div className={styles.dupCardBody}>
+                <div className={styles.dupCardRow}>
+                  <span className={styles.dupCardLabel}>Invoice #</span>
+                  <span className={styles.dupCardValue}>{refNum}</span>
+                </div>
+                <div className={styles.dupCardRow}>
+                  <span className={styles.dupCardLabel}>Amount</span>
+                  <span className={styles.dupCardValue}>{usd2.format(Number(m.amount))}</span>
+                </div>
+                {docDate && (
+                  <div className={styles.dupCardRow}>
+                    <span className={styles.dupCardLabel}>Invoice date</span>
+                    <span className={styles.dupCardValue}>{docDate}</span>
+                  </div>
+                )}
+                <div className={styles.dupCardRow}>
+                  <span className={styles.dupCardLabel}>Lives in</span>
+                  <span className={styles.dupCardValue}>{location} → Audit Tab</span>
+                </div>
+                {confirmedDate && (
+                  <div className={styles.dupCardRow}>
+                    <span className={styles.dupCardLabel}>Confirmed on</span>
+                    <span className={styles.dupCardValue}>{confirmedDate}</span>
+                  </div>
+                )}
+                {m.match_type === 'fuzzy' && (
+                  <div className={styles.dupCardRow}>
+                    <span className={styles.dupCardLabel}>Why flagged</span>
+                    <span className={styles.dupCardValue}>{m.reason}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
       {!acknowledged ? (
         <label className={styles.dupAck}>
           <input type="checkbox" onChange={e => { if (e.target.checked) onAck(); }} />
-          <span>I reviewed the above and confirm this is not a duplicate</span>
+          <span>
+            {hasExact
+              ? 'I understand — this is intentionally a separate entry (not a duplicate)'
+              : 'I reviewed the above and this is a different invoice'}
+          </span>
         </label>
       ) : (
-        <div className={styles.dupAcked}>✓ Duplicate check acknowledged</div>
+        <div className={styles.dupAcked}>✓ Acknowledged</div>
       )}
     </div>
   );

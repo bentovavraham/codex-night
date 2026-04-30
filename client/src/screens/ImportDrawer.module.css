@@ -450,26 +450,51 @@
   border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
 .dupBanner {
-  padding: 10px 14px; flex-shrink: 0;
+  padding: 12px 14px; flex-shrink: 0;
   border-bottom: 1px solid var(--border);
 }
-.dupBannerExact { background: #fde0dc; border-left: 3px solid #c0392b; }
-.dupBannerFuzzy { background: #fef9e7; border-left: 3px solid #e8921a; }
-.dupTitle { font-size: 11.5px; font-weight: 700; color: var(--text-1); margin-bottom: 6px; }
-.dupList { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
-.dupRow {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  font-size: 11px; color: var(--text-2);
+.dupBannerExact { background: #fde0dc; border-left: 4px solid #c0392b; }
+.dupBannerFuzzy { background: #fef9e7; border-left: 4px solid #e8921a; }
+.dupTitle { font-size: 12.5px; font-weight: 700; color: var(--text-1); margin-bottom: 4px; }
+.dupSubtitle { font-size: 11px; color: var(--text-2); margin-bottom: 10px; line-height: 1.45; }
+.dupList { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+
+/* Card per duplicate match */
+.dupCard {
+  background: rgba(255,255,255,0.65);
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 6px;
+  overflow: hidden;
 }
+.dupCardHeader {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  background: rgba(0,0,0,0.04);
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+.dupCardStatus {
+  margin-left: auto;
+  font-size: 9.5px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.dupCardStatus[data-status="approved"] { color: #1a6630; }
+.dupCardStatus[data-status="pending"] { color: #856404; }
+
+.dupCardBody { padding: 6px 10px 8px; display: flex; flex-direction: column; gap: 3px; }
+.dupCardRow { display: flex; align-items: baseline; gap: 8px; font-size: 11px; }
+.dupCardLabel {
+  flex-shrink: 0; width: 90px;
+  font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em;
+}
+.dupCardValue { color: var(--text-1); font-weight: 500; }
+
 .dupTag {
   font-size: 9px; font-weight: 800; letter-spacing: .06em;
   padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
 }
 .dupTagExact { background: #fde0dc; color: #922b21; border: 1px solid #f5a9a2; }
 .dupTagFuzzy { background: #fef3cd; color: #856404; border: 1px solid #e8d888; }
-.dupDetail { flex: 1; min-width: 0; }
-.dupStatus { font-size: 9.5px; color: var(--text-3); font-weight: 600; text-transform: uppercase; }
-.dupReason { font-size: 10px; color: var(--text-4); font-style: italic; }
+
 .dupAck {
   display: flex; align-items: flex-start; gap: 6px;
   font-size: 11px; color: var(--text-2); cursor: pointer;

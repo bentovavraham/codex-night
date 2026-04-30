@@ -325,8 +325,13 @@ router.get('/import-queue/:id/duplicates', requireAuth, async (req, res, next) =
       // Exact: same vendor + invoice number
       if (vendor && invNum) {
         const r = await pool.query(
-          `SELECT id, vendor_name, invoice_number, amount::numeric as amount, invoice_date, status
-           FROM invoices WHERE LOWER(TRIM(vendor_name))=$1 AND LOWER(TRIM(invoice_number))=$2`,
+          `SELECT i.id, i.vendor_name, i.invoice_number, i.amount::numeric as amount, i.invoice_date, i.status,
+                  i.created_at AS confirmed_at,
+                  ph.name AS phase_name, pr.name AS project_name
+           FROM invoices i
+           LEFT JOIN phases ph ON ph.id = i.phase_id
+           LEFT JOIN projects pr ON pr.id = ph.project_id
+           WHERE LOWER(TRIM(i.vendor_name))=$1 AND LOWER(TRIM(i.invoice_number))=$2`,
           [vendor, invNum]
         );
         r.rows.forEach(row => matches.push({ ...row, match_type: 'exact', reason: 'Same vendor + invoice number' }));
@@ -335,12 +340,16 @@ router.get('/import-queue/:id/duplicates', requireAuth, async (req, res, next) =
       // Fuzzy: same vendor + amount within 5% + date within 60 days
       if (vendor && amount > 0 && invDate) {
         const r = await pool.query(
-          `SELECT id, vendor_name, invoice_number, amount::numeric as amount, invoice_date, status
-           FROM invoices
-           WHERE LOWER(TRIM(vendor_name))=$1
-             AND ABS(amount::numeric - $2) / NULLIF($2, 0) < 0.05
-             AND invoice_date IS NOT NULL
-             AND ABS(invoice_date::date - $3::date) < 60`,
+          `SELECT i.id, i.vendor_name, i.invoice_number, i.amount::numeric as amount, i.invoice_date, i.status,
+                  i.created_at AS confirmed_at,
+                  ph.name AS phase_name, pr.name AS project_name
+           FROM invoices i
+           LEFT JOIN phases ph ON ph.id = i.phase_id
+           LEFT JOIN projects pr ON pr.id = ph.project_id
+           WHERE LOWER(TRIM(i.vendor_name))=$1
+             AND ABS(i.amount::numeric - $2) / NULLIF($2, 0) < 0.05
+             AND i.invoice_date IS NOT NULL
+             AND ABS(i.invoice_date::date - $3::date) < 60`,
           [vendor, amount, invDate]
         );
         r.rows.forEach(row => { if (!matches.find(m => m.id === row.id)) matches.push({ ...row, match_type: 'fuzzy', reason: 'Same vendor, similar amount & date' }); });
@@ -354,8 +363,13 @@ router.get('/import-queue/:id/duplicates', requireAuth, async (req, res, next) =
       // Exact: same vendor + reference number
       if (vendor && refNum) {
         const r = await pool.query(
-          `SELECT id, vendor_name, reference_number, total_value::numeric as amount, contract_date, status
-           FROM contracts WHERE LOWER(TRIM(vendor_name))=$1 AND LOWER(TRIM(reference_number))=$2`,
+          `SELECT c.id, c.vendor_name, c.reference_number, c.total_value::numeric as amount, c.contract_date, c.status,
+                  c.created_at AS confirmed_at,
+                  ph.name AS phase_name, pr.name AS project_name
+           FROM contracts c
+           LEFT JOIN phases ph ON ph.id = c.phase_id
+           LEFT JOIN projects pr ON pr.id = ph.project_id
+           WHERE LOWER(TRIM(c.vendor_name))=$1 AND LOWER(TRIM(c.reference_number))=$2`,
           [vendor, refNum]
         );
         r.rows.forEach(row => matches.push({ ...row, match_type: 'exact', reason: 'Same vendor + reference number' }));
@@ -364,12 +378,16 @@ router.get('/import-queue/:id/duplicates', requireAuth, async (req, res, next) =
       // Fuzzy: same vendor + amount within 10% + date within 90 days
       if (vendor && amount > 0 && cDate) {
         const r = await pool.query(
-          `SELECT id, vendor_name, reference_number, total_value::numeric as amount, contract_date, status
-           FROM contracts
-           WHERE LOWER(TRIM(vendor_name))=$1
-             AND ABS(total_value::numeric - $2) / NULLIF($2, 0) < 0.10
-             AND contract_date IS NOT NULL
-             AND ABS(contract_date::date - $3::date) < 90`,
+          `SELECT c.id, c.vendor_name, c.reference_number, c.total_value::numeric as amount, c.contract_date, c.status,
+                  c.created_at AS confirmed_at,
+                  ph.name AS phase_name, pr.name AS project_name
+           FROM contracts c
+           LEFT JOIN phases ph ON ph.id = c.phase_id
+           LEFT JOIN projects pr ON pr.id = ph.project_id
+           WHERE LOWER(TRIM(c.vendor_name))=$1
+             AND ABS(c.total_value::numeric - $2) / NULLIF($2, 0) < 0.10
+             AND c.contract_date IS NOT NULL
+             AND ABS(c.contract_date::date - $3::date) < 90`,
           [vendor, amount, cDate]
         );
         r.rows.forEach(row => { if (!matches.find(m => m.id === row.id)) matches.push({ ...row, match_type: 'fuzzy', reason: 'Same vendor, similar amount & date' }); });
