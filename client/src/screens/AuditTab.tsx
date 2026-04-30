@@ -45,16 +45,16 @@ interface AuditData {
 const fmt = (n: number | null | undefined) =>
   n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 
-const RECON_LABEL: Record<string, string> = {
+const ISSUE_TEXT: Record<string, string> = {
   matched:          'OK',
-  amount_mismatch:  'Amt Mismatch',
-  gl_mismatch:      'GL Mismatch',
+  amount_mismatch:  'Wrong Amount',
+  gl_mismatch:      'Wrong Code',
   missing_in_qb:    'Not in QB',
   missing_source:   'No Source Doc',
   duplicate:        'Duplicate',
 };
 
-const RECON_CLASS: Record<string, string> = {
+const ISSUE_CLASS: Record<string, string> = {
   matched:          styles.tagOk,
   amount_mismatch:  styles.tagWarn,
   gl_mismatch:      styles.tagWarn,
@@ -324,19 +324,22 @@ export default function AuditTab() {
             <tr>
               <th className={styles.th}>Invoice #</th>
               <th className={styles.th}>Vendor</th>
-              <th className={`${styles.th} ${styles.right}`}>Folder Amt</th>
               <th className={`${styles.th} ${styles.right}`}>QB Amt</th>
+              <th className={`${styles.th} ${styles.right}`}>Folder Amt</th>
+              <th className={`${styles.th} ${styles.right}`}>Delta</th>
               <th className={styles.th}>QB GL Code</th>
+              <th className={styles.th}>QB GL Description</th>
               <th className={styles.th}>PM Validated Code</th>
               <th className={styles.th}>Match?</th>
+              <th className={styles.th}>Issue</th>
               <th className={styles.th}>Paid in QB?</th>
-              <th className={`${styles.th} ${styles.right}`}>QB Open Bal</th>
+              <th className={`${styles.th} ${styles.right}`}>Open Bal</th>
             </tr>
           </thead>
           <tbody>
             {invoices.length === 0 && (
               <tr>
-                <td colSpan={9} className={styles.emptyRow}>
+                <td colSpan={12} className={styles.emptyRow}>
                   {filter === 'issues' ? 'No issues found — everything looks good.' : 'No invoices in this phase yet.'}
                 </td>
               </tr>
@@ -344,18 +347,27 @@ export default function AuditTab() {
             {invoices.map(inv => {
               const amtMismatch = inv.qb_amount != null && inv.folder_amount != null &&
                 Math.abs(inv.folder_amount - inv.qb_amount) >= 0.02;
+              const delta = inv.qb_amount != null && inv.folder_amount != null
+                ? inv.folder_amount - inv.qb_amount : null;
+              const isOk = inv.recon_status === 'matched';
               return (
                 <tr key={inv.id} className={styles.row}>
                   <td className={styles.td}>{inv.invoice_number || '—'}</td>
                   <td className={styles.td}>{inv.vendor_name}</td>
-                  <td className={`${styles.td} ${styles.right}`}>{fmt(inv.folder_amount)}</td>
                   <td className={`${styles.td} ${styles.right} ${amtMismatch ? styles.mismatch : ''}`}>
                     {fmt(inv.qb_amount)}
                   </td>
+                  <td className={`${styles.td} ${styles.right}`}>{fmt(inv.folder_amount)}</td>
+                  <td className={`${styles.td} ${styles.right} ${delta != null && Math.abs(delta) >= 0.02 ? styles.mismatch : ''}`}>
+                    {delta != null ? (Math.abs(delta) < 0.02 ? '—' : fmt(delta)) : '—'}
+                  </td>
                   <td className={styles.td}>
                     {inv.qb_gl_code
-                      ? <><span className={styles.glCode}>{inv.qb_gl_code}</span> <span className={styles.glNameSmall}>{inv.qb_gl_name}</span></>
+                      ? <span className={styles.glCode}>{inv.qb_gl_code}</span>
                       : <span className={styles.noData}>—</span>}
+                  </td>
+                  <td className={styles.td}>
+                    <span className={styles.glNameSmall}>{inv.qb_gl_name || '—'}</span>
                   </td>
                   <td className={`${styles.td} ${styles.glPickerCell}`}>
                     <GlPicker
@@ -366,11 +378,15 @@ export default function AuditTab() {
                   </td>
                   <td className={styles.td}>
                     {inv.recon_status
-                      ? <span className={`${styles.tag} ${RECON_CLASS[inv.recon_status] || styles.tagWarn}`}>
-                          {RECON_LABEL[inv.recon_status] || inv.recon_status}
+                      ? <span className={isOk ? styles.matchYes : styles.matchNo}>{isOk ? '✓ Yes' : '✗ No'}</span>
+                      : <span className={styles.noData}>—</span>}
+                  </td>
+                  <td className={styles.td}>
+                    {inv.recon_status
+                      ? <span className={`${styles.tag} ${ISSUE_CLASS[inv.recon_status] || styles.tagWarn}`}>
+                          {ISSUE_TEXT[inv.recon_status] || inv.recon_status}
                         </span>
-                      : <span className={styles.noData}>—</span>
-                    }
+                      : <span className={styles.noData}>—</span>}
                   </td>
                   <td className={styles.td}>
                     {inv.qb_txn_id != null

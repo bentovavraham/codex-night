@@ -284,8 +284,10 @@
 .tagMiss { background: #fce4ec; color: #c62828; }
 .tagErr  { background: #f3e5f5; color: #6a1b9a; }
 
-.paidYes { color: #2e7d32; font-weight: 600; }
-.paidNo  { color: var(--text-3); }
+.paidYes  { color: #2e7d32; font-weight: 600; }
+.paidNo   { color: var(--text-3); }
+.matchYes { color: #2e7d32; font-weight: 700; }
+.matchNo  { color: #c62828; font-weight: 700; }
 
 /* ── GL Picker cell ─────────────────────────────────────────────────────── */
 

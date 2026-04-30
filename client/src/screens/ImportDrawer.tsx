@@ -1130,13 +1130,12 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
         />
       )}
 
-      <div className={styles.backdrop} onClick={onClose} />
       <div className={styles.panel}>
         {/* Header */}
         <div className={styles.header}>
           <div className={styles.headerLeft}>
             <div className={styles.headerTitle}>Bulk Import</div>
-            <div className={styles.headerSub}>AI classifies and extracts — you review</div>
+            <div className={styles.headerSub}>AI classifies and extracts — you review and match to QB</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {needsReview.length > 0 && (
@@ -1159,34 +1158,49 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
         </div>
 
         <div className={styles.queueView}>
-          {/* Drop zone */}
-          <div className={styles.dropZoneWrap}>
-            {uploading
-              ? <div className={styles.uploadingMsg}><div className={styles.spinner} /> Uploading…</div>
-              : <DropZone onFiles={handleFiles} />}
-            <div className={styles.batchLabelRow}>
-              <label className={styles.batchLabelText}>Source / folder label</label>
-              <input
-                className={styles.batchLabelInput}
-                placeholder="e.g. Hammer Invoices — auto-filled from folder name"
-                value={batchLabel}
-                onChange={e => setBatchLabel(e.target.value)}
-              />
+          {/* Left sidebar: upload controls + status */}
+          <div className={styles.queueLeft}>
+            <div className={styles.dropZoneWrap}>
+              {uploading
+                ? <div className={styles.uploadingMsg}><div className={styles.spinner} /> Uploading…</div>
+                : <DropZone onFiles={handleFiles} />}
+              <div className={styles.batchLabelRow}>
+                <label className={styles.batchLabelText}>Source / folder label</label>
+                <input
+                  className={styles.batchLabelInput}
+                  placeholder="e.g. Hammer Invoices — auto-filled from folder name"
+                  value={batchLabel}
+                  onChange={e => setBatchLabel(e.target.value)}
+                />
+              </div>
+              {uploadError && <div className={styles.uploadErr}>{uploadError}</div>}
             </div>
-            {uploadError && <div className={styles.uploadErr}>{uploadError}</div>}
+
+            {batchMsg && (
+              <div className={styles.uploadErr} style={{ margin: '8px 14px 0', background: batchMsg.startsWith('Error') ? undefined : '#e8f5e9', color: batchMsg.startsWith('Error') ? undefined : '#2e7d32', borderColor: batchMsg.startsWith('Error') ? undefined : '#c8e6c9' }}>
+                {batchMsg}
+              </div>
+            )}
+            {rematchMsg && (
+              <div className={styles.uploadErr} style={{ margin: '8px 14px 0', background: rematchMsg.startsWith('Error') ? undefined : '#e8f5e9', color: rematchMsg.startsWith('Error') ? undefined : '#2e7d32', borderColor: rematchMsg.startsWith('Error') ? undefined : '#c8e6c9' }}>
+                {rematchMsg}
+              </div>
+            )}
+
+            {/* Stats summary */}
+            {pending.length > 0 && (
+              <div className={styles.queueStats}>
+                <div className={styles.queueStatRow}><span className={styles.queueStatDot} style={{ background: '#16a34a' }} /><span>{tier1Matched.length} QB matched</span></div>
+                <div className={styles.queueStatRow}><span className={styles.queueStatDot} style={{ background: '#d97706' }} /><span>{tier2Review.length} needs review</span></div>
+                <div className={styles.queueStatRow}><span className={styles.queueStatDot} style={{ background: '#9ca3af' }} /><span>{tier3NoMatch.length} no QB match</span></div>
+                {processing.length > 0 && <div className={styles.queueStatRow}><span className={styles.queueStatDot} style={{ background: '#3b82f6' }} /><span>{processing.length} processing…</span></div>}
+                {failedItems.length > 0 && <div className={styles.queueStatRow}><span className={styles.queueStatDot} style={{ background: '#c0392b' }} /><span>{failedItems.length} failed</span></div>}
+              </div>
+            )}
           </div>
 
-          {/* Status messages */}
-          {batchMsg && (
-            <div className={styles.uploadErr} style={{ background: batchMsg.startsWith('Error') ? undefined : '#e8f5e9', color: batchMsg.startsWith('Error') ? undefined : '#2e7d32', borderColor: batchMsg.startsWith('Error') ? undefined : '#c8e6c9' }}>
-              {batchMsg}
-            </div>
-          )}
-          {rematchMsg && (
-            <div className={styles.uploadErr} style={{ background: rematchMsg.startsWith('Error') ? undefined : '#e8f5e9', color: rematchMsg.startsWith('Error') ? undefined : '#2e7d32', borderColor: rematchMsg.startsWith('Error') ? undefined : '#c8e6c9' }}>
-              {rematchMsg}
-            </div>
-          )}
+          {/* Right: queue tiers */}
+          <div className={styles.queueRight}>
 
           {/* Processing (queued/extracting) */}
           {processing.length > 0 && (
@@ -1300,9 +1314,10 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
           )}
 
           {queue.length === 0 && !uploading && (
-            <div className={styles.emptyQueue}>Drop PDFs above to get started.</div>
+            <div className={styles.emptyQueue}>Upload a folder of PDFs to get started.</div>
           )}
-        </div>
+          </div>{/* end queueRight */}
+        </div>{/* end queueView */}
       </div>
     </>
   );
