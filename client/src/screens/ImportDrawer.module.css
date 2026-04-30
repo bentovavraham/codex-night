@@ -671,6 +671,18 @@
   font-size: 11.5px; color: var(--status-rejected, #c0392b);
   background: #fde0dc; padding: 6px 10px; border-radius: 3px;
 }
+.blockError {
+  display: flex; flex-direction: column; gap: 4px;
+  background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 5px;
+  padding: 10px 12px; font-size: 12px; color: #991b1b;
+}
+.blockError strong { font-size: 12.5px; }
+.overrideWarn {
+  display: flex; flex-direction: column; gap: 4px;
+  background: #fffbeb; border: 1.5px solid #fde68a; border-radius: 5px;
+  padding: 10px 12px; font-size: 12px; color: #92400e;
+}
+.overrideWarn strong { font-size: 12.5px; }
 .reviewActions {
   display: flex; justify-content: flex-end; gap: 8px;
 }

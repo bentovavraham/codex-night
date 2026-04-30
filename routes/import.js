@@ -475,6 +475,9 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
   try {
     const item = (await pool.query('SELECT * FROM import_queue WHERE id=$1', [Number(req.params.id)])).rows[0];
     if (!item) return res.status(404).json({ error: 'Not found' });
+    if (item.project_match === 'mismatch') {
+      return res.status(422).json({ error: 'Cannot confirm: this invoice is identified as belonging to a different project. Discard it.' });
+    }
     const { formData } = req.body;
     const lineId = formData.phase_budget_line_id || item.suggested_budget_line_id || null;
 

@@ -462,8 +462,14 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
     .reduce((s, li) => s + (Number(li.budgeted_amount) || 0), 0);
   const hasTm = lineItems.some(li => li.billing_type === 'tm');
 
+  const isWrongProject = item.project_match === 'mismatch';
+  const weakQbMatch = !isContract && (item.qb_match_confidence === 'low' || item.qb_match_confidence === 'none');
+  const [qbOverrideAcked, setQbOverrideAcked] = useState(false);
+
   const dupBlocked = dupMatches.length > 0 && !dupAcked;
-  const canConfirm = reviewed && !!vendor.trim() && !dupBlocked && !saving;
+  const canConfirm = reviewed && !!vendor.trim() && !dupBlocked && !saving
+    && !isWrongProject
+    && (!weakQbMatch || qbOverrideAcked);
 
   function addLine() {
     setLineItems(li => [...li, { billing_type: 'fixed', description: '', budgeted_amount: '', phase_budget_line_id: null }]);
@@ -843,16 +849,36 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
 
         {/* Sticky footer */}
         <div className={styles.reviewFormFooter}>
-          <label className={styles.reviewCheck}>
-            <input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
-            <span>I have reviewed this document and confirm all details are correct</span>
-          </label>
+          {isWrongProject && (
+            <div className={styles.blockError}>
+              <strong>⛔ Wrong Project — Cannot Confirm</strong>
+              <span>This invoice's filename and/or content identifies it as belonging to a different project. You must discard it.</span>
+            </div>
+          )}
+          {!isWrongProject && weakQbMatch && (
+            <div className={styles.overrideWarn}>
+              <strong>⚠ No verified QB match</strong>
+              <span>This invoice has no high-confidence QB transaction link. Confirming without one means the Audit table will show it as unmatched.</span>
+              <label className={styles.reviewCheck} style={{ marginTop: 6 }}>
+                <input type="checkbox" checked={qbOverrideAcked} onChange={e => setQbOverrideAcked(e.target.checked)} />
+                <span>I understand — confirm anyway without a QB match</span>
+              </label>
+            </div>
+          )}
+          {!isWrongProject && (
+            <label className={styles.reviewCheck}>
+              <input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
+              <span>I have reviewed this document and confirm all details are correct</span>
+            </label>
+          )}
           {saveError && <div className={styles.reviewSaveError}>{saveError}</div>}
           <div className={styles.reviewActions}>
             <button className={styles.discardBtn} onClick={onDiscard} disabled={saving}>Discard</button>
-            <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!canConfirm}>
-              {saving ? 'Saving…' : 'Confirm & Save'}
-            </button>
+            {!isWrongProject && (
+              <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!canConfirm}>
+                {saving ? 'Saving…' : 'Confirm & Save'}
+              </button>
+            )}
           </div>
         </div>
       </div>
