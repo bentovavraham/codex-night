@@ -508,12 +508,13 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
       const projectId = phaseRes.rows[0]?.project_id;
       const r = await client.query(
         `INSERT INTO invoices (project_id, phase_id, phase_budget_line_id, contract_id, vendor_name, invoice_number, amount,
-          invoice_date, description, status, file_reference, invoice_type, qb_account_id, source_batch, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+          invoice_date, description, status, file_reference, invoice_type, qb_account_id, qb_transaction_id, source_batch, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
         [projectId, item.phase_id, lineId, formData.contract_id||null, formData.vendor_name, formData.invoice_number||'',
          Number(formData.amount)||0, formData.invoice_date||null, formData.description||null,
          'approved', item.file_reference, formData.invoice_type||'fixed',
          formData.qb_account_id ? Number(formData.qb_account_id) : null,
+         item.suggested_qb_txn_id || null,
          item.source_batch||null, req.session.userId]
       );
       invoiceId = r.rows[0].id;
@@ -860,11 +861,12 @@ router.post('/phases/:phaseId/import/confirm-batch-high', requireAuth, async (re
         } else {
           const r = await client.query(
             `INSERT INTO invoices (project_id, phase_id, phase_budget_line_id, contract_id, vendor_name, invoice_number,
-               amount, invoice_date, description, status, file_reference, invoice_type, source_batch, created_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+               amount, invoice_date, description, status, file_reference, invoice_type, qb_transaction_id, source_batch, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
             [projectId, item.phase_id, lineId, null, ext.vendor_name || 'Unknown', ext.invoice_number || '',
              Number(ext.amount) || 0, ext.invoice_date || null, ext.description || null,
              'approved', item.file_reference, ext.invoice_type || 'fixed',
+             item.suggested_qb_txn_id || null,
              item.source_batch || null, req.session.userId]
           );
           invoiceId = r.rows[0].id;
