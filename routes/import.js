@@ -6,7 +6,7 @@ const fs = require('fs');
 const pool = require('../db/pool');
 const fileStorage = require('../lib/storage');
 const { requireAuth } = require('../middleware/auth');
-const { classifyDocument, extractContract, extractInvoice, suggestLineBudgets, suggestInvoiceLineCodes } = require('../lib/extract');
+const { classifyDocument, extractContract, extractInvoice, suggestLineBudgets, suggestInvoiceLineCodes, matchQbTransaction, matchProject } = require('../lib/extract');
 
 // Use memory storage — save to Postgres immediately so files survive restarts + Render deploys
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -101,6 +101,20 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
     )).rows;
 
     const qbAccounts = (await pool.query('SELECT id, account_number, full_name, short_name FROM qb_accounts ORDER BY account_number')).rows;
+
+    // QB transactions for this phase (for matching)
+    const qbTransactions = (await pool.query(
+      'SELECT id, vendor_name, ref_number, amount, txn_date, qb_gl_code FROM qb_transactions WHERE phase_id=$1',
+      [phaseId]
+    )).rows;
+
+    // Project info for project matching
+    const phaseProjectRes = await pool.query(
+      'SELECT pr.id, pr.name FROM projects pr JOIN phases ph ON ph.project_id=pr.id WHERE ph.id=$1',
+      [phaseId]
+    );
+    const phaseProject = phaseProjectRes.rows[0] || null;
+    const allProjects = (await pool.query('SELECT name FROM projects')).rows.map(r => r.name);
 
     const phaseContracts = (await pool.query(`
       SELECT DISTINCT c.id, c.vendor_name, c.reference_number, c.total_value, c.status
@@ -237,11 +251,32 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
         const invLineId = (type === 'invoice' && extracted.suggested_primary_budget_line_id) || null;
         const { lineId: fallbackLineId, confidence: matchConf } = matchBudgetLine(desc, vendor, budgetLines);
         const lineId = primaryLineId ?? invLineId ?? fallbackLineId;
+
+        // QB + project matching for invoices
+        let qbTxnId = null, qbMatchConf = null, qbMatchReason = null;
+        let identifiedProject = null, projectMatchResult = null;
+        if (type === 'invoice') {
+          const qbMatch = matchQbTransaction(extracted, qbTransactions);
+          qbTxnId = qbMatch.txn_id;
+          qbMatchConf = qbMatch.confidence;
+          qbMatchReason = qbMatch.reason;
+
+          if (phaseProject) {
+            const pm = matchProject(extracted.project_clues, phaseProject.name, []);
+            projectMatchResult = pm.match;
+            identifiedProject = extracted.project_clues || null;
+          }
+        }
+
         await pool.query(
           `UPDATE import_queue SET status='needs_review', doc_type=$1, doc_type_confidence=$2,
-           extracted_data=$3, suggested_budget_line_id=$4, match_confidence=$5, updated_at=NOW()
-           WHERE id=$6`,
-          [type, confidence, JSON.stringify(extracted), lineId, matchConf, item.id]
+           extracted_data=$3, suggested_budget_line_id=$4, match_confidence=$5,
+           suggested_qb_txn_id=$6, qb_match_confidence=$7, qb_match_reason=$8,
+           identified_project=$9, project_match=$10,
+           updated_at=NOW() WHERE id=$11`,
+          [type, confidence, JSON.stringify(extracted), lineId, matchConf,
+           qbTxnId, qbMatchConf, qbMatchReason, identifiedProject, projectMatchResult,
+           item.id]
         );
       } catch (err) {
         await pool.query(
@@ -348,14 +383,66 @@ router.get('/phases/:phaseId/import-queue', requireAuth, async (req, res, next) 
   try {
     const phaseId = Number(req.params.phaseId);
     const r = await pool.query(
-      `SELECT iq.*, pbl.task_name AS suggested_line_name
+      `SELECT iq.*,
+              pbl.task_name AS suggested_line_name,
+              qt.vendor_name   AS qb_vendor,
+              qt.ref_number    AS qb_ref_number,
+              qt.amount        AS qb_amount,
+              qt.txn_date      AS qb_txn_date,
+              qt.qb_gl_code,
+              qt.qb_gl_name,
+              qt.is_paid       AS qb_is_paid,
+              qt.open_balance  AS qb_open_balance
        FROM import_queue iq
        LEFT JOIN phase_budget_lines pbl ON pbl.id = iq.suggested_budget_line_id
+       LEFT JOIN qb_transactions qt     ON qt.id  = iq.suggested_qb_txn_id
        WHERE iq.phase_id = $1
        ORDER BY iq.created_at ASC`,
       [phaseId]
     );
     res.json(r.rows);
+  } catch (err) { next(err); }
+});
+
+// POST /api/phases/:phaseId/import/rematch-qb
+// Re-run QB matching on existing needs_review items without re-extracting PDFs.
+router.post('/phases/:phaseId/import/rematch-qb', requireAuth, async (req, res, next) => {
+  const phaseId = Number(req.params.phaseId);
+  try {
+    const items = (await pool.query(
+      `SELECT id, extracted_data FROM import_queue WHERE phase_id=$1 AND status='needs_review' AND doc_type='invoice'`,
+      [phaseId]
+    )).rows;
+
+    const qbTransactions = (await pool.query(
+      'SELECT id, vendor_name, ref_number, amount, txn_date, qb_gl_code FROM qb_transactions WHERE phase_id=$1',
+      [phaseId]
+    )).rows;
+
+    const phaseProjectRes = await pool.query(
+      'SELECT pr.id, pr.name FROM projects pr JOIN phases ph ON ph.project_id=pr.id WHERE ph.id=$1',
+      [phaseId]
+    );
+    const phaseProject = phaseProjectRes.rows[0] || null;
+
+    let updated = 0;
+    for (const item of items) {
+      const ext = item.extracted_data || {};
+      const qbMatch = matchQbTransaction(ext, qbTransactions);
+      let pm = { match: null, reason: null };
+      if (phaseProject) pm = matchProject(ext.project_clues, phaseProject.name, []);
+
+      await pool.query(
+        `UPDATE import_queue SET
+           suggested_qb_txn_id=$1, qb_match_confidence=$2, qb_match_reason=$3,
+           identified_project=$4, project_match=$5, updated_at=NOW()
+         WHERE id=$6`,
+        [qbMatch.txn_id, qbMatch.confidence, qbMatch.reason,
+         ext.project_clues || null, pm.match, item.id]
+      );
+      updated++;
+    }
+    res.json({ updated, total_items: items.length, qb_transactions_loaded: qbTransactions.length });
   } catch (err) { next(err); }
 });
 

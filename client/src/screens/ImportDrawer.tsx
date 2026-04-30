@@ -20,6 +20,21 @@ interface ImportItem {
   match_confidence: string | null;
   status: string;
   error_message: string | null;
+  // QB matching
+  suggested_qb_txn_id: number | null;
+  qb_match_confidence: string | null;
+  qb_match_reason: string | null;
+  identified_project: string | null;
+  project_match: string | null;
+  // QB transaction data (joined)
+  qb_vendor: string | null;
+  qb_ref_number: string | null;
+  qb_amount: number | null;
+  qb_txn_date: string | null;
+  qb_gl_code: string | null;
+  qb_gl_name: string | null;
+  qb_is_paid: boolean | null;
+  qb_open_balance: number | null;
 }
 
 interface Props {
@@ -538,6 +553,54 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
               placeholder="Who is this from?" />
           </div>
 
+          {/* QB Match Panel — invoices with a match */}
+          {!isContract && (item.qb_match_confidence === 'high' || item.qb_match_confidence === 'medium' || item.qb_match_confidence === 'low') && item.qb_vendor && (
+            <div className={`${styles.qbMatchPanel} ${item.qb_match_confidence === 'high' ? styles.qbMatchPanelHigh : item.qb_match_confidence === 'medium' ? styles.qbMatchPanelMed : styles.qbMatchPanelLow}`}>
+              <div className={styles.qbMatchHeader}>
+                <QbMatchBadge confidence={item.qb_match_confidence} />
+                {item.qb_match_reason && <span className={styles.qbMatchReason}>{item.qb_match_reason}</span>}
+              </div>
+              <div className={styles.qbMatchGrid}>
+                <span className={styles.qbMatchLabel}>QB Vendor</span>
+                <span className={styles.qbMatchValue}>{item.qb_vendor}</span>
+                {item.qb_ref_number && <>
+                  <span className={styles.qbMatchLabel}>Ref #</span>
+                  <span className={styles.qbMatchValue}>{item.qb_ref_number}</span>
+                </>}
+                {item.qb_amount != null && <>
+                  <span className={styles.qbMatchLabel}>QB Amount</span>
+                  <span className={`${styles.qbMatchValue} ${styles.mono}`}>{usd2.format(Number(item.qb_amount))}</span>
+                </>}
+                {item.qb_txn_date && <>
+                  <span className={styles.qbMatchLabel}>QB Date</span>
+                  <span className={styles.qbMatchValue}>{String(item.qb_txn_date).slice(0, 10)}</span>
+                </>}
+                {item.qb_gl_code && <>
+                  <span className={styles.qbMatchLabel}>QB GL</span>
+                  <span className={styles.qbMatchValue}>{item.qb_gl_code}{item.qb_gl_name ? ` — ${item.qb_gl_name}` : ''}</span>
+                </>}
+                {item.qb_is_paid != null && <>
+                  <span className={styles.qbMatchLabel}>QB Status</span>
+                  <span className={styles.qbMatchValue}>{item.qb_is_paid ? '✓ Paid' : `Open${item.qb_open_balance != null ? ` — ${usd2.format(Number(item.qb_open_balance))} remaining` : ''}`}</span>
+                </>}
+              </div>
+              {item.project_match === 'uncertain' && item.identified_project && (
+                <div className={styles.qbMatchProjectWarn}>
+                  ⚠ Invoice references "{item.identified_project}" — verify this belongs to this project
+                </div>
+              )}
+            </div>
+          )}
+          {!isContract && item.qb_match_confidence === 'none' && (
+            <div className={styles.qbNoMatchPanel}>
+              <span className={styles.qbBadgeNone}>No QB match found</span>
+              {item.qb_match_reason && <span className={styles.qbMatchReason}>{item.qb_match_reason}</span>}
+              {item.identified_project && item.project_match === 'uncertain' && (
+                <span className={styles.qbMatchProjectWarn}>⚠ References "{item.identified_project}"</span>
+              )}
+            </div>
+          )}
+
           {/* Budget line — contracts only */}
           {isContract && !hasLineItems && (
             <div className={styles.rGroup}>
@@ -770,6 +833,13 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
 
 // ── Queue Card ───────────────────────────────────────────────────────────────
 
+function QbMatchBadge({ confidence }: { confidence: string | null }) {
+  if (!confidence || confidence === 'none') return <span className={styles.qbBadgeNone}>No QB match</span>;
+  if (confidence === 'high')   return <span className={styles.qbBadgeHigh}>✓ QB matched</span>;
+  if (confidence === 'medium') return <span className={styles.qbBadgeMed}>~ QB possible</span>;
+  return <span className={styles.qbBadgeLow}>? QB weak</span>;
+}
+
 function QueueCard({ item, onClick, onFlipType, onRetry, onDiscard }: {
   item: ImportItem; onClick: () => void; onFlipType: () => void;
   onRetry: () => void; onDiscard: () => void;
@@ -779,8 +849,10 @@ function QueueCard({ item, onClick, onFlipType, onRetry, onDiscard }: {
   const amount = ext.amount != null ? usd.format(Number(ext.amount))
     : ext.total_value != null ? usd.format(Number(ext.total_value)) : null;
 
+  const showQbInfo = item.doc_type === 'invoice' && (item.status === 'needs_review' || item.status === 'confirmed');
+
   return (
-    <div className={styles.queueCard}>
+    <div className={`${styles.queueCard} ${item.qb_match_confidence === 'high' ? styles.cardMatched : item.qb_match_confidence === 'none' ? styles.cardUnmatched : ''}`}>
       <div className={styles.cardRow}>
         <TypeChip
           type={item.doc_type}
@@ -806,9 +878,19 @@ function QueueCard({ item, onClick, onFlipType, onRetry, onDiscard }: {
         <div className={styles.cardMeta}>
           <span className={styles.cardVendor}>{vendor}</span>
           {amount && <span className={styles.cardAmt}>{amount}</span>}
-          {item.suggested_line_name && (
-            <span className={styles.cardLine} title={item.suggested_line_name}>{item.suggested_line_name}</span>
+          {showQbInfo && <QbMatchBadge confidence={item.qb_match_confidence} />}
+          {item.project_match === 'uncertain' && (
+            <span className={styles.cardProjectWarn} title={item.identified_project || ''}>⚠ project?</span>
           )}
+        </div>
+      )}
+      {showQbInfo && item.qb_vendor && (
+        <div className={styles.cardQbRow}>
+          <span className={styles.cardQbLabel}>QB:</span>
+          <span className={styles.cardQbVendor}>{item.qb_vendor}</span>
+          {item.qb_ref_number && <span className={styles.cardQbRef}>#{item.qb_ref_number}</span>}
+          {item.qb_amount != null && <span className={styles.cardQbAmt}>{usd.format(Number(item.qb_amount))}</span>}
+          {item.qb_gl_code && <span className={styles.cardQbGl}>{item.qb_gl_code}</span>}
         </div>
       )}
       {item.status === 'failed' && item.error_message && (
@@ -898,6 +980,8 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
   const [batchConfirming, setBatchConfirming] = useState(false);
   const [batchMsg, setBatchMsg] = useState<string | null>(null);
   const [batchLabel, setBatchLabel] = useState('');
+  const [rematchMsg, setRematchMsg] = useState<string | null>(null);
+  const [rematching, setRematching] = useState(false);
   const uploadingRef = useRef(false);
 
   const { data: queue = [], refetch } = useQuery<ImportItem[]>({
@@ -923,6 +1007,20 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
   const pending = queue.filter(i => i.status !== 'confirmed' && i.status !== 'discarded');
   const done = queue.filter(i => i.status === 'confirmed' || i.status === 'discarded');
   const failedCount = pending.filter(i => i.status === 'failed').length;
+
+  // 3-tier split for needs_review items
+  const processing = pending.filter(i => i.status === 'queued' || i.status === 'extracting');
+  const failedItems = pending.filter(i => i.status === 'failed');
+  const needsReview = pending.filter(i => i.status === 'needs_review');
+  const tier1Matched = needsReview.filter(i =>
+    i.doc_type === 'invoice' && i.qb_match_confidence === 'high' && i.project_match !== 'uncertain'
+  );
+  const tier3NoMatch = needsReview.filter(i =>
+    i.doc_type === 'invoice' && i.qb_match_confidence === 'none' && i.project_match !== 'uncertain'
+  );
+  const tier2Review = needsReview.filter(i =>
+    !tier1Matched.includes(i) && !tier3NoMatch.includes(i)
+  );
 
   const liveReviewItem = reviewItem ? (queue.find(i => i.id === reviewItem.id) ?? reviewItem) : null;
 
@@ -996,6 +1094,19 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
     }
   };
 
+  const handleRematchQb = async () => {
+    setRematching(true); setRematchMsg(null);
+    try {
+      const r = await api.rematchQb(phaseId);
+      await refetch();
+      setRematchMsg(`Re-matched ${r.updated} of ${r.total_items} items (${r.qb_transactions_loaded} QB transactions loaded).`);
+    } catch (err: any) {
+      setRematchMsg(`Error: ${err.message}`);
+    } finally {
+      setRematching(false);
+    }
+  };
+
   const handleDiscard = async () => {
     if (!reviewItem) return;
     setSaving(true);
@@ -1028,6 +1139,14 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
             <div className={styles.headerSub}>AI classifies and extracts — you review</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {needsReview.length > 0 && (
+              <button className={styles.rematchBtn}
+                onClick={handleRematchQb}
+                disabled={rematching}
+                title="Re-run QB matching on all pending items">
+                {rematching ? 'Matching…' : '⟳ Re-match QB'}
+              </button>
+            )}
             {failedCount > 0 && (
               <button className={styles.clearFailedBtn}
                 onClick={() => clearFailedMutation.mutate()}
@@ -1057,38 +1176,109 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
             {uploadError && <div className={styles.uploadErr}>{uploadError}</div>}
           </div>
 
-          {/* Batch confirm message */}
+          {/* Status messages */}
           {batchMsg && (
             <div className={styles.uploadErr} style={{ background: batchMsg.startsWith('Error') ? undefined : '#e8f5e9', color: batchMsg.startsWith('Error') ? undefined : '#2e7d32', borderColor: batchMsg.startsWith('Error') ? undefined : '#c8e6c9' }}>
               {batchMsg}
             </div>
           )}
+          {rematchMsg && (
+            <div className={styles.uploadErr} style={{ background: rematchMsg.startsWith('Error') ? undefined : '#e8f5e9', color: rematchMsg.startsWith('Error') ? undefined : '#2e7d32', borderColor: rematchMsg.startsWith('Error') ? undefined : '#c8e6c9' }}>
+              {rematchMsg}
+            </div>
+          )}
 
-          {/* Pending section */}
-          {pending.length > 0 && (
+          {/* Processing (queued/extracting) */}
+          {processing.length > 0 && (
             <div className={styles.section}>
               <div className={styles.sectionHead}>
-                Pending
-                <span className={styles.sectionCount}>{pending.length}</span>
-                {pending.some(i => i.status === 'needs_review' && i.match_confidence === 'high') && (
-                  <button
-                    className={styles.batchConfirmBtn}
-                    onClick={handleBatchConfirmHigh}
-                    disabled={batchConfirming}
-                  >
-                    {batchConfirming ? 'Confirming…' : '✓ Confirm All High-Confidence'}
-                  </button>
-                )}
+                <span className={styles.sectionDot} style={{ background: '#3b82f6' }} />
+                Processing
+                <span className={styles.sectionCount}>{processing.length}</span>
               </div>
-              {pending.map(item => (
-                <QueueCard
-                  key={item.id}
-                  item={item}
-                  onClick={() => setReviewItem(item)}
-                  onFlipType={() => handleFlipType(item)}
+              {processing.map(item => (
+                <QueueCard key={item.id} item={item}
+                  onClick={() => {}} onFlipType={() => handleFlipType(item)}
                   onRetry={() => retryMutation.mutate(item.id)}
-                  onDiscard={() => discardOneMutation.mutate(item.id)}
-                />
+                  onDiscard={() => discardOneMutation.mutate(item.id)} />
+              ))}
+            </div>
+          )}
+
+          {/* Tier 1 — QB Matched (high confidence) */}
+          {tier1Matched.length > 0 && (
+            <div className={styles.section}>
+              <div className={`${styles.sectionHead} ${styles.sectionHeadGreen}`}>
+                <span className={styles.sectionDot} style={{ background: '#16a34a' }} />
+                ✓ QB Matched
+                <span className={styles.sectionCount}>{tier1Matched.length}</span>
+                <button
+                  className={styles.batchConfirmBtn}
+                  onClick={handleBatchConfirmHigh}
+                  disabled={batchConfirming}
+                >
+                  {batchConfirming ? 'Confirming…' : '✓ Confirm All'}
+                </button>
+              </div>
+              {tier1Matched.map(item => (
+                <QueueCard key={item.id} item={item}
+                  onClick={() => setReviewItem(item)} onFlipType={() => handleFlipType(item)}
+                  onRetry={() => retryMutation.mutate(item.id)}
+                  onDiscard={() => discardOneMutation.mutate(item.id)} />
+              ))}
+            </div>
+          )}
+
+          {/* Tier 2 — Needs Review (contracts, medium/low confidence, uncertain project) */}
+          {tier2Review.length > 0 && (
+            <div className={styles.section}>
+              <div className={`${styles.sectionHead} ${styles.sectionHeadAmber}`}>
+                <span className={styles.sectionDot} style={{ background: '#d97706' }} />
+                ? Needs Review
+                <span className={styles.sectionCount}>{tier2Review.length}</span>
+              </div>
+              {tier2Review.map(item => (
+                <QueueCard key={item.id} item={item}
+                  onClick={() => setReviewItem(item)} onFlipType={() => handleFlipType(item)}
+                  onRetry={() => retryMutation.mutate(item.id)}
+                  onDiscard={() => discardOneMutation.mutate(item.id)} />
+              ))}
+            </div>
+          )}
+
+          {/* Tier 3 — No QB Match */}
+          {tier3NoMatch.length > 0 && (
+            <div className={styles.section}>
+              <div className={`${styles.sectionHead} ${styles.sectionHeadGray}`}>
+                <span className={styles.sectionDot} style={{ background: '#9ca3af' }} />
+                ✗ No QB Match
+                <span className={styles.sectionCount}>{tier3NoMatch.length}</span>
+              </div>
+              {tier3NoMatch.map(item => (
+                <QueueCard key={item.id} item={item}
+                  onClick={() => setReviewItem(item)} onFlipType={() => handleFlipType(item)}
+                  onRetry={() => retryMutation.mutate(item.id)}
+                  onDiscard={() => discardOneMutation.mutate(item.id)} />
+              ))}
+            </div>
+          )}
+
+          {/* Failed */}
+          {failedItems.length > 0 && (
+            <div className={styles.section}>
+              <div className={styles.sectionHead}>
+                Failed
+                <span className={styles.sectionCount}>{failedItems.length}</span>
+                <button className={styles.clearFailedBtn} style={{ marginLeft: 'auto' }}
+                  onClick={() => clearFailedMutation.mutate()} disabled={clearFailedMutation.isPending}>
+                  Clear all
+                </button>
+              </div>
+              {failedItems.map(item => (
+                <QueueCard key={item.id} item={item}
+                  onClick={() => {}} onFlipType={() => handleFlipType(item)}
+                  onRetry={() => retryMutation.mutate(item.id)}
+                  onDiscard={() => discardOneMutation.mutate(item.id)} />
               ))}
             </div>
           )}
@@ -1101,14 +1291,10 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
                 <span className={styles.sectionCount}>{done.length}</span>
               </button>
               {doneOpen && done.map(item => (
-                <QueueCard
-                  key={item.id}
-                  item={item}
-                  onClick={() => {}}
-                  onFlipType={() => {}}
+                <QueueCard key={item.id} item={item}
+                  onClick={() => {}} onFlipType={() => {}}
                   onRetry={() => retryMutation.mutate(item.id)}
-                  onDiscard={() => discardOneMutation.mutate(item.id)}
-                />
+                  onDiscard={() => discardOneMutation.mutate(item.id)} />
               ))}
             </div>
           )}
