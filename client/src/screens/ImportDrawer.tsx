@@ -247,10 +247,12 @@ function InlineGlPicker({ accounts, value, onChange, isSuggested, suggestionReas
       >
         {selected ? (
           <>
-            {isSuggested && <span className={styles.inglAiBadge} style={{ color: confColor }}>✦</span>}
-            <span className={styles.inglCode}>{selected.account_number}</span>
+            <div className={styles.inglTopRow}>
+              {isSuggested && <span className={styles.inglAiBadge} style={{ color: confColor }}>✦</span>}
+              <span className={styles.inglCode}>{selected.account_number}</span>
+              <button className={styles.inglClear} onClick={e => { e.stopPropagation(); onChange(null); }}>✕</button>
+            </div>
             <span className={styles.inglName}>{selected.full_name}</span>
-            <button className={styles.inglClear} onClick={e => { e.stopPropagation(); onChange(null); }}>✕</button>
           </>
         ) : (
           <span className={styles.inglEmpty}>Set GL…</span>
@@ -367,8 +369,8 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   const [reviewed, setReviewed] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Resizable form pane — default 50%, min 480px, max 90%
-  const [formWidth, setFormWidth] = useState(() => Math.max(600, Math.round(window.innerWidth * 0.50)));
+  // Resizable form pane — default 65%, min 600px, max 92%
+  const [formWidth, setFormWidth] = useState(() => Math.max(700, Math.round(window.innerWidth * 0.65)));
   const dragState = useRef<{ active: boolean; startX: number; startW: number }>({ active: false, startX: 0, startW: 0 });
 
   useEffect(() => {
