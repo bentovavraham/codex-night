@@ -286,11 +286,11 @@ function InvoiceList({ invoices, phaseId, onEdit }: {
 
       <div className={styles.toolbar}>
         <span className={styles.toolLabel}>Invoices</span>
-        <span className={styles.uploadHint}>Upload invoices via the ↑ Import tab</span>
+        <span className={styles.uploadHint}>Upload invoices via ↑ Import Invoices in the Audit tab</span>
       </div>
       {invoices.length === 0 ? (
         <div className={styles.emptyState}>
-          <p>No invoices yet — upload PDFs via the <strong>↑ Import</strong> tab.</p>
+          <p>No invoices yet — use <strong>↑ Import Invoices</strong> in the Audit tab.</p>
         </div>
       ) : (
         <div className={styles.scrollArea}>

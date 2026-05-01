@@ -10,7 +10,6 @@ const TABS = [
   { to: 'audit',       label: 'Audit' },
   { to: 'alerts',      label: 'Alerts' },
   { to: 'history',     label: 'History' },
-  { to: 'import',      label: '↑ Import' },
 ];
 
 export default function PhaseHome() {
