@@ -464,6 +464,7 @@ export default function BudgetGrid() {
       <td className={cls}>{money(t.committed)}</td>
       <td className={cls}>{t.co_value > 0 ? money(t.co_value) : '—'}</td>
       <td className={`${cls} ${t.total_commitment > t.budgeted && t.budgeted > 0 ? styles.danger : ''}`}>{money(t.total_commitment)}</td>
+      <td className={cls}>{t.total_commitment > 0 ? remPct(t.billed, t.total_commitment) : '—'}</td>
       <td className={cls}>{money(t.fixed)}</td>
       <td className={cls}>{money(t.tm)}</td>
       <td className={cls}>{money(t.expenses)}</td>
@@ -510,6 +511,9 @@ export default function BudgetGrid() {
         </td>
         <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
           {money(row.total_commitment)}
+        </td>
+        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>
+          {row.total_commitment > 0 ? remPct(row.billed, row.total_commitment) : '—'}
         </td>
         <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.fixed_charges)}</td>
         <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.tm_charges)}</td>
@@ -704,7 +708,7 @@ export default function BudgetGrid() {
             <tr className={styles.theadGroup}>
               <th colSpan={4} />
               <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>Remaining</th>
-              <th className={styles.thGroup} colSpan={3}>Contract Commitment</th>
+              <th className={styles.thGroup} colSpan={4}>Contract Commitment</th>
               <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={4}>Invoiced</th>
               <th className={styles.thGroup} colSpan={2}>Payments</th>
               <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>Unit Cost</th>
@@ -720,6 +724,7 @@ export default function BudgetGrid() {
               <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Contracted ↓</th>
               <th className={`${styles.th} ${styles.thRight}`}>COs</th>
               <th className={`${styles.th} ${styles.thRight}`}>Total Commit</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. Commit %</th>
               <th className={`${styles.th} ${styles.thRight}`}>Fixed</th>
               <th className={`${styles.th} ${styles.thRight}`}>T&amp;M</th>
               <th className={`${styles.th} ${styles.thRight}`}>Expense</th>
@@ -746,6 +751,7 @@ export default function BudgetGrid() {
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.committed)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{grand.co_value > 0 ? usd.format(grand.co_value) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.total_commitment > grand.budgeted ? styles.danger : ''}`}>{usd.format(grand.total_commitment)}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{grand.total_commitment > 0 ? remPct(grand.billed, grand.total_commitment) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.fixed)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.tm)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.expenses)}</td>
