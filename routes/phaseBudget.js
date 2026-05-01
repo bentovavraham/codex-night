@@ -1175,7 +1175,7 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
 
     // Build section totals keyed by parent GL
     const secMap = new Map();
-    const leafRows = rows.filter(r => r.budgeted > 0 || r.total_commitment > 0 || r.billed > 0);
+    const leafRows = rows.filter(r => r.task_name || r.budgeted > 0 || r.total_commitment > 0 || r.billed > 0);
     for (const r of leafRows) {
       const key = r.qb_parent_number || r.qb_account_number || '—';
       if (!secMap.has(key)) secMap.set(key, {
