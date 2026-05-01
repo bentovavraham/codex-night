@@ -724,7 +724,7 @@ export default function BudgetGrid() {
               <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Contracted ↓</th>
               <th className={`${styles.th} ${styles.thRight}`}>COs</th>
               <th className={`${styles.th} ${styles.thRight}`}>Total Commit</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. Commit %</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
               <th className={`${styles.th} ${styles.thRight}`}>Fixed</th>
               <th className={`${styles.th} ${styles.thRight}`}>T&amp;M</th>
               <th className={`${styles.th} ${styles.thRight}`}>Expense</th>
