@@ -795,13 +795,13 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         qp.account_number                       AS parent_code,
         qp.full_name                            AS parent_full_name,
         COALESCE((
-          SELECT SUM(contribution) FROM (
-            SELECT cli.budgeted_amount AS contribution
+          SELECT SUM(s.amt) FROM (
+            SELECT cli.budgeted_amount AS amt
             FROM contracts c JOIN contract_line_items cli ON cli.contract_id = c.id
             WHERE COALESCE(cli.phase_budget_line_id, c.phase_budget_line_id) = pbl.id
               AND c.status NOT IN ('voided','draft')
             UNION ALL
-            SELECT c.total_value FROM contracts c
+            SELECT c.total_value AS amt FROM contracts c
             WHERE c.phase_budget_line_id = pbl.id AND c.status NOT IN ('voided','draft')
               AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
           ) s), 0)::numeric                     AS committed,
@@ -811,12 +811,12 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
           WHERE c.phase_budget_line_id = pbl.id AND co.status = 'approved'
         ), 0)::numeric                          AS co_value,
         COALESCE((
-          SELECT SUM(contribution) FROM (
-            SELECT ili.amount FROM invoice_line_items ili
+          SELECT SUM(s.amt) FROM (
+            SELECT ili.amount AS amt FROM invoice_line_items ili
             JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','draft','rejected') AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT inv.amount FROM invoices inv
+            SELECT inv.amount AS amt FROM invoices inv
             WHERE inv.status NOT IN ('voided','draft','rejected')
               AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
               AND (inv.phase_budget_line_id = pbl.id
