@@ -159,10 +159,10 @@ router.post('/contracts', requireAuth, async (req, res, next) => {
     await client.query('BEGIN');
     const result = await client.query(
       `INSERT INTO contracts
-         (project_id, vendor_name, description, total_value,
+         (project_id, phase_id, vendor_name, description, total_value,
           contract_date, reference_number, status, file_reference, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,'draft'),$8,$9) RETURNING *`,
-      [Number(project_id),
+       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'draft'),$9,$10) RETURNING *`,
+      [Number(project_id), phase_id ? Number(phase_id) : null,
        vendor_name, description || null, total,
        contract_date || null, reference_number || null,
        status || null, file_reference || null, req.session.userId]
