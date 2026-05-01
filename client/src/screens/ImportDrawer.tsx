@@ -888,7 +888,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                               {li.person && <span style={{ fontWeight: 700, marginRight: 6, color: '#3d2e27' }}>{li.person}</span>}
                               {li.description}
                             </span>
-                            {li.billing_type === 'tm' && li.hours > 0 && <span style={{ fontSize: 10.5, color: '#8a7f74', marginTop: 1, display: 'block' }}>{li.hours}h @ ${li.rate}/h</span>}
+                            {li.billing_type === 'tm' && Number(li.hours) > 0 && <span style={{ fontSize: 10.5, color: '#8a7f74', marginTop: 1, display: 'block' }}>{li.hours}h @ ${li.rate}/h</span>}
                           </td>
                           <td className={`${styles.rColAmt} ${styles.right} ${styles.mono}`} style={{ fontSize: 11.5, color: '#1a1714', fontWeight: 600 }}>
                             {usd2.format(Number(li.amount) || 0)}
@@ -1125,7 +1125,7 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
   const pending = queue.filter(i => i.status !== 'confirmed' && i.status !== 'discarded');
   const confirmed = queue.filter(i => i.status === 'confirmed');
   const discarded = queue.filter(i => i.status === 'discarded');
-  const done = [...confirmed, ...discarded];
+
   const failedCount = pending.filter(i => i.status === 'failed').length;
 
   // Tier split for needs_review items

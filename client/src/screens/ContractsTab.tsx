@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -129,145 +129,6 @@ function QbPicker({ accounts, value, suggestedId, suggestionConfidence, onChange
   );
 }
 
-// ─── Budget line autocomplete picker ─────────────────────────────────────────
-
-function BudgetLinePicker({ lines, value, onChange }: {
-  lines: any[];
-  value: number | null;
-  onChange: (id: number | null) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const ref = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const selected = lines.find(l => l.id === value) ?? null;
-
-  const filtered = useMemo(() => {
-    if (!query.trim()) return lines;
-    const q = query.toLowerCase();
-    return lines.filter(l =>
-      l.task_name.toLowerCase().includes(q) ||
-      (l.discipline && l.discipline.toLowerCase().includes(q))
-    );
-  }, [lines, query]);
-
-  useEffect(() => {
-    function onOut(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
-    if (open) document.addEventListener('mousedown', onOut);
-    return () => document.removeEventListener('mousedown', onOut);
-  }, [open]);
-
-  function openDropdown() { setQuery(''); setOpen(true); setTimeout(() => inputRef.current?.focus(), 30); }
-  function pick(l: any) { onChange(l.id); setOpen(false); setQuery(''); }
-  function clear(e: React.MouseEvent) { e.stopPropagation(); onChange(null); }
-
-  const label = selected ? `${selected.task_name}${selected.discipline ? ` · ${selected.discipline}` : ''}` : null;
-
-  return (
-    <div className={styles.qbPicker} ref={ref}>
-      <div className={`${styles.qbDisplay} ${!selected ? styles.qbEmpty : ''}`} onClick={openDropdown}>
-        {selected ? (
-          <>
-            <span className={styles.qbName}>{label}</span>
-            <button className={styles.qbClear} onClick={clear} title="Clear">✕</button>
-          </>
-        ) : <span className={styles.qbPlaceholder}>Search tasks…</span>}
-      </div>
-      {open && (
-        <div className={styles.qbDropdown}>
-          <input ref={inputRef} className={styles.qbSearch} value={query}
-            onChange={e => setQuery(e.target.value)} placeholder="Type task name or discipline…" />
-          <div className={styles.qbList}>
-            {filtered.map(l => (
-              <div key={l.id}
-                className={`${styles.qbOption} ${l.id === value ? styles.qbOptionSelected : ''}`}
-                onMouseDown={() => pick(l)}>
-                <span className={styles.qbOptName}>{l.task_name}{l.discipline ? ` · ${l.discipline}` : ''}</span>
-              </div>
-            ))}
-            {filtered.length === 0 && <div className={styles.qbNoMatch}>No match</div>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Inline budget line picker for task table rows (portal-based) ─────────────
-
-function InlineBudgetLinePicker({ lines, value, onChange }: {
-  lines: any[]; value: number | null; onChange: (id: number | null) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
-  const triggerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const selected = lines.find(l => l.id === value) ?? null;
-
-  const filtered = useMemo(() => {
-    if (!query.trim()) return lines;
-    const q = query.toLowerCase();
-    return lines.filter(l =>
-      l.task_name.toLowerCase().includes(q) || (l.discipline || '').toLowerCase().includes(q)
-    );
-  }, [lines, query]);
-
-  function openPicker() {
-    if (!triggerRef.current) return;
-    const r = triggerRef.current.getBoundingClientRect();
-    setPos({ top: r.bottom + 2, left: r.left, width: Math.max(r.width, 280) });
-    setQuery('');
-    setOpen(true);
-    setTimeout(() => inputRef.current?.focus(), 20);
-  }
-
-  useEffect(() => {
-    if (!open) return;
-    function onOut(e: MouseEvent) {
-      if (triggerRef.current?.contains(e.target as Node)) return;
-      if ((e.target as Element)?.closest?.('[data-inbl-dp]')) return;
-      setOpen(false);
-    }
-    document.addEventListener('mousedown', onOut);
-    return () => document.removeEventListener('mousedown', onOut);
-  }, [open]);
-
-  return (
-    <>
-      <div ref={triggerRef} className={styles.inblTrigger} onClick={openPicker}
-        title={selected ? `${selected.task_name}${selected.discipline ? ` · ${selected.discipline}` : ''}` : 'Click to assign budget line'}>
-        {selected ? (
-          <>
-            <span className={styles.inblLabel}>{selected.task_name}</span>
-            <button className={styles.inblClear} onClick={e => { e.stopPropagation(); onChange(null); }}>✕</button>
-          </>
-        ) : (
-          <span className={styles.inblEmpty}>— inherit —</span>
-        )}
-      </div>
-      {open && createPortal(
-        <div data-inbl-dp className={styles.inblDropdown} style={{ top: pos.top, left: pos.left, width: pos.width }}>
-          <input ref={inputRef} className={styles.inblSearch} value={query}
-            onChange={e => setQuery(e.target.value)} placeholder="Search budget lines…" />
-          <div className={styles.inblList}>
-            <div className={styles.inblOption} onMouseDown={() => { onChange(null); setOpen(false); }}>— inherit —</div>
-            {filtered.map(l => (
-              <div key={l.id}
-                className={`${styles.inblOption} ${l.id === value ? styles.inblSelected : ''}`}
-                onMouseDown={() => { onChange(l.id); setOpen(false); }}>
-                {l.task_name}{l.discipline ? ` · ${l.discipline}` : ''}
-              </div>
-            ))}
-            {filtered.length === 0 && <div className={styles.inblNoMatch}>No match</div>}
-          </div>
-        </div>,
-        document.body
-      )}
-    </>
-  );
-}
 
 // ─── Inline editable cell ─────────────────────────────────────────────────────
 
@@ -571,7 +432,7 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
     .reduce((s, li) => s + (Number(li.budgeted_amount) || 0), 0);
   const hasTm = form.line_items.some(li => li.billing_type === 'tm');
 
-  const hasLineItems = form.line_items.length > 0;
+
 
   async function handleSave() {
     setSaveError(null);

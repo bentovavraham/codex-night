@@ -203,7 +203,7 @@ function InlineBudgetLinePicker({ lines, value, onChange }: {
 
 // ─── QB account picker ────────────────────────────────────────────────────────
 
-function QbPicker({ accounts, value, suggestedId, suggestionConfidence, onChange }: {
+function QbPicker({ accounts, value, suggestedId, suggestionConfidence: _suggestionConfidence, onChange }: {
   accounts: QbAccount[]; value: number | null; suggestedId: number | null;
   suggestionConfidence: string | null; onChange: (id: number | null) => void;
 }) {
@@ -772,7 +772,7 @@ function ReviewForm({ item, budgetLines, contracts, qbAccounts, onConfirm, onDis
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ImportPage() {
-  const { projectId, phaseId } = useParams<{ projectId: string; phaseId: string }>();
+  const { projectId: _projectId, phaseId } = useParams<{ projectId: string; phaseId: string }>();
   const phaseIdNum = Number(phaseId);
   const qc = useQueryClient();
 

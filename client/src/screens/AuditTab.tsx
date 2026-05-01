@@ -162,7 +162,7 @@ function VendorGroup({ vendor, rows, accounts, statusFilter, onValidateGl, onImp
   const [open, setOpen] = useState(true);
 
   const totalAmt   = rows.reduce((s, r) => s + Number(r.amount || 0), 0);
-  const withInv    = rows.filter(r => r.inv_id).length;
+
   const verified   = rows.filter(r => verifyStatus(r) === 'verified').length;
   const issues     = rows.filter(r => { const s = verifyStatus(r); return s === 'amount_off' || s === 'gl_off'; }).length;
   const unverified = rows.filter(r => !r.inv_id).length;
