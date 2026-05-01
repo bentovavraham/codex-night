@@ -819,12 +819,13 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
     const XLSX = require('xlsx');
     const phaseId = Number(req.params.phaseId);
 
-    // ── Fetch phase + project name for the filename ──
+    // ── Fetch phase + project name + site dimensions for the filename ──
     const phaseRow = (await pool.query(
-      `SELECT ph.name AS phase_name, pr.name AS project_name
+      `SELECT ph.name AS phase_name, pr.name AS project_name,
+              pr.gla_sf, pr.gla_ac
          FROM phases ph JOIN projects pr ON pr.id = ph.project_id
         WHERE ph.id = $1`, [phaseId]
-    )).rows[0] || { phase_name: 'Phase', project_name: 'Project' };
+    )).rows[0] || { phase_name: 'Phase', project_name: 'Project', gla_sf: null, gla_ac: null };
 
     // ── Full budget query (same as GET /budget endpoint) ──
     const rawRows = (await pool.query(`
@@ -1030,372 +1031,283 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
 
     const ExcelJS = require('exceljs');
 
-    // ── Palette & shared styles ──────────────────────────────────────────────
+    // ── Palette (black & white only) ─────────────────────────────────────────
     const C = {
-      darkBg:    '1F2D3D',  // dark charcoal — section headers
-      midBg:     '2E4057',  // slightly lighter — sub-group headers
-      leafAlt:   'F7F6F4',  // warm off-white tint for alternating data rows
-      totalBg:   '1F2D3D',  // same as section for grand total
-      headerBg:  '2C3E50',  // column header row bg
-      dangerFg:  'C0392B',  // red for negative variances
-      white:     'FFFFFF',
-      black:     '1A1A1A',
-      subtle:    '6B7280',  // muted text for secondary values
+      darkBg:  '1F2D3D',  // section headers, title, total row
+      midBg:   '3D5166',  // group band headers
+      leafAlt: 'F2F2F2',  // alternating data row tint
+      white:   'FFFFFF',
+      black:   '000000',
     };
 
-    const USD  = '"$"#,##0.00;[Red]"$"(#,##0.00)';
-    const USD0 = '"$"#,##0;[Red]"$"(#,##0)';
+    const USD0 = '"$"#,##0;("$"#,##0)';   // no red — parens for negatives
     const PCT  = '0%';
-    const DASH = '—';
 
-    function money(n) { return (n == null || n === 0) ? null : n; }
-    function pctVal(num, den) { return den > 0 ? num / den : null; }
+    function pctVal(num, den) { return (den && den > 0) ? num / den : null; }
+    function v(n) { return (!n || n === 0) ? null : n; }  // null out zeros for cleaner cells
 
-    function fontBase(bold = false, color = C.black, sz = 10) {
+    function font(bold = false, color = C.black, sz = 10) {
       return { name: 'Calibri', size: sz, bold, color: { argb: 'FF' + color } };
     }
-    function fillSolid(hex) {
+    function fill(hex) {
       return { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + hex } };
     }
-    function borderThin(sides = ['top','left','bottom','right']) {
-      const s = { style: 'thin', color: { argb: 'FFD1D5DB' } };
-      const b = {};
-      for (const side of sides) b[side] = s;
-      return b;
-    }
-    function borderMedium(sides = ['bottom']) {
-      const s = { style: 'medium', color: { argb: 'FF' + C.darkBg } };
-      const b = {};
-      for (const side of sides) b[side] = s;
-      return b;
-    }
-    function applyToRow(row, style) {
-      row.eachCell({ includeEmpty: true }, cell => Object.assign(cell, style));
+    function border() {
+      const t = { style: 'thin', color: { argb: 'FFD0D0D0' } };
+      return { top: t, left: t, bottom: t, right: t };
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // SHEET 1 — VARIANCE REPORT
-    // ─────────────────────────────────────────────────────────────────────────
+    // Columns matching the budget grid exactly (left-to-right)
+    // Col indices (1-based):
+    //  1  Acct #          2  Task / Description  3  Budgeted
+    //  4  Rem. Budget      5  Rem. %              [REMAINING]
+    //  6  Contracted       7  COs                 8  Total Commit   9  Rem. %   [CONTRACT COMMITMENT]
+    // 10  Fixed           11  T&M                12  Expense        13 Billed   [INVOICED]
+    // 14  Amt Due         15  Paid               [PAYMENTS]
+    // 16  $/SF            17  $/AC               [UNIT COST]
+    // 18  QB Codes Used   19  Calc Method        20  Consultant     21  Notes
+
+    const NCOLS   = 21;
+    const glaSF   = phaseRow.gla_sf ? Number(phaseRow.gla_sf) : null;
+    const glaAC   = phaseRow.gla_ac ? Number(phaseRow.gla_ac) : null;
+    const genDate = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+
+    const MONEY_COLS = [3,4,6,7,8,10,11,12,13,14,15];
+    const PCT_COLS   = [5,9];
+
+    function styleDataCell(cell, col) {
+      cell.border    = border();
+      cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', wrapText: col === 2 };
+      if (MONEY_COLS.includes(col)) { cell.numFmt = USD0; if (cell.value === 0) cell.value = null; }
+      if (PCT_COLS.includes(col))   { cell.numFmt = PCT;  if (cell.value === 0) cell.value = null; }
+      // $/SF and $/AC are pre-formatted strings, no numFmt needed
+    }
+
+    // ── Build workbook ───────────────────────────────────────────────────────
     const wb = new ExcelJS.Workbook();
-    wb.creator  = 'ActiveAcq';
-    wb.created  = new Date();
+    wb.creator = 'ActiveAcq';
+    wb.created = new Date();
 
-    const vrSheet = wb.addWorksheet('Variance Report');
-    vrSheet.pageSetup = {
+    const ws = wb.addWorksheet('Budget');
+    ws.pageSetup = {
       orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
-      paperSize: 1,   // Letter
-      margins: { left: 0.5, right: 0.5, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
+      paperSize: 1,
+      margins: { left: 0.4, right: 0.4, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
     };
-    vrSheet.headerFooter = {
-      oddHeader: `&L&"Calibri,Bold"&12${phaseRow.project_name} — ${phaseRow.phase_name}`,
-      oddFooter: `&L&"Calibri"&9Budget Variance Report&C&P of &N&R&"Calibri"&9${new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })}`,
+    ws.headerFooter = {
+      oddHeader: `&L&"Calibri,Bold"&12${phaseRow.project_name} — ${phaseRow.phase_name}&R&"Calibri"&9Generated ${genDate}`,
+      oddFooter: `&C&"Calibri"&9Page &P of &N`,
     };
+    ws.pageSetup.printTitlesRow = '1:4';
 
-    // Title block
-    vrSheet.mergeCells('A1:H1');
-    const vrTitle = vrSheet.getCell('A1');
-    vrTitle.value = `${phaseRow.project_name}  ·  ${phaseRow.phase_name}`;
-    vrTitle.font  = fontBase(true, C.white, 14);
-    vrTitle.fill  = fillSolid(C.darkBg);
-    vrTitle.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-    vrSheet.getRow(1).height = 28;
+    // ── Row 1: Title ─────────────────────────────────────────────────────────
+    ws.mergeCells(1, 1, 1, NCOLS);
+    const titleCell = ws.getCell('A1');
+    titleCell.value     = `${phaseRow.project_name}  ·  ${phaseRow.phase_name}`;
+    titleCell.font      = font(true, C.white, 14);
+    titleCell.fill      = fill(C.darkBg);
+    titleCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    ws.getRow(1).height = 30;
 
-    vrSheet.mergeCells('A2:H2');
-    const vrSub = vrSheet.getCell('A2');
-    vrSub.value = `Budget Variance Report  ·  Generated ${new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })}`;
-    vrSub.font  = fontBase(false, C.white, 9);
-    vrSub.fill  = fillSolid(C.midBg);
-    vrSub.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-    vrSheet.getRow(2).height = 16;
+    // ── Row 2: Subtitle ──────────────────────────────────────────────────────
+    ws.mergeCells(2, 1, 2, NCOLS);
+    const subCell = ws.getCell('A2');
+    subCell.value     = `Project Budget  ·  ${genDate}`;
+    subCell.font      = font(false, C.white, 9);
+    subCell.fill      = fill(C.midBg);
+    subCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    ws.getRow(2).height = 14;
 
-    // Column header row
-    const vrCols = ['GL Code', 'Description', 'Budget', '% of Budget', 'Committed', '% of Committed', 'Actual (Billed)', 'Variance\n(Commit − Billed)'];
-    const vrHdrRow = vrSheet.addRow(vrCols);
-    vrHdrRow.height = 30;
-    vrHdrRow.eachCell((cell, col) => {
-      cell.font      = fontBase(true, C.white, 10);
-      cell.fill      = fillSolid(C.headerBg);
-      cell.alignment = { horizontal: col <= 2 ? 'left' : 'center', vertical: 'middle', wrapText: true };
-      cell.border    = borderThin();
+    // ── Row 3: Group header bands (matching the grid exactly) ────────────────
+    // Cols 1-3: blank  |  4-5: REMAINING  |  6-9: CONTRACT COMMITMENT
+    //          10-13: INVOICED  |  14-15: PAYMENTS  |  16-17: UNIT COST
+    //          18-21: (blank detail)
+    const bands = [
+      [1, 3, ''],
+      [4, 5, 'REMAINING'],
+      [6, 9, 'CONTRACT COMMITMENT'],
+      [10, 13, 'INVOICED'],
+      [14, 15, 'PAYMENTS'],
+      [16, 17, 'UNIT COST'],
+      [18, 21, ''],
+    ];
+    bands.forEach(([c1, c2, label], i) => {
+      if (c1 < c2) ws.mergeCells(3, c1, 3, c2);
+      const cell     = ws.getCell(3, c1);
+      cell.value     = label;
+      cell.font      = font(true, C.white, 9);
+      cell.fill      = fill(i % 2 === 0 ? C.darkBg : C.midBg);
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      // Fill remaining cells in merged range
+      for (let c = c1; c <= c2; c++) {
+        const bc = ws.getCell(3, c);
+        bc.fill = fill(i % 2 === 0 ? C.darkBg : C.midBg);
+      }
     });
-    vrSheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 3 }];
+    ws.getRow(3).height = 13;
 
-    // Build variance groups
-    const groupMap = new Map();
-    for (const r of rows) {
-      const key   = r.qb_parent_number || r.qb_account_number || '—';
-      const label = r.qb_parent_full_name || r.qb_full_name || r.task_name || '—';
-      if (!groupMap.has(key)) groupMap.set(key, { gl_code: key, label, budgeted: 0, committed: 0, co_value: 0, billed: 0 });
-      const g = groupMap.get(key);
-      g.budgeted  += r.budgeted;
-      g.committed += r.committed;
-      g.co_value  += r.co_value;
-      g.billed    += r.billed;
-    }
+    // ── Row 4: Column headers ─────────────────────────────────────────────────
+    const HDR = [
+      'Acct #', 'Task / Description', 'Budgeted',
+      'Rem. Budget', 'Rem. %',
+      'Contracted', 'COs', 'Total Commit', 'Rem. %',
+      'Fixed', 'T&M', 'Expense', 'Billed',
+      'Amt Due', 'Paid',
+      '$/SF', '$/AC',
+      'QB Codes Used', 'Calc Method', 'Consultant', 'Notes',
+    ];
+    const hdrRow = ws.addRow(HDR);  // row 4
+    hdrRow.height = 28;
+    hdrRow.eachCell({ includeEmpty: true }, (cell, col) => {
+      cell.font      = font(true, C.white, 9);
+      cell.fill      = fill(C.darkBg);
+      cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', wrapText: true };
+      cell.border    = border();
+    });
 
-    let vrAlt = false;
-    for (const [, g] of groupMap) {
-      const tc    = g.committed + g.co_value;
-      const vari  = tc - g.billed;
-      const label = g.label.split(':').slice(1).join(' › ') || g.label;
-      const row   = vrSheet.addRow([g.gl_code, label, g.budgeted || null, pctVal(g.billed, g.budgeted), tc || null, pctVal(g.billed, tc), g.billed || null, vari || null]);
-      row.height  = 16;
-      const bg    = vrAlt ? C.leafAlt : C.white;
-      row.eachCell({ includeEmpty: true }, (cell, col) => {
-        cell.fill      = fillSolid(bg);
-        cell.font      = fontBase(false, C.black, 10);
-        cell.border    = borderThin();
-        cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
-        if (col === 3 || col === 5 || col === 7) cell.numFmt = USD0;
-        if (col === 4 || col === 6)              cell.numFmt = PCT;
-        if (col === 8) {
-          cell.numFmt = USD0;
-          if (typeof cell.value === 'number' && cell.value < 0) cell.font = { ...cell.font, color: { argb: 'FF' + C.dangerFg } };
-        }
-      });
-      vrAlt = !vrAlt;
-    }
+    ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 4 }];
 
+    // ── Data rows: section headers + leaf rows ────────────────────────────────
     const totBudget = rows.reduce((s, r) => s + r.budgeted, 0);
     const totCommit = rows.reduce((s, r) => s + r.total_commitment, 0);
     const totBilled = rows.reduce((s, r) => s + r.billed, 0);
     const totPaid   = rows.reduce((s, r) => s + r.paid, 0);
 
-    // Total row
-    const vrTotRow = vrSheet.addRow(['', 'TOTAL', totBudget, pctVal(totBilled, totBudget), totCommit, pctVal(totBilled, totCommit), totBilled, totCommit - totBilled]);
-    vrTotRow.height = 20;
-    vrTotRow.eachCell({ includeEmpty: true }, (cell, col) => {
-      cell.font      = fontBase(true, C.white, 10);
-      cell.fill      = fillSolid(C.totalBg);
-      cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
-      cell.border    = { top: { style: 'medium', color: { argb: 'FF' + C.white } } };
-      if (col === 3 || col === 5 || col === 7 || col === 8) cell.numFmt = USD0;
-      if (col === 4 || col === 6)                           cell.numFmt = PCT;
-    });
-
-    vrSheet.columns = [
-      { width: 10 }, { width: 46 }, { width: 15 }, { width: 13 },
-      { width: 15 }, { width: 16 }, { width: 16 }, { width: 22 },
-    ];
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // SHEET 2 — BUDGET DETAIL
-    // ─────────────────────────────────────────────────────────────────────────
-    const detSheet = wb.addWorksheet('Budget Detail');
-    detSheet.pageSetup = {
-      orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
-      paperSize: 1,
-      margins: { left: 0.4, right: 0.4, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
-    };
-    detSheet.headerFooter = {
-      oddHeader: `&L&"Calibri,Bold"&12${phaseRow.project_name} — ${phaseRow.phase_name}`,
-      oddFooter: `&L&"Calibri"&9Budget Detail&C&P of &N&R&"Calibri"&9${new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })}`,
-    };
-
-    // Title block
-    const DET_COLS = 19;
-    detSheet.mergeCells(1, 1, 1, DET_COLS);
-    const detTitle = detSheet.getCell('A1');
-    detTitle.value = `${phaseRow.project_name}  ·  ${phaseRow.phase_name}`;
-    detTitle.font  = fontBase(true, C.white, 14);
-    detTitle.fill  = fillSolid(C.darkBg);
-    detTitle.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-    detSheet.getRow(1).height = 28;
-
-    detSheet.mergeCells(2, 1, 2, DET_COLS);
-    const detSub = detSheet.getCell('A2');
-    detSub.value = `Budget Detail  ·  Generated ${new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })}`;
-    detSub.font  = fontBase(false, C.white, 9);
-    detSub.fill  = fillSolid(C.midBg);
-    detSub.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-    detSheet.getRow(2).height = 16;
-
-    // Group header row
-    const grpLabels = [
-      ['A3:B3', ''],
-      ['C3:E3', 'TASK INFO'],
-      ['F3:H3', 'REMAINING'],
-      ['I3:K3', 'CONTRACT COMMITMENT'],
-      ['L3:N3', 'INVOICED'],
-      ['O3:Q3', 'PAYMENTS'],
-      ['R3:S3', 'REFERENCE'],
-    ];
-    const grpColors = ['','', C.midBg, C.headerBg, C.midBg, C.headerBg, C.midBg, C.headerBg];
-    grpLabels.forEach(([range, label], i) => {
-      detSheet.mergeCells(range);
-      const cell = detSheet.getCell(range.split(':')[0]);
-      cell.value     = label;
-      cell.font      = fontBase(true, C.white, 9);
-      cell.fill      = fillSolid(grpColors[i + 2] || C.midBg);
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    });
-    detSheet.getRow(3).height = 14;
-
-    // Column header row
-    const detCols = [
-      'GL Code', 'Parent GL',
-      'Task / Description', 'Consultant', 'Calc Method',
-      'Budget', 'Rem. Budget', 'Rem. %',
-      'Contracted', 'COs', 'Total Commit', 'Rem. Commit %',
-      'Fixed', 'T&M', 'Expense',
-      'Billed', 'Amt Due', 'Paid',
-      'QB Codes Used',
-    ];
-    const detHdrRow = detSheet.addRow(detCols);  // row 4
-    detHdrRow.height = 28;
-    detHdrRow.eachCell((cell, col) => {
-      cell.font      = fontBase(true, C.white, 9);
-      cell.fill      = fillSolid(C.darkBg);
-      cell.alignment = { horizontal: col <= 5 ? 'left' : 'right', vertical: 'middle', wrapText: true };
-      cell.border    = borderThin();
-    });
-    detSheet.views = [{ state: 'frozen', xSplit: 2, ySplit: 4 }];
-    detSheet.pageSetup.printTitlesRow = '3:4';
-
-    // Build section → sub-group → leaf hierarchy for styling
-    const sectionTotals = new Map();  // parentNumber → totals
+    // Build section totals keyed by parent GL
+    const secMap = new Map();
     const leafRows = rows.filter(r => r.budgeted > 0 || r.total_commitment > 0 || r.billed > 0);
-
-    // Group by parent for section rows
     for (const r of leafRows) {
       const key = r.qb_parent_number || r.qb_account_number || '—';
-      if (!sectionTotals.has(key)) sectionTotals.set(key, {
-        key, label: r.qb_parent_full_name || r.qb_full_name || '', budgeted: 0,
-        committed: 0, co_value: 0, total_commitment: 0, fixed_charges: 0,
-        tm_charges: 0, expense_charges: 0, billed: 0, paid: 0, amount_due: 0,
-        remaining_budget: 0,
+      if (!secMap.has(key)) secMap.set(key, {
+        key,
+        label: (r.qb_parent_full_name || r.qb_full_name || '').split(':').slice(1).join('').trim() || r.qb_parent_full_name || r.qb_full_name || '',
+        budgeted: 0, remaining_budget: 0,
+        committed: 0, co_value: 0, total_commitment: 0,
+        fixed_charges: 0, tm_charges: 0, expense_charges: 0,
+        billed: 0, amount_due: 0, paid: 0,
       });
-      const s = sectionTotals.get(key);
-      s.budgeted          += r.budgeted;
-      s.committed         += r.committed;
-      s.co_value          += r.co_value;
-      s.total_commitment  += r.total_commitment;
-      s.fixed_charges     += r.fixed_charges;
-      s.tm_charges        += r.tm_charges;
-      s.expense_charges   += r.expense_charges;
-      s.billed            += r.billed;
-      s.paid              += r.paid;
-      s.amount_due        += r.amount_due;
-      s.remaining_budget  += r.remaining_budget;
+      const s = secMap.get(key);
+      s.budgeted         += r.budgeted;
+      s.remaining_budget += r.remaining_budget;
+      s.committed        += r.committed;
+      s.co_value         += r.co_value;
+      s.total_commitment += r.total_commitment;
+      s.fixed_charges    += r.fixed_charges;
+      s.tm_charges       += r.tm_charges;
+      s.expense_charges  += r.expense_charges;
+      s.billed           += r.billed;
+      s.amount_due       += r.amount_due;
+      s.paid             += r.paid;
     }
+
+    function perSF(n) { return glaSF && glaSF > 0 && n > 0 ? `$${(n / glaSF).toFixed(2)}` : '—'; }
+    function perAC(n) { return glaAC && glaAC > 0 && n > 0 ? `$${Math.round(n / glaAC).toLocaleString()}` : '—'; }
 
     let currentParent = null;
-    let detAlt        = false;
-
-    function addDetailRow(sheet, values, style) {
-      const row = sheet.addRow(values);
-      row.height = style.height || 15;
-      row.eachCell({ includeEmpty: true }, (cell, col) => {
-        cell.font      = style.font      || fontBase(false, C.black, 9);
-        cell.fill      = style.fill      || fillSolid(C.white);
-        cell.border    = borderThin();
-        cell.alignment = { horizontal: col <= 5 ? 'left' : 'right', vertical: 'middle', indent: col <= 5 ? style.indent || 0 : 0, wrapText: col === 3 };
-        // Number formats
-        const moneyCol  = [6,7,9,10,11,13,14,15,16,17,18].includes(col);
-        const pctCol    = [8,12].includes(col);
-        if (moneyCol) { cell.numFmt = USD0; if (cell.value === 0) cell.value = null; }
-        if (pctCol)   { cell.numFmt = PCT;  if (cell.value === 0) cell.value = null; }
-        // Red negatives on remaining budget
-        if (col === 7 && typeof cell.value === 'number' && cell.value < 0)
-          cell.font = { ...cell.font, color: { argb: 'FF' + C.dangerFg } };
-      });
-      return row;
-    }
+    let alt = false;
 
     for (const r of leafRows) {
       const parentKey = r.qb_parent_number || r.qb_account_number || '—';
 
-      // Section header when parent changes
+      // Section header row when parent group changes
       if (parentKey !== currentParent) {
         currentParent = parentKey;
-        detAlt        = false;
-        const sec = sectionTotals.get(parentKey);
-        const secLabel = sec.label.split(':').slice(1).join(' › ') || sec.label;
-        const secRow = detSheet.addRow([
-          parentKey, '', secLabel.toUpperCase(), '', '',
-          sec.budgeted || null, sec.remaining_budget || null, pctVal(sec.billed, sec.budgeted),
-          sec.committed || null, sec.co_value || null, sec.total_commitment || null,
-          pctVal(sec.billed, sec.total_commitment),
-          sec.fixed_charges || null, sec.tm_charges || null, sec.expense_charges || null,
-          sec.billed || null, sec.amount_due || null, sec.paid || null, '',
+        alt = false;
+        const s = secMap.get(parentKey);
+        const secRow = ws.addRow([
+          parentKey, s.label.toUpperCase(), v(s.budgeted),
+          v(s.remaining_budget), pctVal(s.billed, s.budgeted),
+          v(s.committed), v(s.co_value), v(s.total_commitment), pctVal(s.billed, s.total_commitment),
+          v(s.fixed_charges), v(s.tm_charges), v(s.expense_charges), v(s.billed),
+          v(s.amount_due), v(s.paid),
+          perSF(s.billed), perAC(s.billed),
+          '', '', '', '',
         ]);
-        secRow.height = 18;
+        secRow.height = 17;
         secRow.eachCell({ includeEmpty: true }, (cell, col) => {
-          cell.font      = fontBase(true, C.white, 9);
-          cell.fill      = fillSolid(C.darkBg);
-          cell.border    = borderThin();
-          cell.alignment = { horizontal: col <= 5 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
-          const moneyCol = [6,7,9,10,11,13,14,15,16,17,18].includes(col);
-          const pctCol   = [8,12].includes(col);
-          if (moneyCol) { cell.numFmt = USD0; if (cell.value === 0) cell.value = null; }
-          if (pctCol)   { cell.numFmt = PCT;  if (cell.value === 0) cell.value = null; }
+          cell.font      = font(true, C.white, 9);
+          cell.fill      = fill(C.darkBg);
+          cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
+          cell.border    = border();
+          styleDataCell(cell, col);
+          cell.font = font(true, C.white, 9); // re-apply after styleDataCell
         });
       }
 
-      // Leaf data row
-      const remCommitPct = pctVal(r.billed, r.total_commitment);
-      const bg = detAlt ? C.leafAlt : C.white;
-      addDetailRow(detSheet, [
+      // Leaf row
+      const rowBg = alt ? C.leafAlt : C.white;
+      const dataRow = ws.addRow([
         r.qb_account_number || '—',
-        r.qb_parent_number  || '',
-        r.task_name         || '',
-        r.consultant        || '',
-        r.calculation_method || '',
-        r.budgeted   || null,
-        r.remaining_budget || null,
-        pctVal(r.billed, r.budgeted),
-        r.committed  || null,
-        r.co_value   || null,
-        r.total_commitment || null,
-        remCommitPct,
-        r.fixed_charges   || null,
-        r.tm_charges      || null,
-        r.expense_charges || null,
-        r.billed     || null,
-        r.amount_due || null,
-        r.paid       || null,
-        r.qb_codes_used || '',
-      ], { fill: fillSolid(bg), indent: 2 });
-      detAlt = !detAlt;
+        r.task_name || '',
+        v(r.budgeted),
+        v(r.remaining_budget), pctVal(r.billed, r.budgeted),
+        v(r.committed), v(r.co_value), v(r.total_commitment), pctVal(r.billed, r.total_commitment),
+        v(r.fixed_charges), v(r.tm_charges), v(r.expense_charges), v(r.billed),
+        v(r.amount_due), v(r.paid),
+        perSF(r.billed), perAC(r.billed),
+        r.qb_codes_used || '', r.calculation_method || '', r.consultant || '', r.notes || '',
+      ]);
+      dataRow.height = 15;
+      dataRow.eachCell({ includeEmpty: true }, (cell, col) => {
+        cell.font = font(false, C.black, 9);
+        cell.fill = fill(rowBg);
+        cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 2 : 0, wrapText: col === 2 };
+        styleDataCell(cell, col);
+      });
+      alt = !alt;
     }
 
-    // Grand total row
-    const remBudget = rows.reduce((s,r) => s+r.remaining_budget, 0);
-    const totFixed  = rows.reduce((s,r) => s+r.fixed_charges, 0);
-    const totTM     = rows.reduce((s,r) => s+r.tm_charges, 0);
-    const totExp    = rows.reduce((s,r) => s+r.expense_charges, 0);
-    const totAmtDue = totBilled - totPaid;
+    // ── Grand total row ───────────────────────────────────────────────────────
+    const totRemBudget = rows.reduce((s,r) => s+r.remaining_budget, 0);
+    const totFixed     = rows.reduce((s,r) => s+r.fixed_charges, 0);
+    const totTM        = rows.reduce((s,r) => s+r.tm_charges, 0);
+    const totExp       = rows.reduce((s,r) => s+r.expense_charges, 0);
+    const totAmtDue    = totBilled - totPaid;
+    const totCommitted = rows.reduce((s,r) => s+r.committed, 0);
+    const totCO        = rows.reduce((s,r) => s+r.co_value, 0);
 
-    const totRow = detSheet.addRow([
-      '', '', 'TOTAL', '', '',
-      totBudget    || null, remBudget || null, pctVal(totBilled, totBudget),
-      rows.reduce((s,r)=>s+r.committed,0) || null,
-      rows.reduce((s,r)=>s+r.co_value,0) || null,
-      totCommit    || null, pctVal(totBilled, totCommit),
-      totFixed     || null, totTM || null, totExp || null,
-      totBilled    || null, totAmtDue || null, totPaid || null,
-      '',
+    const totRow = ws.addRow([
+      '', 'TOTAL',
+      v(totBudget), v(totRemBudget), pctVal(totBilled, totBudget),
+      v(totCommitted), v(totCO), v(totCommit), pctVal(totBilled, totCommit),
+      v(totFixed), v(totTM), v(totExp), v(totBilled),
+      v(totAmtDue), v(totPaid),
+      perSF(totBilled), perAC(totBilled),
+      '', '', '', '',
     ]);
     totRow.height = 20;
     totRow.eachCell({ includeEmpty: true }, (cell, col) => {
-      cell.font      = fontBase(true, C.white, 10);
-      cell.fill      = fillSolid(C.totalBg);
-      cell.border    = { top: { style: 'double', color: { argb: 'FF' + C.white } } };
-      cell.alignment = { horizontal: col <= 5 ? 'left' : 'right', vertical: 'middle', indent: col <= 5 ? 1 : 0 };
-      const moneyCol = [6,7,9,10,11,13,14,15,16,17,18].includes(col);
-      const pctCol   = [8,12].includes(col);
-      if (moneyCol) { cell.numFmt = USD0; if (cell.value === 0) cell.value = null; }
-      if (pctCol)   { cell.numFmt = PCT;  if (cell.value === 0) cell.value = null; }
+      cell.font      = font(true, C.white, 10);
+      cell.fill      = fill(C.darkBg);
+      cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
+      cell.border    = { top: { style: 'double', color: { argb: 'FF' + C.white } }, bottom: { style: 'medium', color: { argb: 'FF' + C.white } } };
+      if (MONEY_COLS.includes(col)) { cell.numFmt = USD0; if (cell.value === 0) cell.value = null; }
+      if (PCT_COLS.includes(col))   { cell.numFmt = PCT;  if (cell.value === 0) cell.value = null; }
     });
 
-    detSheet.columns = [
-      { width: 10 }, { width: 9 },
-      { width: 42 }, { width: 18 }, { width: 13 },
-      { width: 13 }, { width: 13 }, { width: 8 },
-      { width: 13 }, { width: 8  }, { width: 13 }, { width: 10 },
-      { width: 11 }, { width: 11 }, { width: 11 },
-      { width: 13 }, { width: 11 }, { width: 11 },
-      { width: 22 },
+    // ── Column widths ─────────────────────────────────────────────────────────
+    ws.columns = [
+      { width: 10 },  // Acct #
+      { width: 44 },  // Task / Description
+      { width: 13 },  // Budgeted
+      { width: 13 },  // Rem. Budget
+      { width: 8  },  // Rem. %
+      { width: 13 },  // Contracted
+      { width: 9  },  // COs
+      { width: 13 },  // Total Commit
+      { width: 8  },  // Rem. %
+      { width: 11 },  // Fixed
+      { width: 11 },  // T&M
+      { width: 11 },  // Expense
+      { width: 13 },  // Billed
+      { width: 11 },  // Amt Due
+      { width: 11 },  // Paid
+      { width: 9  },  // $/SF
+      { width: 9  },  // $/AC
+      { width: 22 },  // QB Codes Used
+      { width: 14 },  // Calc Method
+      { width: 18 },  // Consultant
+      { width: 30 },  // Notes
     ];
 
     // ── Stream workbook to response ──────────────────────────────────────────
