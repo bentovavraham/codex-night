@@ -325,6 +325,7 @@ export default function BudgetGrid() {
   const [hideUnused,  setHideUnused]  = useState(false);
   const [panelRow,    setPanelRow]    = useState<BudgetRow | null>(null);
   const [drillTarget, setDrillTarget] = useState<DrillTarget | null>(null);
+  const [viewMode,    setViewMode]    = useState<'budget' | 'variance'>('budget');
 
   const { data: rows = [], isLoading, error } = useQuery<BudgetRow[]>({
     queryKey: ['budget', phaseIdNum],
@@ -596,33 +597,103 @@ export default function BudgetGrid() {
     });
   };
 
+  const vrPct = (num: number, den: number) => den > 0 ? `${Math.round((num / den) * 100)}%` : '—';
+
+  const renderVarianceAccts = (accounts: QbAccount[], depth: number): React.ReactNode[] =>
+    accounts.flatMap(acct => {
+      const t = acctTotals.get(acct.id);
+      const children = qbChildrenOf.get(acct.id) ?? [];
+      if (!t || (t.budgeted === 0 && t.total_commitment === 0 && t.billed === 0)) return [];
+      const isOver = t.total_commitment > t.budgeted && t.budgeted > 0;
+      const label  = acct.full_name.split(':').pop()?.trim() ?? acct.account_number;
+      const rowCls = depth === 0 ? styles.vrRoot : depth === 1 ? styles.vrGroup : styles.vrLeaf;
+      return [
+        <tr key={acct.id} className={`${styles.vrRow} ${rowCls} ${isOver ? styles.vrRowOver : ''}`}>
+          <td className={styles.vrCode}>{acct.account_number}</td>
+          <td className={styles.vrName} style={{ paddingLeft: `${10 + depth * 18}px` }}>{label}</td>
+          <td className={`${styles.vrNum} ${isOver ? styles.vrOver : ''}`}>{moneyD(t.budgeted)}</td>
+          <td className={styles.vrPct}>{vrPct(t.billed, t.budgeted)}</td>
+          <td className={`${styles.vrNum} ${isOver ? styles.vrOver : ''}`}>{moneyD(t.total_commitment)}</td>
+          <td className={styles.vrPct}>{vrPct(t.billed, t.total_commitment)}</td>
+          <td className={styles.vrNum}>{moneyD(t.billed)}</td>
+          <td className={`${styles.vrNum} ${t.remaining_commit < 0 ? styles.vrNeg : ''}`}>{moneyD(t.remaining_commit)}</td>
+        </tr>,
+        ...renderVarianceAccts(children, depth + 1),
+      ];
+    });
+
   return (
     <div className={styles.wrapper}>
       {panelRow    && <LineItemPanel row={panelRow} onClose={() => setPanelRow(null)} />}
       {drillTarget && <DrillPanel phaseId={phaseIdNum} target={drillTarget} onClose={() => setDrillTarget(null)} />}
 
       <div className={styles.toolbar}>
-        <span className={styles.toolLabel}>Budget</span>
-        {drillTarget && (
+        <span className={styles.toolLabel}>{viewMode === 'variance' ? 'Variance Report' : 'Budget'}</span>
+        {drillTarget && viewMode === 'budget' && (
           <span className={styles.drillHint}>
             <strong>{drillTarget.rowName}</strong> · {drillTarget.cell === 'committed' ? 'Commitments' : 'Billed'}
             <button className={styles.drillClearBtn} onClick={() => setDrillTarget(null)}>✕</button>
           </span>
         )}
         <div className={styles.toolActions}>
-          <button className={`${styles.tbBtn} ${hideUnused ? styles.tbBtnActive : ''}`}
-            onClick={() => setHideUnused(v => !v)}
-            title="Hide rows with no contracts or invoices">
-            {hideUnused ? `Active Only (${filteredRows.length}/${rows.length})` : 'Active Only'}
+          <button className={`${styles.tbBtn} ${viewMode === 'variance' ? styles.tbBtnActive : ''}`}
+            onClick={() => setViewMode(v => v === 'budget' ? 'variance' : 'budget')}>
+            {viewMode === 'variance' ? '← Budget View' : 'Variance Report'}
           </button>
-          <button className={`${styles.tbBtn} ${showDetails ? styles.tbBtnActive : ''}`}
-            onClick={() => setShowDetails(v => !v)}>
-            {showDetails ? 'Hide Details' : 'Details'}
-          </button>
+          {viewMode === 'budget' && <>
+            <button className={`${styles.tbBtn} ${hideUnused ? styles.tbBtnActive : ''}`}
+              onClick={() => setHideUnused(v => !v)}
+              title="Hide rows with no contracts or invoices">
+              {hideUnused ? `Active Only (${filteredRows.length}/${rows.length})` : 'Active Only'}
+            </button>
+            <button className={`${styles.tbBtn} ${showDetails ? styles.tbBtnActive : ''}`}
+              onClick={() => setShowDetails(v => !v)}>
+              {showDetails ? 'Hide Details' : 'Details'}
+            </button>
+          </>}
         </div>
       </div>
 
-      <div className={styles.scrollArea} onClick={() => setActive({ rowId: -1, field: '' })}>
+      {viewMode === 'variance' && (
+        <div className={styles.vrWrap}>
+          <table className={styles.vrTable}>
+            <thead>
+              <tr className={styles.vrHead}>
+                <th className={styles.vrThCode}>GL Code</th>
+                <th className={styles.vrThName}>Description</th>
+                <th className={styles.vrThNum}>Budget</th>
+                <th className={styles.vrThPct}>% of Budget</th>
+                <th className={styles.vrThNum}>Committed</th>
+                <th className={styles.vrThPct}>% of Committed</th>
+                <th className={styles.vrThNum}>Actual (Billed)</th>
+                <th className={styles.vrThNum}>Variance<br/><span className={styles.vrThSub}>Committed − Actual</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {renderVarianceAccts(qbRoots, 0)}
+            </tbody>
+            <tfoot>
+              <tr className={styles.vrTotal}>
+                <td />
+                <td className={styles.vrTotalLabel}>TOTAL</td>
+                <td className={styles.vrNum}>{moneyD(grand.budgeted)}</td>
+                <td className={styles.vrPct}>{vrPct(grand.billed, grand.budgeted)}</td>
+                <td className={`${styles.vrNum} ${grand.total_commitment > grand.budgeted ? styles.vrOver : ''}`}>{moneyD(grand.total_commitment)}</td>
+                <td className={styles.vrPct}>{vrPct(grand.billed, grand.total_commitment)}</td>
+                <td className={styles.vrNum}>{moneyD(grand.billed)}</td>
+                <td className={`${styles.vrNum} ${grand.remaining_commit < 0 ? styles.vrNeg : ''}`}>{moneyD(grand.remaining_commit)}</td>
+              </tr>
+            </tfoot>
+          </table>
+          <div className={styles.vrLegend}>
+            <span className={styles.vrLegOver}>■ Over budget at commitment stage</span>
+            <span className={styles.vrLegNeg}>■ Negative variance (billed exceeds committed)</span>
+          </div>
+        </div>
+      )}
+
+      <div className={styles.scrollArea} style={{ display: viewMode === 'variance' ? 'none' : undefined }}
+        onClick={() => setActive({ rowId: -1, field: '' })}>
         <table className={styles.table} onClick={e => e.stopPropagation()}>
           <colgroup><col style={{width:24}}/><col style={{width:200}}/><col style={{width:210}}/><col style={{width:90}}/><col style={{width:88}}/><col style={{width:64}}/><col style={{width:90}}/><col style={{width:76}}/><col style={{width:90}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:76}}/><col style={{width:88}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:64}}/><col style={{width:64}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
           <thead>

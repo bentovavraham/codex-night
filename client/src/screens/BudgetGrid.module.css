@@ -548,3 +548,104 @@
 
 .empty { color: #c8cacd; }
 .hint  { font-size: 10.5px; color: #80868b; font-style: italic; }
+
+/* ── Variance Report view ────────────────────────────────────────────────── */
+
+.vrWrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 32px;
+  background: var(--bg);
+}
+
+.vrTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.vrHead th {
+  padding: 8px 12px;
+  background: #37474f;
+  color: #fff;
+  text-align: right;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  border-right: 1px solid rgba(255,255,255,.1);
+  white-space: nowrap;
+}
+.vrThCode, .vrThName { text-align: left; }
+.vrThSub { font-size: 9px; font-weight: 400; text-transform: none; letter-spacing: 0; opacity: .8; }
+
+.vrRow td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.vrRow:hover td { background: #f9f6f3; }
+
+/* depth-based styling */
+.vrRoot td   { background: #f0f2f4; font-weight: 700; font-size: 13px; }
+.vrGroup td  { background: #f7f8f9; font-weight: 600; }
+.vrLeaf td   { background: #fff; font-weight: 400; }
+
+/* over-budget row highlight */
+.vrRowOver td { background: #fff8f0 !important; }
+
+.vrCode {
+  font-family: monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-2);
+  white-space: nowrap;
+  width: 80px;
+}
+
+.vrName {
+  color: var(--text-1);
+  min-width: 220px;
+}
+
+.vrNum {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-1);
+  width: 110px;
+}
+
+.vrPct {
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--text-2);
+  width: 70px;
+}
+
+.vrOver { color: #c0392b; font-weight: 700; }
+.vrNeg  { color: #c0392b; }
+
+.vrTotal td {
+  padding: 10px 12px;
+  background: #263238;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  border-top: 2px solid #37474f;
+}
+.vrTotalLabel { text-align: left; letter-spacing: .06em; text-transform: uppercase; }
+.vrTotal .vrNum  { color: #fff; text-align: right; }
+.vrTotal .vrPct  { color: rgba(255,255,255,.7); text-align: right; }
+.vrTotal .vrOver { color: #ff8a65; }
+.vrTotal .vrNeg  { color: #ff8a65; }
+
+.vrLegend {
+  display: flex;
+  gap: 24px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.vrLegOver { color: #c0392b; }
+.vrLegNeg  { color: #c0392b; }
