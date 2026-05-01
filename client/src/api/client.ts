@@ -41,6 +41,9 @@ export const api = {
 
   // Budget
   getBudget:    (phaseId: number)     => request<any[]>('GET',  `/api/phases/${phaseId}/budget`),
+  downloadBudgetExcel: (phaseId: number) => {
+    window.location.href = `/api/phases/${phaseId}/budget/export-excel`;
+  },
   updateBudgetLine: (id: number, data: any) => request<any>('PATCH', `/api/budget-lines/${id}`, data),
   getLineActivity: (lineId: number)          => request<any>('GET',  `/api/budget-lines/${lineId}/activity`),
   drillBudgetLine: (phaseId: number, lineId: number) => request<any>('GET', `/api/phases/${phaseId}/budget-lines/${lineId}/drill`),

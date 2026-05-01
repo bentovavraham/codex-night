@@ -770,4 +770,139 @@ router.put('/invoice-qb-lines/:invoiceId', requireAuth, async (req, res, next) =
   } catch (err) { next(err); }
 });
 
+// GET /api/phases/:phaseId/budget/export-excel
+// Downloads a .xlsx file: both Variance Report sheet and full Budget Detail sheet.
+router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res, next) => {
+  try {
+    const XLSX = require('xlsx');
+    const phaseId = Number(req.params.phaseId);
+
+    // ── Fetch phase + project name for the filename ──
+    const phaseRow = (await pool.query(
+      `SELECT ph.name AS phase_name, pr.name AS project_name
+         FROM phases ph JOIN projects pr ON pr.id = ph.project_id
+        WHERE ph.id = $1`, [phaseId]
+    )).rows[0] || { phase_name: 'Phase', project_name: 'Project' };
+
+    // ── Fetch all budget rows with committed + billed rolled up ──
+    const rows = (await pool.query(`
+      SELECT
+        pbl.id,
+        pbl.task_name,
+        pbl.budgeted_amount::numeric            AS budgeted,
+        qa.account_number                       AS gl_code,
+        qa.full_name                            AS gl_full_name,
+        qp.account_number                       AS parent_code,
+        qp.full_name                            AS parent_full_name,
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT cli.budgeted_amount AS contribution
+            FROM contracts c JOIN contract_line_items cli ON cli.contract_id = c.id
+            WHERE COALESCE(cli.phase_budget_line_id, c.phase_budget_line_id) = pbl.id
+              AND c.status NOT IN ('voided','draft')
+            UNION ALL
+            SELECT c.total_value FROM contracts c
+            WHERE c.phase_budget_line_id = pbl.id AND c.status NOT IN ('voided','draft')
+              AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
+          ) s), 0)::numeric                     AS committed,
+        COALESCE((
+          SELECT SUM(co.amount) FROM change_orders co
+          JOIN contracts c ON c.id = co.contract_id
+          WHERE c.phase_budget_line_id = pbl.id AND co.status = 'approved'
+        ), 0)::numeric                          AS co_value,
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT ili.amount FROM invoice_line_items ili
+            JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','draft','rejected') AND ili.phase_budget_line_id = pbl.id
+            UNION ALL
+            SELECT inv.amount FROM invoices inv
+            WHERE inv.status NOT IN ('voided','draft','rejected')
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
+              AND (inv.phase_budget_line_id = pbl.id
+                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN
+                  (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
+          ) s), 0)::numeric                     AS billed
+      FROM phase_budget_lines pbl
+      LEFT JOIN qb_accounts qa ON qa.id = pbl.qb_account_id
+      LEFT JOIN qb_accounts qp ON qp.id = qa.parent_id
+      WHERE pbl.phase_id = $1
+      ORDER BY qa.sort_order NULLS LAST, pbl.sort_order
+    `, [phaseId])).rows;
+
+    const usd = n => n == null ? 0 : Number(n);
+    const pct = (num, den) => den > 0 ? Math.round((num / den) * 100) / 100 : null;
+
+    // ── Sheet 1: Variance Report (rolled up by GL parent code) ──
+    const groupMap = new Map();
+    for (const r of rows) {
+      const key = r.parent_code || r.gl_code || '—';
+      const label = r.parent_full_name || r.gl_full_name || r.task_name || '—';
+      if (!groupMap.has(key)) groupMap.set(key, { gl_code: key, label, budgeted: 0, committed: 0, co_value: 0, billed: 0 });
+      const g = groupMap.get(key);
+      g.budgeted  += usd(r.budgeted);
+      g.committed += usd(r.committed);
+      g.co_value  += usd(r.co_value);
+      g.billed    += usd(r.billed);
+    }
+
+    const vrRows = [['GL Code', 'Description', 'Budget', '% of Budget', 'Committed', '% of Committed', 'Actual (Billed)', 'Variance (Committed − Actual)']];
+    for (const [, g] of groupMap) {
+      const totalCommit = g.committed + g.co_value;
+      vrRows.push([
+        g.gl_code,
+        g.label.split(':').slice(1).join(' › ') || g.label,
+        g.budgeted,
+        pct(g.billed, g.budgeted),
+        totalCommit,
+        pct(g.billed, totalCommit),
+        g.billed,
+        totalCommit - g.billed,
+      ]);
+    }
+    // Totals row
+    const totBudget = rows.reduce((s, r) => s + usd(r.budgeted), 0);
+    const totCommit = rows.reduce((s, r) => s + usd(r.committed) + usd(r.co_value), 0);
+    const totBilled = rows.reduce((s, r) => s + usd(r.billed), 0);
+    vrRows.push(['', 'TOTAL', totBudget, pct(totBilled, totBudget), totCommit, pct(totBilled, totCommit), totBilled, totCommit - totBilled]);
+
+    const vrSheet = XLSX.utils.aoa_to_sheet(vrRows);
+    vrSheet['!cols'] = [{ wch: 10 }, { wch: 45 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 22 }];
+
+    // ── Sheet 2: Full Budget Detail ──
+    const detailRows = [['GL Code', 'Parent GL', 'Task / Description', 'Budget', 'Committed', 'COs', 'Total Commitment', 'Billed', 'Remaining (Budget − Committed)', '% Billed of Budget']];
+    for (const r of rows) {
+      const totalCommit = usd(r.committed) + usd(r.co_value);
+      detailRows.push([
+        r.gl_code || '—',
+        r.parent_code || '—',
+        r.task_name,
+        usd(r.budgeted),
+        usd(r.committed),
+        usd(r.co_value),
+        totalCommit,
+        usd(r.billed),
+        usd(r.budgeted) - totalCommit,
+        pct(usd(r.billed), usd(r.budgeted)),
+      ]);
+    }
+    detailRows.push(['', '', 'TOTAL', totBudget, rows.reduce((s,r)=>s+usd(r.committed),0), rows.reduce((s,r)=>s+usd(r.co_value),0), totCommit, totBilled, totBudget - totCommit, pct(totBilled, totBudget)]);
+
+    const detailSheet = XLSX.utils.aoa_to_sheet(detailRows);
+    detailSheet['!cols'] = [{ wch: 10 }, { wch: 10 }, { wch: 50 }, { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 26 }, { wch: 16 }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, vrSheet,     'Variance Report');
+    XLSX.utils.book_append_sheet(wb, detailSheet, 'Budget Detail');
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const filename = `${phaseRow.project_name} - ${phaseRow.phase_name} Budget.xlsx`
+      .replace(/[/\\?%*:|"<>]/g, '-');
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buf);
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

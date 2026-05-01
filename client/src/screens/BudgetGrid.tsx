@@ -651,6 +651,10 @@ export default function BudgetGrid() {
               {showDetails ? 'Hide Details' : 'Details'}
             </button>
           </>}
+          <button className={styles.tbBtn} onClick={() => api.downloadBudgetExcel(phaseIdNum)}
+            title="Download Excel — includes Variance Report + Budget Detail tabs">
+            ↓ Excel
+          </button>
         </div>
       </div>
 
