@@ -771,7 +771,7 @@ router.put('/invoice-qb-lines/:invoiceId', requireAuth, async (req, res, next) =
 });
 
 // GET /api/phases/:phaseId/budget/export-excel
-// Downloads a .xlsx file: both Variance Report sheet and full Budget Detail sheet.
+// Downloads a .xlsx file: Variance Report sheet + full Budget Detail sheet with all columns.
 router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res, next) => {
   try {
     const XLSX = require('xlsx');
@@ -784,66 +784,198 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         WHERE ph.id = $1`, [phaseId]
     )).rows[0] || { phase_name: 'Phase', project_name: 'Project' };
 
-    // ── Fetch all budget rows with committed + billed rolled up ──
-    const rows = (await pool.query(`
+    // ── Full budget query (same as GET /budget endpoint) ──
+    const rawRows = (await pool.query(`
       SELECT
         pbl.id,
         pbl.task_name,
-        pbl.budgeted_amount::numeric            AS budgeted,
-        qa.account_number                       AS gl_code,
-        qa.full_name                            AS gl_full_name,
-        qp.account_number                       AS parent_code,
-        qp.full_name                            AS parent_full_name,
+        pbl.discipline,
+        pbl.section,
+        pbl.sub_group,
+        pbl.calculation_method,
+        pbl.budgeted_amount,
+        pbl.consultant,
+        pbl.notes,
+        pbl.sort_order,
+        pbl.qb_account_id,
+
+        qa.account_number                       AS qb_account_number,
+        qa.short_name                           AS qb_short_name,
+        qa.full_name                            AS qb_full_name,
+        qp.account_number                       AS qb_parent_number,
+        qp.short_name                           AS qb_parent_name,
+        qp.full_name                            AS qb_parent_full_name,
+
         COALESCE((
-          SELECT SUM(s.amt) FROM (
-            SELECT cli.budgeted_amount AS amt
-            FROM contracts c JOIN contract_line_items cli ON cli.contract_id = c.id
+          SELECT SUM(contribution) FROM (
+            SELECT cli.budgeted_amount AS contribution
+            FROM contracts c
+            JOIN contract_line_items cli ON cli.contract_id = c.id
             WHERE COALESCE(cli.phase_budget_line_id, c.phase_budget_line_id) = pbl.id
               AND c.status NOT IN ('voided','draft')
             UNION ALL
-            SELECT c.total_value AS amt FROM contracts c
-            WHERE c.phase_budget_line_id = pbl.id AND c.status NOT IN ('voided','draft')
+            SELECT c.total_value AS contribution
+            FROM contracts c
+            WHERE c.phase_budget_line_id = pbl.id
+              AND c.status NOT IN ('voided','draft')
               AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
-          ) s), 0)::numeric                     AS committed,
+          ) sub
+        ), 0) AS committed,
+
         COALESCE((
-          SELECT SUM(co.amount) FROM change_orders co
+          SELECT SUM(co.amount)
+          FROM change_orders co
           JOIN contracts c ON c.id = co.contract_id
           WHERE c.phase_budget_line_id = pbl.id AND co.status = 'approved'
-        ), 0)::numeric                          AS co_value,
+        ), 0) AS co_value,
+
         COALESCE((
-          SELECT SUM(s.amt) FROM (
-            SELECT ili.amount AS amt FROM invoice_line_items ili
+          SELECT SUM(contribution) FROM (
+            SELECT ili.amount AS contribution
+            FROM invoice_line_items ili
             JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','draft','rejected') AND ili.phase_budget_line_id = pbl.id
+            WHERE inv.status NOT IN ('voided','draft','rejected')
+              AND ili.phase_budget_line_id = pbl.id AND ili.billing_type = 'tm'
             UNION ALL
-            SELECT inv.amount AS amt FROM invoices inv
+            SELECT inv.amount AS contribution
+            FROM invoices inv
+            WHERE inv.invoice_type = 'tm'
+              AND inv.status NOT IN ('voided','draft','rejected')
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
+              AND (inv.phase_budget_line_id = pbl.id
+                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
+          ) sub
+        ), 0) AS tm_charges,
+
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT ili.amount AS contribution
+            FROM invoice_line_items ili
+            JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','draft','rejected')
+              AND ili.phase_budget_line_id = pbl.id AND ili.billing_type = 'expense'
+            UNION ALL
+            SELECT inv.amount AS contribution
+            FROM invoices inv
+            WHERE inv.invoice_type = 'expense'
+              AND inv.status NOT IN ('voided','draft','rejected')
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
+              AND (inv.phase_budget_line_id = pbl.id
+                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
+          ) sub
+        ), 0) AS expense_charges,
+
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT ili.amount AS contribution
+            FROM invoice_line_items ili
+            JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','draft','rejected')
+              AND ili.phase_budget_line_id = pbl.id AND ili.billing_type = 'fixed'
+            UNION ALL
+            SELECT inv.amount AS contribution
+            FROM invoices inv
+            WHERE inv.invoice_type = 'fixed'
+              AND inv.status NOT IN ('voided','draft','rejected')
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
+              AND (inv.phase_budget_line_id = pbl.id
+                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
+          ) sub
+        ), 0) AS fixed_charges,
+
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT ili.amount AS contribution
+            FROM invoice_line_items ili
+            JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','draft','rejected')
+              AND ili.phase_budget_line_id = pbl.id
+            UNION ALL
+            SELECT inv.amount AS contribution
+            FROM invoices inv
             WHERE inv.status NOT IN ('voided','draft','rejected')
               AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
               AND (inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN
-                  (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
-          ) s), 0)::numeric                     AS billed
+                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
+          ) sub
+        ), 0) AS billed,
+
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT ili.amount AS contribution
+            FROM invoice_line_items ili
+            JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status = 'paid' AND ili.phase_budget_line_id = pbl.id
+            UNION ALL
+            SELECT inv.amount AS contribution
+            FROM invoices inv
+            WHERE inv.status = 'paid'
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
+              AND (inv.phase_budget_line_id = pbl.id
+                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
+          ) sub
+        ), 0) AS paid,
+
+        COALESCE((
+          SELECT string_agg(DISTINCT qa2.account_number, ', ' ORDER BY qa2.account_number)
+          FROM invoice_line_items ili
+          JOIN invoices inv ON inv.id = ili.invoice_id
+          JOIN qb_accounts qa2 ON qa2.id = ili.qb_account_id
+          WHERE inv.status NOT IN ('voided','draft','rejected')
+            AND qa2.account_number IS NOT NULL
+            AND (
+              ili.phase_budget_line_id = pbl.id
+              OR (ili.phase_budget_line_id IS NULL AND (
+                inv.phase_budget_line_id = pbl.id
+                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
+              ))
+            )
+        ), '') AS qb_codes_used
+
       FROM phase_budget_lines pbl
       LEFT JOIN qb_accounts qa ON qa.id = pbl.qb_account_id
       LEFT JOIN qb_accounts qp ON qp.id = qa.parent_id
       WHERE pbl.phase_id = $1
-      ORDER BY qa.sort_order NULLS LAST, pbl.sort_order
+      ORDER BY
+        COALESCE(qp.sort_order, qa.sort_order, 9999),
+        COALESCE(qa.sort_order, 9999),
+        pbl.sort_order,
+        pbl.id
     `, [phaseId])).rows;
 
-    const usd = n => n == null ? 0 : Number(n);
-    const pct = (num, den) => den > 0 ? Math.round((num / den) * 100) / 100 : null;
+    // Apply same computed fields as the GET /budget endpoint
+    const rows = rawRows.map(r => {
+      const budgeted         = parseFloat(r.budgeted_amount)  || 0;
+      const committed        = parseFloat(r.committed)        || 0;
+      const co_value         = parseFloat(r.co_value)         || 0;
+      const total_commitment = committed + co_value;
+      const fixed_charges    = parseFloat(r.fixed_charges)    || 0;
+      const tm_charges       = parseFloat(r.tm_charges)       || 0;
+      const expense_charges  = parseFloat(r.expense_charges)  || 0;
+      const billed           = parseFloat(r.billed)           || 0;
+      const paid             = parseFloat(r.paid)             || 0;
+      const amount_due       = billed - paid;
+      const remaining_budget = budgeted - billed;
+      const remaining_commit = budgeted - total_commitment;
+      const pct_billed       = budgeted > 0 ? billed / budgeted : null;
+      const rem_pct          = budgeted > 0 ? remaining_commit / budgeted : null;
+      return { ...r, budgeted, committed, co_value, total_commitment, fixed_charges, tm_charges, expense_charges, billed, paid, amount_due, remaining_budget, remaining_commit, pct_billed, rem_pct };
+    });
+
+    const pct = (num, den) => den > 0 ? Math.round((num / den) * 10000) / 10000 : null;
+    const fmt = n => n == null ? 0 : n;
 
     // ── Sheet 1: Variance Report (rolled up by GL parent code) ──
     const groupMap = new Map();
     for (const r of rows) {
-      const key = r.parent_code || r.gl_code || '—';
-      const label = r.parent_full_name || r.gl_full_name || r.task_name || '—';
+      const key   = r.qb_parent_number || r.qb_account_number || '—';
+      const label = r.qb_parent_full_name || r.qb_full_name || r.task_name || '—';
       if (!groupMap.has(key)) groupMap.set(key, { gl_code: key, label, budgeted: 0, committed: 0, co_value: 0, billed: 0 });
       const g = groupMap.get(key);
-      g.budgeted  += usd(r.budgeted);
-      g.committed += usd(r.committed);
-      g.co_value  += usd(r.co_value);
-      g.billed    += usd(r.billed);
+      g.budgeted  += r.budgeted;
+      g.committed += r.committed;
+      g.co_value  += r.co_value;
+      g.billed    += r.billed;
     }
 
     const vrRows = [['GL Code', 'Description', 'Budget', '% of Budget', 'Committed', '% of Committed', 'Actual (Billed)', 'Variance (Committed − Actual)']];
@@ -860,36 +992,74 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         totalCommit - g.billed,
       ]);
     }
-    // Totals row
-    const totBudget = rows.reduce((s, r) => s + usd(r.budgeted), 0);
-    const totCommit = rows.reduce((s, r) => s + usd(r.committed) + usd(r.co_value), 0);
-    const totBilled = rows.reduce((s, r) => s + usd(r.billed), 0);
+    const totBudget = rows.reduce((s, r) => s + r.budgeted, 0);
+    const totCommit = rows.reduce((s, r) => s + r.total_commitment, 0);
+    const totBilled = rows.reduce((s, r) => s + r.billed, 0);
+    const totPaid   = rows.reduce((s, r) => s + r.paid, 0);
     vrRows.push(['', 'TOTAL', totBudget, pct(totBilled, totBudget), totCommit, pct(totBilled, totCommit), totBilled, totCommit - totBilled]);
 
     const vrSheet = XLSX.utils.aoa_to_sheet(vrRows);
     vrSheet['!cols'] = [{ wch: 10 }, { wch: 45 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 22 }];
 
-    // ── Sheet 2: Full Budget Detail ──
-    const detailRows = [['GL Code', 'Parent GL', 'Task / Description', 'Budget', 'Committed', 'COs', 'Total Commitment', 'Billed', 'Remaining (Budget − Committed)', '% Billed of Budget']];
+    // ── Sheet 2: Full Budget Detail (all columns matching the grid) ──
+    const detailHeader = [
+      'GL Code', 'Parent GL', 'Task / Description', 'Consultant', 'Calc Method',
+      'Budget', 'Rem. Budget', 'Rem. %',
+      'Contracted', 'COs', 'Total Commit',
+      'Fixed', 'T&M', 'Expense',
+      'Billed', 'Amt Due', 'Paid',
+      'QB Codes Used', 'Notes',
+    ];
+    const detailRows = [detailHeader];
     for (const r of rows) {
-      const totalCommit = usd(r.committed) + usd(r.co_value);
       detailRows.push([
-        r.gl_code || '—',
-        r.parent_code || '—',
-        r.task_name,
-        usd(r.budgeted),
-        usd(r.committed),
-        usd(r.co_value),
-        totalCommit,
-        usd(r.billed),
-        usd(r.budgeted) - totalCommit,
-        pct(usd(r.billed), usd(r.budgeted)),
+        r.qb_account_number || '—',
+        r.qb_parent_number  || '—',
+        r.task_name         || '',
+        r.consultant        || '',
+        r.calculation_method || '',
+        fmt(r.budgeted),
+        fmt(r.remaining_budget),
+        r.budgeted > 0 ? pct(r.remaining_commit, r.budgeted) : null,
+        fmt(r.committed),
+        fmt(r.co_value),
+        fmt(r.total_commitment),
+        fmt(r.fixed_charges),
+        fmt(r.tm_charges),
+        fmt(r.expense_charges),
+        fmt(r.billed),
+        fmt(r.amount_due),
+        fmt(r.paid),
+        r.qb_codes_used || '',
+        r.notes         || '',
       ]);
     }
-    detailRows.push(['', '', 'TOTAL', totBudget, rows.reduce((s,r)=>s+usd(r.committed),0), rows.reduce((s,r)=>s+usd(r.co_value),0), totCommit, totBilled, totBudget - totCommit, pct(totBilled, totBudget)]);
+    detailRows.push([
+      '', '', 'TOTAL', '', '',
+      totBudget,
+      rows.reduce((s,r)=>s+r.remaining_budget,0),
+      null,
+      rows.reduce((s,r)=>s+r.committed,0),
+      rows.reduce((s,r)=>s+r.co_value,0),
+      totCommit,
+      rows.reduce((s,r)=>s+r.fixed_charges,0),
+      rows.reduce((s,r)=>s+r.tm_charges,0),
+      rows.reduce((s,r)=>s+r.expense_charges,0),
+      totBilled,
+      totBilled - totPaid,
+      totPaid,
+      '', '',
+    ]);
 
     const detailSheet = XLSX.utils.aoa_to_sheet(detailRows);
-    detailSheet['!cols'] = [{ wch: 10 }, { wch: 10 }, { wch: 50 }, { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 26 }, { wch: 16 }];
+    detailSheet['!cols'] = [
+      { wch: 10 }, { wch: 10 }, { wch: 50 }, { wch: 20 }, { wch: 12 },
+      { wch: 14 }, { wch: 14 }, { wch: 10 },
+      { wch: 14 }, { wch: 10 }, { wch: 16 },
+      { wch: 12 }, { wch: 12 }, { wch: 12 },
+      { wch: 14 }, { wch: 12 }, { wch: 12 },
+      { wch: 24 }, { wch: 40 },
+    ];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, vrSheet,     'Variance Report');
