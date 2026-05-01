@@ -270,3 +270,37 @@
 }
 .confirmDeleteBtn:hover:not(:disabled) { background: #c0392b; }
 .confirmDeleteBtn:disabled { opacity: .6; cursor: not-allowed; }
+
+/* ── Inline edit ─────────────────────────────────────────────────────────── */
+
+.inlineDisplay {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inlineDisplay:hover { background: #e8f0fe; }
+
+.inlineInput {
+  width: 100%;
+  font-size: 12px;
+  padding: 2px 5px;
+  border: 1px solid var(--primary, #c4522a);
+  border-radius: 3px;
+  outline: none;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+/* ── Scope column ────────────────────────────────────────────────────────── */
+
+.scopeCell {
+  max-width: 300px;
+  font-size: 11.5px;
+  color: var(--text-2);
+}

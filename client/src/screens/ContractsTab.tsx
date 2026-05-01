@@ -269,6 +269,46 @@ function InlineBudgetLinePicker({ lines, value, onChange }: {
   );
 }
 
+// ─── Inline editable cell ─────────────────────────────────────────────────────
+
+function InlineEdit({ value, placeholder, onSave, mono }: {
+  value: string | null;
+  placeholder: string;
+  onSave: (v: string) => void;
+  mono?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft,   setDraft]   = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function open() { setDraft(value ?? ''); setEditing(true); setTimeout(() => inputRef.current?.focus(), 10); }
+  function commit() { setEditing(false); if (draft !== (value ?? '')) onSave(draft); }
+  function onKey(e: React.KeyboardEvent) { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className={`${styles.inlineInput} ${mono ? styles.mono : ''}`}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={onKey}
+        onClick={e => e.stopPropagation()}
+      />
+    );
+  }
+  return (
+    <span
+      className={`${styles.inlineDisplay} ${mono ? styles.mono : ''} ${!value ? styles.dim : ''}`}
+      onClick={e => { e.stopPropagation(); open(); }}
+      title="Click to edit"
+    >
+      {value || placeholder}
+    </span>
+  );
+}
+
 // ─── Contract list ────────────────────────────────────────────────────────────
 
 function ContractList({ contracts, phaseId, onEdit }: {
@@ -288,6 +328,11 @@ function ContractList({ contracts, phaseId, onEdit }: {
     },
   });
 
+  const patchMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) => api.updateContract(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['phaseContracts', phaseId] }),
+  });
+
   return (
     <div className={styles.listWrap} onClick={() => setConfirmDeleteId(null)}>
       <div className={styles.toolbar}>
@@ -305,6 +350,7 @@ function ContractList({ contracts, phaseId, onEdit }: {
                 <th className={`${styles.lth} ${styles.left}`}>Vendor</th>
                 <th className={`${styles.lth} ${styles.left}`}>GL Account</th>
                 <th className={`${styles.lth} ${styles.left}`}>Contract #</th>
+                <th className={`${styles.lth} ${styles.left}`}>Scope</th>
                 <th className={`${styles.lth} ${styles.right}`}>Date</th>
                 <th className={`${styles.lth} ${styles.right}`}>Fixed Value</th>
                 <th className={`${styles.lth} ${styles.center}`}>Status</th>
@@ -316,7 +362,21 @@ function ContractList({ contracts, phaseId, onEdit }: {
                 <tr key={c.id} className={styles.listRow}>
                   <td className={styles.ltd}>{c.vendor_name}</td>
                   <td className={`${styles.ltd} ${styles.mono}`}>{c.gl_account_number ?? c.budget_line_name ?? '—'}</td>
-                  <td className={`${styles.ltd} ${styles.mono}`}>{c.reference_number || '—'}</td>
+                  <td className={styles.ltd}>
+                    <InlineEdit
+                      value={c.reference_number || null}
+                      placeholder="—"
+                      mono
+                      onSave={v => patchMutation.mutate({ id: c.id, data: { reference_number: v || null } })}
+                    />
+                  </td>
+                  <td className={`${styles.ltd} ${styles.scopeCell}`}>
+                    <InlineEdit
+                      value={c.description || null}
+                      placeholder="Add scope…"
+                      onSave={v => patchMutation.mutate({ id: c.id, data: { description: v || null } })}
+                    />
+                  </td>
                   <td className={`${styles.ltd} ${styles.mono} ${styles.right}`}>
                     {c.contract_date ? String(c.contract_date).slice(0, 10) : '—'}
                   </td>
@@ -361,7 +421,7 @@ function ContractList({ contracts, phaseId, onEdit }: {
                 const hasCos = active.some((c: any) => Number(c.co_value) > 0);
                 return (
                   <tr className={styles.totalRow}>
-                    <td colSpan={4} className={styles.totalLabel}>
+                    <td colSpan={5} className={styles.totalLabel}>
                       {active.length} contract{active.length !== 1 ? 's' : ''}{hasCos ? ' + COs' : ''}
                     </td>
                     <td className={`${styles.ltd} ${styles.mono} ${styles.right} ${styles.totalCell}`}>
