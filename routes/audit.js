@@ -252,6 +252,72 @@ router.get('/:phaseId/audit', async (req, res) => {
   }
 });
 
+// ── GET /api/phases/:phaseId/audit/transaction-report ────────────────────────
+// QB transactions as the spine. Each row carries its matched invoice if one exists.
+router.get('/:phaseId/audit/transaction-report', async (req, res) => {
+  const phaseId = Number(req.params.phaseId);
+  try {
+    const txns = await pool.query(
+      `SELECT
+         qt.id, qt.txn_date, qt.vendor_name, qt.ref_number, qt.memo,
+         qt.qb_gl_code, qt.qb_gl_name, qt.qb_project,
+         qt.amount::numeric         AS amount,
+         qt.paid_amount::numeric    AS paid_amount,
+         qt.open_balance::numeric   AS open_balance,
+         qt.is_paid,
+         i.id                       AS inv_id,
+         i.invoice_number,
+         i.amount::numeric          AS inv_amount,
+         i.invoice_date,
+         i.status                   AS inv_status,
+         i.recon_status,
+         qa.account_number          AS pm_gl_code,
+         qa.full_name               AS pm_gl_name,
+         qa.id                      AS pm_gl_id
+       FROM qb_transactions qt
+       LEFT JOIN invoices i    ON i.qb_transaction_id = qt.id
+       LEFT JOIN qb_accounts qa ON qa.id = i.pm_validated_gl_id
+       WHERE qt.phase_id = $1
+       ORDER BY qt.vendor_name, qt.txn_date, qt.id`,
+      [phaseId]
+    );
+
+    // Invoices confirmed but not linked to any QB transaction
+    const orphans = await pool.query(
+      `SELECT i.id, i.invoice_number, i.vendor_name,
+              i.amount::numeric AS inv_amount, i.invoice_date,
+              i.status, i.recon_status,
+              qa.account_number AS pm_gl_code, qa.full_name AS pm_gl_name
+         FROM invoices i
+         LEFT JOIN qb_accounts qa ON qa.id = i.pm_validated_gl_id
+        WHERE i.phase_id = $1 AND i.qb_transaction_id IS NULL
+        ORDER BY i.vendor_name, i.invoice_date`,
+      [phaseId]
+    );
+
+    const rows = txns.rows;
+    const totalAmt    = rows.reduce((s, r) => s + Number(r.amount   || 0), 0);
+    const verifiedAmt = rows.filter(r => r.inv_id).reduce((s, r) => s + Number(r.amount || 0), 0);
+    const verified    = rows.filter(r => r.inv_id && r.recon_status === 'matched').length;
+    const withInvoice = rows.filter(r => r.inv_id).length;
+
+    res.json({
+      transactions:    rows,
+      orphan_invoices: orphans.rows,
+      summary: {
+        total:          rows.length,
+        with_invoice:   withInvoice,
+        verified:       verified,
+        total_amount:   totalAmt,
+        verified_amount: verifiedAmt,
+      },
+    });
+  } catch (e) {
+    console.error('Transaction report error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── POST /api/invoices/:id/validate-gl ───────────────────────────────────────
 // PM sets the correct GL code for an invoice. Triggers recon_status recompute.
 router.post('/invoices/:id/validate-gl', async (req, res) => {

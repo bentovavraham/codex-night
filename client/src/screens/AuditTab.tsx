@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -9,35 +9,54 @@ import styles from './AuditTab.module.css';
 
 interface QbAccount { id: number; account_number: string; full_name: string; }
 
-interface AuditInvoice {
+interface TxnRow {
+  id: number;
+  txn_date: string | null;
+  vendor_name: string;
+  ref_number: string | null;
+  memo: string | null;
+  qb_gl_code: string | null;
+  qb_gl_name: string | null;
+  amount: number;
+  paid_amount: number;
+  open_balance: number;
+  is_paid: boolean;
+  // linked invoice (if any)
+  inv_id: number | null;
+  invoice_number: string | null;
+  inv_amount: number | null;
+  invoice_date: string | null;
+  inv_status: string | null;
+  recon_status: string | null;
+  pm_gl_code: string | null;
+  pm_gl_name: string | null;
+  pm_gl_id: number | null;
+}
+
+interface OrphanInvoice {
   id: number;
   invoice_number: string;
   vendor_name: string;
-  folder_amount: number | null;
+  inv_amount: number;
   invoice_date: string | null;
   status: string;
   recon_status: string | null;
-  pm_validated_gl_id: number | null;
-  pm_validated_gl_code: string | null;
-  pm_validated_gl_name: string | null;
-  qb_txn_id: number | null;
-  qb_amount: number | null;
-  qb_gl_code: string | null;
-  qb_gl_name: string | null;
-  qb_project: string | null;
-  is_paid: boolean | null;
-  paid_amount: number | null;
-  open_balance: number | null;
-  qb_memo: string | null;
-  active_gl_code: string | null;
-  active_gl_name: string | null;
+  pm_gl_code: string | null;
+  pm_gl_name: string | null;
 }
 
-interface AuditData {
-  invoices: AuditInvoice[];
-  unmatched_qb: any[];
-  totals: Record<string, any>;
-  has_qb_data: boolean;
+interface Summary {
+  total: number;
+  with_invoice: number;
+  verified: number;
+  total_amount: number;
+  verified_amount: number;
+}
+
+interface ReportData {
+  transactions: TxnRow[];
+  orphan_invoices: OrphanInvoice[];
+  summary: Summary;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -45,30 +64,20 @@ interface AuditData {
 const fmt = (n: number | null | undefined) =>
   n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 
-const ISSUE_TEXT: Record<string, string> = {
-  matched:          'OK',
-  amount_mismatch:  'Wrong Amount',
-  gl_mismatch:      'Wrong Code',
-  missing_in_qb:    'Not in QB',
-  missing_source:   'No Source Doc',
-  duplicate:        'Duplicate',
-};
+const fmtDate = (s: string | null) => s ? s.slice(0, 10) : '—';
 
-const ISSUE_CLASS: Record<string, string> = {
-  matched:          styles.tagOk,
-  amount_mismatch:  styles.tagWarn,
-  gl_mismatch:      styles.tagWarn,
-  missing_in_qb:    styles.tagMiss,
-  missing_source:   styles.tagMiss,
-  duplicate:        styles.tagErr,
-};
+function verifyStatus(row: TxnRow): 'verified' | 'amount_off' | 'gl_off' | 'unverified' {
+  if (!row.inv_id) return 'unverified';
+  if (row.recon_status === 'matched') return 'verified';
+  if (row.recon_status === 'gl_mismatch') return 'gl_off';
+  return 'amount_off';
+}
 
-// ─── GL Picker cell ──────────────────────────────────────────────────────────
+// ─── GL Picker (inline in table row) ─────────────────────────────────────────
 
-function GlPicker({ invoice, accounts, onSave }: {
-  invoice: AuditInvoice;
-  accounts: QbAccount[];
-  onSave: (invoiceId: number, glId: number | null) => void;
+function GlPickerCell({ invId, glCode, glName, accounts, onSave }: {
+  invId: number; glCode: string | null; glName: string | null;
+  accounts: QbAccount[]; onSave: (invId: number, glId: number | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [search, setSearch]   = useState('');
@@ -80,38 +89,200 @@ function GlPicker({ invoice, accounts, onSave }: {
 
   if (!editing) {
     return (
-      <div className={styles.glCell} onClick={() => setEditing(true)}>
-        {invoice.pm_validated_gl_code
-          ? <><span className={styles.glCode}>{invoice.pm_validated_gl_code}</span> <span className={styles.glName}>{invoice.pm_validated_gl_name}</span></>
-          : <span className={styles.glPlaceholder}>Click to set…</span>
-        }
+      <div className={styles.glCell} onClick={() => setEditing(true)} title="Click to set PM-validated GL code">
+        {glCode
+          ? <><span className={styles.glCode}>{glCode}</span><span className={styles.glNameSmall}>{glName?.split(':').pop()?.trim()}</span></>
+          : <span className={styles.glPlaceholder}>Set code…</span>}
       </div>
     );
   }
 
   return (
     <div className={styles.glPickerWrap}>
-      <input
-        autoFocus
-        className={styles.glSearch}
-        placeholder="Code or name…"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        onBlur={() => { setTimeout(() => setEditing(false), 150); }}
-      />
+      <input autoFocus className={styles.glSearch} placeholder="Code or name…"
+        value={search} onChange={e => setSearch(e.target.value)}
+        onBlur={() => { setTimeout(() => setEditing(false), 150); }} />
       <div className={styles.glDropdown}>
         {filtered.map(a => (
-          <div
-            key={a.id}
-            className={styles.glOption}
-            onMouseDown={() => { onSave(invoice.id, a.id); setEditing(false); setSearch(''); }}
-          >
+          <div key={a.id} className={styles.glOption}
+            onMouseDown={() => { onSave(invId, a.id); setEditing(false); setSearch(''); }}>
             <span className={styles.glCode}>{a.account_number}</span>
             <span className={styles.glName}>{a.full_name}</span>
           </div>
         ))}
         {!filtered.length && <div className={styles.glEmpty}>No match</div>}
       </div>
+    </div>
+  );
+}
+
+// ─── Progress Bar ─────────────────────────────────────────────────────────────
+
+function ProgressBar({ summary }: { summary: Summary }) {
+  const pct = summary.total > 0 ? (summary.with_invoice / summary.total) * 100 : 0;
+  const amtPct = summary.total_amount > 0 ? (summary.verified_amount / summary.total_amount) * 100 : 0;
+
+  return (
+    <div className={styles.progressWrap}>
+      <div className={styles.progressHeader}>
+        <span className={styles.progressTitle}>Invoice Coverage</span>
+        <span className={styles.progressCounts}>
+          <strong>{summary.with_invoice}</strong> of <strong>{summary.total}</strong> transactions have an invoice
+          <span className={styles.progressDivider}>·</span>
+          <strong>{fmt(summary.verified_amount)}</strong> of <strong>{fmt(summary.total_amount)}</strong> covered
+          <span className={styles.progressDivider}>·</span>
+          <span className={pct >= 100 ? styles.progressComplete : styles.progressPartial}>
+            {pct.toFixed(1)}%
+          </span>
+        </span>
+      </div>
+      <div className={styles.progressTrack}>
+        <div className={styles.progressFillVerified} style={{ width: `${amtPct}%` }} />
+        <div className={styles.progressFillCounted} style={{ width: `${Math.max(pct - amtPct, 0)}%` }} />
+      </div>
+      <div className={styles.progressLegend}>
+        <span className={styles.legendVerified}>■ Verified &amp; matched</span>
+        <span className={styles.legendUnverified}>■ No invoice yet</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Vendor Group ─────────────────────────────────────────────────────────────
+
+function VendorGroup({ vendor, rows, accounts, statusFilter, onValidateGl, onImport }: {
+  vendor: string;
+  rows: TxnRow[];
+  accounts: QbAccount[];
+  statusFilter: string;
+  onValidateGl: (invId: number, glId: number | null) => void;
+  onImport: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+
+  const totalAmt   = rows.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const withInv    = rows.filter(r => r.inv_id).length;
+  const verified   = rows.filter(r => verifyStatus(r) === 'verified').length;
+  const issues     = rows.filter(r => { const s = verifyStatus(r); return s === 'amount_off' || s === 'gl_off'; }).length;
+  const unverified = rows.filter(r => !r.inv_id).length;
+
+  const visible = rows.filter(r => {
+    if (statusFilter === 'verified')   return verifyStatus(r) === 'verified';
+    if (statusFilter === 'unverified') return !r.inv_id;
+    if (statusFilter === 'issues')     return verifyStatus(r) === 'amount_off' || verifyStatus(r) === 'gl_off';
+    return true;
+  });
+
+  if (statusFilter !== 'all' && visible.length === 0) return null;
+
+  return (
+    <div className={styles.vendorGroup}>
+      <div className={styles.vendorHeader} onClick={() => setOpen(o => !o)}>
+        <span className={styles.vendorChevron}>{open ? '▾' : '▸'}</span>
+        <span className={styles.vendorName}>{vendor}</span>
+        <div className={styles.vendorMeta}>
+          {verified > 0    && <span className={styles.metaVerified}>{verified} verified</span>}
+          {issues > 0      && <span className={styles.metaIssue}>{issues} issue{issues > 1 ? 's' : ''}</span>}
+          {unverified > 0  && <span className={styles.metaUnverified}>{unverified} need invoice</span>}
+        </div>
+        <span className={styles.vendorTotal}>{fmt(totalAmt)}</span>
+      </div>
+
+      {open && (
+        <div className={styles.vendorBody}>
+          <table className={styles.txnTable}>
+            <colgroup>
+              <col style={{ width: '18px' }} />
+              <col style={{ width: '82px' }} />
+              <col style={{ width: '80px' }} />
+              <col style={{ width: '200px' }} />
+              <col style={{ width: '130px' }} />
+              <col style={{ width: '90px' }} />
+              <col style={{ width: '90px' }} />
+              <col style={{ width: '70px' }} />
+              <col style={{ width: '130px' }} />
+              <col style={{ width: '70px' }} />
+            </colgroup>
+            <thead>
+              <tr className={styles.txnHead}>
+                <th />
+                <th>Date</th>
+                <th>Ref #</th>
+                <th>Memo</th>
+                <th>QB GL Code</th>
+                <th className={styles.right}>QB Amount</th>
+                <th className={styles.right}>Inv Amount</th>
+                <th>Paid?</th>
+                <th>PM GL Code</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map(row => {
+                const vs = verifyStatus(row);
+                const amtDelta = row.inv_amount != null
+                  ? Number(row.inv_amount) - Number(row.amount) : null;
+
+                return (
+                  <tr key={row.id} className={`${styles.txnRow} ${styles['txnRow_' + vs]}`}>
+                    {/* status dot */}
+                    <td><span className={`${styles.dot} ${styles['dot_' + vs]}`} title={vs} /></td>
+
+                    {/* date */}
+                    <td className={styles.txnDate}>{fmtDate(row.txn_date)}</td>
+
+                    {/* ref # */}
+                    <td className={styles.txnRef}>{row.ref_number || '—'}</td>
+
+                    {/* memo */}
+                    <td className={styles.txnMemo} title={row.memo || ''}>{row.memo || '—'}</td>
+
+                    {/* QB GL */}
+                    <td className={styles.txnGl}>
+                      {row.qb_gl_code
+                        ? <><span className={styles.glCode}>{row.qb_gl_code}</span><span className={styles.glNameSmall}>{row.qb_gl_name?.split(':').pop()?.trim()}</span></>
+                        : <span className={styles.noData}>—</span>}
+                    </td>
+
+                    {/* QB amount */}
+                    <td className={`${styles.right} ${styles.txnAmt}`}>{fmt(row.amount)}</td>
+
+                    {/* invoice amount (delta highlighted if off) */}
+                    <td className={`${styles.right} ${amtDelta != null && Math.abs(amtDelta) >= 0.02 ? styles.amtOff : ''}`}>
+                      {row.inv_id
+                        ? <>{fmt(row.inv_amount)}{amtDelta != null && Math.abs(amtDelta) >= 0.02 && <span className={styles.deltaNote}> ({amtDelta > 0 ? '+' : ''}{fmt(amtDelta)})</span>}</>
+                        : <span className={styles.noInv} onClick={onImport} title="No invoice — click Import to attach one">+ add</span>}
+                    </td>
+
+                    {/* paid */}
+                    <td>
+                      <span className={row.is_paid ? styles.paidYes : styles.paidNo}>
+                        {row.is_paid ? 'Paid' : 'Open'}
+                      </span>
+                    </td>
+
+                    {/* PM GL picker (only if invoice linked) */}
+                    <td className={styles.txnPmGl}>
+                      {row.inv_id
+                        ? <GlPickerCell invId={row.inv_id} glCode={row.pm_gl_code} glName={row.pm_gl_name}
+                            accounts={accounts} onSave={onValidateGl} />
+                        : <span className={styles.noData}>—</span>}
+                    </td>
+
+                    {/* status badge */}
+                    <td>
+                      {vs === 'verified'   && <span className={styles.badgeVerified}>✓ Verified</span>}
+                      {vs === 'amount_off' && <span className={styles.badgeAmtOff}>Amt Off</span>}
+                      {vs === 'gl_off'     && <span className={styles.badgeGlOff}>GL Off</span>}
+                      {vs === 'unverified' && <span className={styles.badgeUnverified}>No Invoice</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -124,18 +295,15 @@ export default function AuditTab() {
   const qc  = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [importing, setImporting] = useState(false);
-  const [importMsg, setImportMsg] = useState<string | null>(null);
-  const [filter, setFilter]       = useState<'all' | 'issues'>('all');
-  const [showImport, setShowImport] = useState(false);
+  const [importing, setImporting]     = useState(false);
+  const [importMsg, setImportMsg]     = useState<string | null>(null);
+  const [showImport, setShowImport]   = useState(false);
   const [vendorFilter, setVendorFilter] = useState('');
-  const [dateFrom, setDateFrom]     = useState('');
-  const [dateTo, setDateTo]         = useState('');
-  const [sortAmt, setSortAmt]       = useState<'asc' | 'desc' | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'verified' | 'unverified' | 'issues'>('all');
 
-  const { data, isLoading, error } = useQuery<AuditData>({
-    queryKey: ['audit', pid],
-    queryFn:  () => api.getAudit(pid),
+  const { data, isLoading, error } = useQuery<ReportData>({
+    queryKey: ['txnReport', pid],
+    queryFn:  () => api.getTransactionReport(pid),
     enabled:  !!pid,
   });
 
@@ -147,18 +315,18 @@ export default function AuditTab() {
   const validateGl = useMutation({
     mutationFn: ({ invoiceId, glId }: { invoiceId: number; glId: number | null }) =>
       api.validateGl(invoiceId, glId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['audit', pid] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['txnReport', pid] }),
   });
 
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleQbImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true);
     setImportMsg(null);
     try {
       const r = await api.importQbExcel(pid, file);
-      setImportMsg(`Imported ${r.inserted} rows, auto-matched ${r.matched} invoices, skipped ${r.skipped} duplicates.`);
-      qc.invalidateQueries({ queryKey: ['audit', pid] });
+      setImportMsg(`Imported ${r.inserted} rows, matched ${r.matched} invoices, skipped ${r.skipped} duplicates.`);
+      qc.invalidateQueries({ queryKey: ['txnReport', pid] });
     } catch (err: any) {
       setImportMsg(`Error: ${err.message}`);
     } finally {
@@ -167,72 +335,66 @@ export default function AuditTab() {
     }
   }
 
-  if (isLoading) return <div className={styles.empty}>Loading audit…</div>;
-  if (error)     return <div className={styles.error}>Error loading audit data</div>;
+  const vendorGroups = useMemo(() => {
+    if (!data) return [];
+    let rows = data.transactions;
+    if (vendorFilter.trim())
+      rows = rows.filter(r => r.vendor_name.toLowerCase().includes(vendorFilter.trim().toLowerCase()));
+
+    const map = new Map<string, TxnRow[]>();
+    for (const row of rows) {
+      const key = row.vendor_name || '(Unknown)';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(row);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [data, vendorFilter]);
+
+  if (isLoading) return <div className={styles.empty}>Loading transaction report…</div>;
+  if (error)     return <div className={styles.error}>Error loading data</div>;
 
   const d = data!;
+  const hasQb = d.transactions.length > 0;
 
-  const applyFilters = (rows: AuditInvoice[]) => {
-    let r = filter === 'issues'
-      ? rows.filter(i => i.recon_status && i.recon_status !== 'matched')
-      : rows;
-    if (vendorFilter.trim())
-      r = r.filter(i => i.vendor_name.toLowerCase().includes(vendorFilter.trim().toLowerCase()));
-    if (dateFrom)
-      r = r.filter(i => i.invoice_date && i.invoice_date >= dateFrom);
-    if (dateTo)
-      r = r.filter(i => i.invoice_date && i.invoice_date <= dateTo);
-    if (sortAmt)
-      r = [...r].sort((a, b) => sortAmt === 'asc'
-        ? (a.folder_amount ?? 0) - (b.folder_amount ?? 0)
-        : (b.folder_amount ?? 0) - (a.folder_amount ?? 0));
-    return r;
+  const statusCounts = {
+    all:        d.transactions.length,
+    verified:   d.transactions.filter(r => verifyStatus(r) === 'verified').length,
+    unverified: d.transactions.filter(r => !r.inv_id).length,
+    issues:     d.transactions.filter(r => { const s = verifyStatus(r); return s === 'amount_off' || s === 'gl_off'; }).length,
   };
-
-  const invoices = applyFilters(d.invoices);
-
-  const unmatchedQb = (() => {
-    let r = d.unmatched_qb;
-    if (vendorFilter.trim())
-      r = r.filter((t: any) => String(t.vendor_name || '').toLowerCase().includes(vendorFilter.trim().toLowerCase()));
-    if (dateFrom)
-      r = r.filter((t: any) => t.txn_date && t.txn_date >= dateFrom);
-    if (dateTo)
-      r = r.filter((t: any) => t.txn_date && t.txn_date <= dateTo);
-    if (sortAmt)
-      r = [...r].sort((a: any, b: any) => sortAmt === 'asc' ? (a.amount ?? 0) - (b.amount ?? 0) : (b.amount ?? 0) - (a.amount ?? 0));
-    return r;
-  })();
-
-  const t = d.totals;
 
   return (
     <div className={styles.wrap}>
 
       {/* ── Toolbar ── */}
       <div className={styles.toolbar}>
-        <span className={styles.label}>AUDIT</span>
+        <span className={styles.label}>TRANSACTION REPORT</span>
 
         <div className={styles.filterToggle}>
-          <button
-            className={filter === 'all' ? `${styles.toggleBtn} ${styles.toggleActive}` : styles.toggleBtn}
-            onClick={() => setFilter('all')}
-          >All ({d.invoices.length})</button>
-          <button
-            className={filter === 'issues' ? `${styles.toggleBtn} ${styles.toggleActive}` : styles.toggleBtn}
-            onClick={() => setFilter('issues')}
-          >Issues only ({d.invoices.filter(i => i.recon_status && i.recon_status !== 'matched').length})</button>
+          {(['all', 'verified', 'unverified', 'issues'] as const).map(f => (
+            <button key={f}
+              className={`${styles.toggleBtn} ${statusFilter === f ? styles.toggleActive : ''}`}
+              onClick={() => setStatusFilter(f)}>
+              {f === 'all'        ? `All (${statusCounts.all})` : ''}
+              {f === 'verified'   ? `✓ Verified (${statusCounts.verified})` : ''}
+              {f === 'unverified' ? `○ Need Invoice (${statusCounts.unverified})` : ''}
+              {f === 'issues'     ? `⚠ Issues (${statusCounts.issues})` : ''}
+            </button>
+          ))}
         </div>
 
         <div className={styles.toolbarRight}>
-          {!d.has_qb_data && (
-            <span className={styles.noQbHint}>No QB data yet — import an Excel export to begin reconciliation</span>
-          )}
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.pdf" style={{ display: 'none' }} onChange={handleImport} />
+          <input
+            className={styles.vendorSearch}
+            placeholder="Filter vendor…"
+            value={vendorFilter}
+            onChange={e => setVendorFilter(e.target.value)}
+          />
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.pdf" style={{ display: 'none' }} onChange={handleQbImport} />
           <button className={styles.btnSecondary} onClick={() => fileRef.current?.click()} disabled={importing}>
-            {importing ? 'Importing…' : '↑ Import QB Export'}
+            {importing ? 'Importing…' : '↑ QB Export'}
           </button>
-          {d.has_qb_data && (
+          {hasQb && (
             <button className={styles.btnSecondary} onClick={() => api.downloadCorrectionReport(pid)}>
               ↓ Correction Report
             </button>
@@ -243,211 +405,84 @@ export default function AuditTab() {
         </div>
       </div>
 
-      {/* ── Filter bar ── */}
-      <div className={styles.filterBar}>
-        <input
-          className={styles.filterInput}
-          placeholder="Filter by vendor…"
-          value={vendorFilter}
-          onChange={e => setVendorFilter(e.target.value)}
-        />
-        <input
-          className={styles.filterDate}
-          type="date"
-          value={dateFrom}
-          onChange={e => setDateFrom(e.target.value)}
-          title="Date from"
-        />
-        <span className={styles.filterDateSep}>–</span>
-        <input
-          className={styles.filterDate}
-          type="date"
-          value={dateTo}
-          onChange={e => setDateTo(e.target.value)}
-          title="Date to"
-        />
-        <button
-          className={`${styles.sortBtn} ${sortAmt === 'asc' ? styles.sortActive : ''}`}
-          onClick={() => setSortAmt(s => s === 'asc' ? null : 'asc')}
-          title="Sort by amount ascending"
-        >Amt ↑</button>
-        <button
-          className={`${styles.sortBtn} ${sortAmt === 'desc' ? styles.sortActive : ''}`}
-          onClick={() => setSortAmt(s => s === 'desc' ? null : 'desc')}
-          title="Sort by amount descending"
-        >Amt ↓</button>
-        {(vendorFilter || dateFrom || dateTo || sortAmt) && (
-          <button className={styles.clearFiltersBtn} onClick={() => { setVendorFilter(''); setDateFrom(''); setDateTo(''); setSortAmt(null); }}>
-            Clear filters
-          </button>
-        )}
-      </div>
-
       {importMsg && (
         <div className={importMsg.startsWith('Error') ? styles.importErr : styles.importOk}>
           {importMsg}
         </div>
       )}
 
-      {/* ── Summary strip ── */}
-      {d.has_qb_data && (
-        <div className={styles.summaryStrip}>
-          <div className={styles.summaryCard}>
-            <div className={styles.summaryVal}>{fmt(t.total_folder)}</div>
-            <div className={styles.summaryLbl}>Folder Total</div>
-          </div>
-          <div className={styles.summaryCard}>
-            <div className={styles.summaryVal}>{fmt(t.total_qb)}</div>
-            <div className={styles.summaryLbl}>QB Total</div>
-          </div>
-          <div className={styles.summaryCard}>
-            <div className={styles.summaryVal}>{fmt(t.total_paid_qb)}</div>
-            <div className={styles.summaryLbl}>Paid in QB</div>
-          </div>
-          <div className={styles.summaryCard}>
-            <div className={styles.summaryVal}>{fmt(t.total_open_qb)}</div>
-            <div className={styles.summaryLbl}>QB Open Balance</div>
-          </div>
-          <div className={styles.summaryCard}>
-            <div className={`${styles.summaryVal} ${Number(t.cnt_matched) === d.invoices.length ? styles.allGood : styles.hasIssues}`}>
-              {t.cnt_matched} / {d.invoices.length}
-            </div>
-            <div className={styles.summaryLbl}>Matched</div>
-          </div>
+      {/* ── Progress bar ── */}
+      {hasQb && <ProgressBar summary={d.summary} />}
+
+      {!hasQb && (
+        <div className={styles.noQbState}>
+          <div className={styles.noQbTitle}>No QB transaction data yet</div>
+          <div className={styles.noQbSub}>Import a QuickBooks Transaction Detail report (Excel or PDF) to see all transactions for this property. Each transaction will appear here — invoices attach to them as you import vendor PDFs.</div>
+          <button className={styles.btnPrimary} onClick={() => fileRef.current?.click()}>↑ Import QB Export</button>
         </div>
       )}
 
-      {/* ── Main audit table ── */}
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th className={styles.th}>Invoice #</th>
-              <th className={styles.th}>Vendor</th>
-              <th className={`${styles.th} ${styles.right}`}>QB Amt</th>
-              <th className={`${styles.th} ${styles.right}`}>Folder Amt</th>
-              <th className={`${styles.th} ${styles.right}`}>Delta</th>
-              <th className={styles.th}>QB GL Code</th>
-              <th className={styles.th}>QB GL Description</th>
-              <th className={styles.th}>PM Validated Code</th>
-              <th className={styles.th}>Match?</th>
-              <th className={styles.th}>Issue</th>
-              <th className={styles.th}>Paid in QB?</th>
-              <th className={`${styles.th} ${styles.right}`}>Open Bal</th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoices.length === 0 && (
-              <tr>
-                <td colSpan={12} className={styles.emptyRow}>
-                  {filter === 'issues' ? 'No issues found — everything looks good.' : 'No invoices in this phase yet.'}
-                </td>
-              </tr>
-            )}
-            {invoices.map(inv => {
-              const amtMismatch = inv.qb_amount != null && inv.folder_amount != null &&
-                Math.abs(inv.folder_amount - inv.qb_amount) >= 0.02;
-              const delta = inv.qb_amount != null && inv.folder_amount != null
-                ? inv.folder_amount - inv.qb_amount : null;
-              const isOk = inv.recon_status === 'matched';
-              return (
-                <tr key={inv.id} className={styles.row}>
-                  <td className={styles.td}>{inv.invoice_number || '—'}</td>
-                  <td className={styles.td}>{inv.vendor_name}</td>
-                  <td className={`${styles.td} ${styles.right} ${amtMismatch ? styles.mismatch : ''}`}>
-                    {fmt(inv.qb_amount)}
-                  </td>
-                  <td className={`${styles.td} ${styles.right}`}>{fmt(inv.folder_amount)}</td>
-                  <td className={`${styles.td} ${styles.right} ${delta != null && Math.abs(delta) >= 0.02 ? styles.mismatch : ''}`}>
-                    {delta != null ? (Math.abs(delta) < 0.02 ? '—' : fmt(delta)) : '—'}
-                  </td>
-                  <td className={styles.td}>
-                    {inv.qb_gl_code
-                      ? <span className={styles.glCode}>{inv.qb_gl_code}</span>
-                      : <span className={styles.noData}>—</span>}
-                  </td>
-                  <td className={styles.td}>
-                    <span className={styles.glNameSmall}>{inv.qb_gl_name || '—'}</span>
-                  </td>
-                  <td className={`${styles.td} ${styles.glPickerCell}`}>
-                    <GlPicker
-                      invoice={inv}
-                      accounts={accounts as QbAccount[]}
-                      onSave={(invId, glId) => validateGl.mutate({ invoiceId: invId, glId })}
-                    />
-                  </td>
-                  <td className={styles.td}>
-                    {inv.recon_status
-                      ? <span className={isOk ? styles.matchYes : styles.matchNo}>{isOk ? '✓ Yes' : '✗ No'}</span>
-                      : <span className={styles.noData}>—</span>}
-                  </td>
-                  <td className={styles.td}>
-                    {inv.recon_status
-                      ? <span className={`${styles.tag} ${ISSUE_CLASS[inv.recon_status] || styles.tagWarn}`}>
-                          {ISSUE_TEXT[inv.recon_status] || inv.recon_status}
-                        </span>
-                      : <span className={styles.noData}>—</span>}
-                  </td>
-                  <td className={styles.td}>
-                    {inv.qb_txn_id != null
-                      ? <span className={inv.is_paid ? styles.paidYes : styles.paidNo}>{inv.is_paid ? 'Yes' : 'No'}</span>
-                      : <span className={styles.noData}>—</span>}
-                  </td>
-                  <td className={`${styles.td} ${styles.right}`}>{fmt(inv.open_balance)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      {/* ── Transaction list ── */}
+      {hasQb && (
+        <div className={styles.txnList}>
+          {vendorGroups.map(([vendor, rows]) => (
+            <VendorGroup
+              key={vendor}
+              vendor={vendor}
+              rows={rows}
+              accounts={accounts as QbAccount[]}
+              statusFilter={statusFilter}
+              onValidateGl={(invId, glId) => validateGl.mutate({ invoiceId: invId, glId })}
+              onImport={() => setShowImport(true)}
+            />
+          ))}
+          {vendorGroups.length === 0 && (
+            <div className={styles.empty}>No transactions match the current filter.</div>
+          )}
+        </div>
+      )}
 
-      {/* ── Unmatched QB transactions ── */}
-      {unmatchedQb.length > 0 && (
-        <div className={styles.unmatchedSection}>
-          <div className={styles.unmatchedHeader}>
-            QB transactions with no source document ({unmatchedQb.length}{d.unmatched_qb.length !== unmatchedQb.length ? ` of ${d.unmatched_qb.length}` : ''})
+      {/* ── Orphan invoices (confirmed but no QB match) ── */}
+      {d.orphan_invoices.length > 0 && (
+        <div className={styles.orphanSection}>
+          <div className={styles.orphanHeader}>
+            Invoices with no QB transaction match ({d.orphan_invoices.length})
+            <span className={styles.orphanNote}> — these are confirmed but couldn't be linked to a QB entry</span>
           </div>
-          <table className={styles.table}>
+          <table className={styles.txnTable} style={{ width: '100%' }}>
             <thead>
-              <tr>
-                <th className={styles.th}>Date</th>
-                <th className={styles.th}>Vendor</th>
-                <th className={styles.th}>Ref #</th>
-                <th className={`${styles.th} ${styles.right}`}>Amount</th>
-                <th className={styles.th}>QB GL</th>
-                <th className={styles.th}>Paid?</th>
+              <tr className={styles.txnHead}>
+                <th>Vendor</th>
+                <th>Invoice #</th>
+                <th className={styles.right}>Amount</th>
+                <th>Date</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              {unmatchedQb.map((txn: any) => (
-                <tr key={txn.id} className={`${styles.row} ${styles.unmatchedRow}`}>
-                  <td className={styles.td}>{txn.txn_date?.slice(0, 10) || '—'}</td>
-                  <td className={styles.td}>{txn.vendor_name || '—'}</td>
-                  <td className={styles.td}>{txn.ref_number || '—'}</td>
-                  <td className={`${styles.td} ${styles.right}`}>{fmt(txn.amount)}</td>
-                  <td className={styles.td}>
-                    {txn.qb_gl_code
-                      ? <><span className={styles.glCode}>{txn.qb_gl_code}</span> <span className={styles.glNameSmall}>{txn.qb_gl_name}</span></>
-                      : '—'}
-                  </td>
-                  <td className={styles.td}>
-                    <span className={txn.is_paid ? styles.paidYes : styles.paidNo}>
-                      {txn.is_paid ? 'Yes' : 'No'}
-                    </span>
-                  </td>
+              {d.orphan_invoices.map(inv => (
+                <tr key={inv.id} className={styles.txnRow}>
+                  <td>{inv.vendor_name}</td>
+                  <td>{inv.invoice_number}</td>
+                  <td className={styles.right}>{fmt(inv.inv_amount)}</td>
+                  <td>{fmtDate(inv.invoice_date)}</td>
+                  <td><span className={styles.badgeUnverified}>Not in QB</span></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-      </div>
 
       {/* ── Import drawer ── */}
       {showImport && (
         <ImportDrawer
           phaseId={pid}
           onClose={() => setShowImport(false)}
-          onConfirmed={() => qc.invalidateQueries({ queryKey: ['audit', pid] })}
+          onConfirmed={() => {
+            qc.invalidateQueries({ queryKey: ['txnReport', pid] });
+            qc.invalidateQueries({ queryKey: ['audit', pid] });
+          }}
         />
       )}
     </div>

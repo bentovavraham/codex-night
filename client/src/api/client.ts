@@ -125,6 +125,7 @@ export const api = {
 
   // Audit
   getAudit: (phaseId: number) => request<any>('GET', `/api/phases/${phaseId}/audit`),
+  getTransactionReport: (phaseId: number) => request<any>('GET', `/api/phases/${phaseId}/audit/transaction-report`),
   validateGl: (invoiceId: number, glAccountId: number | null) =>
     request<any>('POST', `/api/audit/invoices/${invoiceId}/validate-gl`, { gl_account_id: glAccountId }),
   importQbExcel: async (phaseId: number, file: File) => {
