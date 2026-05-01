@@ -26,7 +26,6 @@ interface ContractForm {
   reference_number: string;
   contract_date: string;
   description: string;
-  phase_budget_line_id: number | null;
   status: string;
   line_items: ContractLine[];
   reviewed: boolean;
@@ -34,7 +33,7 @@ interface ContractForm {
 
 const EMPTY_FORM: ContractForm = {
   vendor_name: '', reference_number: '', contract_date: '',
-  description: '', phase_budget_line_id: null, status: 'draft',
+  description: '', status: 'draft',
   line_items: [], reviewed: false,
 };
 
@@ -307,8 +306,8 @@ function ContractList({ contracts, phaseId, onUpload, onEdit }: {
             <thead>
               <tr className={styles.listThead}>
                 <th className={`${styles.lth} ${styles.left}`}>Vendor</th>
-                <th className={`${styles.lth} ${styles.left}`}>Task</th>
-                <th className={`${styles.lth} ${styles.left}`}>Ref #</th>
+                <th className={`${styles.lth} ${styles.left}`}>GL Account</th>
+                <th className={`${styles.lth} ${styles.left}`}>Contract #</th>
                 <th className={`${styles.lth} ${styles.right}`}>Date</th>
                 <th className={`${styles.lth} ${styles.right}`}>Fixed Value</th>
                 <th className={`${styles.lth} ${styles.center}`}>Status</th>
@@ -319,7 +318,7 @@ function ContractList({ contracts, phaseId, onUpload, onEdit }: {
               {contracts.map((c: any) => (
                 <tr key={c.id} className={styles.listRow}>
                   <td className={styles.ltd}>{c.vendor_name}</td>
-                  <td className={`${styles.ltd} ${styles.dim}`}>{c.budget_line_name ?? '—'}</td>
+                  <td className={`${styles.ltd} ${styles.mono}`}>{c.gl_account_number ?? c.budget_line_name ?? '—'}</td>
                   <td className={`${styles.ltd} ${styles.mono}`}>{c.reference_number || '—'}</td>
                   <td className={`${styles.ltd} ${styles.mono} ${styles.right}`}>
                     {c.contract_date ? String(c.contract_date).slice(0, 10) : '—'}
@@ -344,12 +343,12 @@ function ContractList({ contracts, phaseId, onUpload, onEdit }: {
                       </button>
                       {confirmDeleteId === c.id ? (
                         <button className={styles.confirmDeleteBtn}
-                          onClick={() => deleteMutation.mutate(c.id)}
+                          onClick={e => { e.stopPropagation(); deleteMutation.mutate(c.id); }}
                           disabled={deleteMutation.isPending}>
                           Confirm?
                         </button>
                       ) : (
-                        <button className={styles.deleteBtn} onClick={() => setConfirmDeleteId(c.id)} title="Delete contract">
+                        <button className={styles.deleteBtn} onClick={e => { e.stopPropagation(); setConfirmDeleteId(c.id); }} title="Delete contract">
                           ✕
                         </button>
                       )}
@@ -385,8 +384,7 @@ function ContractList({ contracts, phaseId, onUpload, onEdit }: {
 
 // ─── Upload + review panel ────────────────────────────────────────────────────
 
-function UploadPanel({ budgetLines, qbAccounts, projectId, phaseId, onClose, onSaved, editId }: {
-  budgetLines: any[];
+function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, editId }: {
   qbAccounts: QbAccount[];
   projectId: number;
   phaseId: number;
@@ -417,12 +415,11 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, phaseId, onClose, onS
       }
       setFileRef(c.file_reference ?? null);
       setForm({
-        vendor_name:          c.vendor_name ?? '',
-        reference_number:     c.reference_number ?? '',
-        contract_date:        c.contract_date ? String(c.contract_date).slice(0, 10) : '',
-        description:          c.description ?? '',
-        phase_budget_line_id: c.phase_budget_line_id ?? null,
-        status:               c.status ?? 'draft',
+        vendor_name:      c.vendor_name ?? '',
+        reference_number: c.reference_number ?? '',
+        contract_date:    c.contract_date ? String(c.contract_date).slice(0, 10) : '',
+        description:      c.description ?? '',
+        status:           c.status ?? 'draft',
         line_items: (c.task_items ?? []).map((li: any) => ({
           billing_type:             li.billing_type ?? 'fixed',
           description:              li.description ?? '',
@@ -464,14 +461,13 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, phaseId, onClose, onS
           budget_line_confidence:   li.budget_line_confidence ?? null,
         }));
         setForm({
-          vendor_name:          e.vendor_name      ?? '',
-          reference_number:     e.reference_number ?? '',
-          contract_date:        e.contract_date    ?? '',
-          description:          e.description      ?? '',
-          phase_budget_line_id: e.suggested_primary_budget_line_id ?? null,
-          status:               'draft',
-          line_items:           items,
-          reviewed:             false,
+          vendor_name:      e.vendor_name      ?? '',
+          reference_number: e.reference_number ?? '',
+          contract_date:    e.contract_date    ?? '',
+          description:      e.description      ?? '',
+          status:           'draft',
+          line_items:       items,
+          reviewed:         false,
         });
       }
       if (result.extract_error) setExtractError(result.extract_error);
@@ -522,31 +518,29 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, phaseId, onClose, onS
 
   async function handleSave() {
     setSaveError(null);
-    if (!form.vendor_name.trim())                          return setSaveError('Vendor name is required.');
-    if (!hasLineItems && !form.phase_budget_line_id)       return setSaveError('Budget line is required when there are no contract tasks.');
-    if (!form.reviewed)                                    return setSaveError('Please check the review confirmation.');
+    if (!form.vendor_name.trim()) return setSaveError('Vendor name is required.');
+    if (!form.reviewed)           return setSaveError('Please check the review confirmation.');
 
     setSaving(true);
     try {
       const payload = {
-        project_id:           projectId,
-        phase_budget_line_id: form.phase_budget_line_id,
-        vendor_name:          form.vendor_name.trim(),
-        reference_number:     form.reference_number || null,
-        contract_date:        form.contract_date    || null,
-        description:          form.description      || null,
-        total_value:          fixedTotal,
-        status:               form.status,
-        file_reference:       fileRef               || null,
-        contract_line_items:  form.line_items
+        project_id:          projectId,
+        phase_id:            phaseId,
+        vendor_name:         form.vendor_name.trim(),
+        reference_number:    form.reference_number || null,
+        contract_date:       form.contract_date    || null,
+        description:         form.description      || null,
+        total_value:         fixedTotal,
+        status:              form.status,
+        file_reference:      fileRef               || null,
+        contract_line_items: form.line_items
           .filter(li => li.description.trim())
           .map((li, i) => ({
-            billing_type:         li.billing_type,
-            description:          li.description,
-            budgeted_amount:      Number(li.budgeted_amount) || 0,
-            qb_account_id:        li.qb_account_id ?? li.suggested_qb_account_id ?? null,
-            sort_order:           i,
-            phase_budget_line_id: li.phase_budget_line_id ?? null,
+            billing_type:    li.billing_type,
+            description:     li.description,
+            budgeted_amount: Number(li.budgeted_amount) || 0,
+            qb_account_id:   li.qb_account_id ?? li.suggested_qb_account_id ?? null,
+            sort_order:      i,
           })),
       };
       if (editId) {
@@ -563,7 +557,7 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, phaseId, onClose, onS
   }
 
   const conf = extracted?.confidence ?? {};
-  const canSave = form.reviewed && !!form.vendor_name && !!form.phase_budget_line_id;
+  const canSave = form.reviewed && !!form.vendor_name.trim();
 
   return (
     <div className={styles.uploadLayout}>
@@ -627,21 +621,6 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, phaseId, onClose, onS
                   onChange={e => setF('vendor_name', e.target.value)} placeholder="Who is this contract with?" />
               </div>
 
-              {/* Budget line — required only when no task breakdown exists */}
-              <div className={styles.hfGroup}>
-                <label className={styles.hfLabel}>
-                  {hasLineItems
-                    ? <>Fallback Budget Line <span className={styles.hfHintInline}>used only for tasks with no specific assignment</span></>
-                    : <>Task / Budget Line <span className={styles.hfRequired}>required</span></>}
-                </label>
-                <BudgetLinePicker
-                  lines={budgetLines}
-                  value={form.phase_budget_line_id}
-                  onChange={id => setF('phase_budget_line_id', id)}
-                />
-                {!hasLineItems && <div className={styles.hfHint}>Which budget task does this contract commit against?</div>}
-              </div>
-
               <div className={styles.hfRow}>
                 <div className={styles.hfGroup}>
                   <label className={styles.hfLabel}>Contract Date <ConfDot level={conf.contract_date} /></label>
@@ -649,7 +628,7 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, phaseId, onClose, onS
                     onChange={e => setF('contract_date', e.target.value)} />
                 </div>
                 <div className={styles.hfGroup}>
-                  <label className={styles.hfLabel}>Ref / Contract # <ConfDot level={conf.reference_number} /></label>
+                  <label className={styles.hfLabel}>Contract # <ConfDot level={conf.reference_number} /></label>
                   <input className={styles.hfInput} value={form.reference_number}
                     onChange={e => setF('reference_number', e.target.value)} placeholder="e.g. 203010-2024Sat" />
                 </div>
@@ -679,8 +658,7 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, phaseId, onClose, onS
                 <thead>
                   <tr className={styles.catThead}>
                     <th className={styles.colHash}>#</th>
-                    <th className={styles.colCat}>CATEGORY</th>
-                    <th className={styles.colBudgetLine}>BUDGET LINE</th>
+                    <th className={styles.colCat}>GL ACCOUNT</th>
                     <th className={styles.colType}>TYPE</th>
                     <th className={styles.colDesc}>DESCRIPTION</th>
                     <th className={`${styles.colAmt} ${styles.right}`}>AMOUNT</th>
@@ -698,13 +676,6 @@ function UploadPanel({ budgetLines, qbAccounts, projectId, phaseId, onClose, onS
                           suggestedId={li.suggested_qb_account_id}
                           suggestionConfidence={li.qb_suggestion_confidence}
                           onChange={id => setLine(i, { qb_account_id: id })}
-                        />
-                      </td>
-                      <td className={styles.colBudgetLine}>
-                        <InlineBudgetLinePicker
-                          lines={budgetLines}
-                          value={li.phase_budget_line_id}
-                          onChange={id => setLine(i, { phase_budget_line_id: id })}
                         />
                       </td>
                       <td className={styles.colType}>
@@ -802,13 +773,6 @@ export default function ContractsTab() {
     enabled:  !!phaseIdNum,
   });
 
-  const { data: budgetLines = [] } = useQuery<any[]>({
-    queryKey: ['budgetLines', phaseIdNum],
-    queryFn:  () => api.listBudgetLines(phaseIdNum),
-    enabled:  !!phaseIdNum,
-    staleTime: 60_000,
-  });
-
   const { data: qbAccounts = [] } = useQuery<QbAccount[]>({
     queryKey: ['qbAccounts'],
     queryFn:  () => api.listQbAccounts(),
@@ -838,7 +802,6 @@ export default function ContractsTab() {
   if (uploadOpen) {
     return (
       <UploadPanel
-        budgetLines={budgetLines}
         qbAccounts={qbAccounts}
         projectId={projectIdNum}
         phaseId={phaseIdNum}

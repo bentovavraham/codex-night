@@ -128,12 +128,23 @@ router.post('/contracts/extract', requireAuth, pdfUpload.single('file'), async (
   } catch (err) { next(err); }
 });
 
-// POST /api/contracts — create a contract (new phase-aware flow)
+// Resolve phase_budget_line_id from qb_account_id + phase_id.
+// Falls back gracefully if no match (budget template may not have that GL code yet).
+async function resolvePbl(client, phaseId, qbAccountId) {
+  if (!phaseId || !qbAccountId) return null;
+  const r = await client.query(
+    `SELECT id FROM phase_budget_lines WHERE phase_id = $1 AND qb_account_id = $2 LIMIT 1`,
+    [phaseId, qbAccountId]
+  );
+  return r.rows[0]?.id ?? null;
+}
+
+// POST /api/contracts — create a contract (COA-driven flow)
 router.post('/contracts', requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const {
-      project_id, phase_budget_line_id,
+      project_id, phase_id,
       vendor_name, description, total_value, contract_date,
       reference_number, status, file_reference,
       contract_line_items: lineItems,
@@ -148,10 +159,10 @@ router.post('/contracts', requireAuth, async (req, res, next) => {
     await client.query('BEGIN');
     const result = await client.query(
       `INSERT INTO contracts
-         (project_id, phase_budget_line_id, vendor_name, description, total_value,
+         (project_id, vendor_name, description, total_value,
           contract_date, reference_number, status, file_reference, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'draft'),$9,$10) RETURNING *`,
-      [Number(project_id), phase_budget_line_id ? Number(phase_budget_line_id) : null,
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,'draft'),$8,$9) RETURNING *`,
+      [Number(project_id),
        vendor_name, description || null, total,
        contract_date || null, reference_number || null,
        status || null, file_reference || null, req.session.userId]
@@ -161,6 +172,8 @@ router.post('/contracts', requireAuth, async (req, res, next) => {
     if (Array.isArray(lineItems) && lineItems.length > 0) {
       for (let i = 0; i < lineItems.length; i++) {
         const li = lineItems[i];
+        const qbAccountId = li.qb_account_id ? Number(li.qb_account_id) : null;
+        const pblId = await resolvePbl(client, phase_id ? Number(phase_id) : null, qbAccountId);
         await client.query(
           `INSERT INTO contract_line_items
              (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id, qb_account_id)
@@ -170,8 +183,8 @@ router.post('/contracts', requireAuth, async (req, res, next) => {
            li.description || null,
            Number(li.budgeted_amount) || 0,
            i,
-           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null,
-           li.qb_account_id ? Number(li.qb_account_id) : null]
+           pblId,
+           qbAccountId]
         );
       }
     }
@@ -409,22 +422,21 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
     const old = (await client.query('SELECT * FROM contracts WHERE id = $1', [contractId])).rows[0];
     const {
       vendor_name, description, total_value, contract_date,
-      reference_number, status, file_reference,
-      phase_budget_line_id, contract_line_items: lineItems,
+      reference_number, status, file_reference, phase_id,
+      contract_line_items: lineItems,
     } = req.body || {};
 
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE contracts SET
-         vendor_name          = COALESCE($2, vendor_name),
-         description          = $3,
-         total_value          = COALESCE($4, total_value),
-         contract_date        = $5,
-         reference_number     = $6,
-         status               = COALESCE($7, status),
-         file_reference       = COALESCE($8, file_reference),
-         phase_budget_line_id = $9,
-         updated_at           = NOW()
+         vendor_name      = COALESCE($2, vendor_name),
+         description      = $3,
+         total_value      = COALESCE($4, total_value),
+         contract_date    = $5,
+         reference_number = $6,
+         status           = COALESCE($7, status),
+         file_reference   = COALESCE($8, file_reference),
+         updated_at       = NOW()
        WHERE id = $1 RETURNING *`,
       [contractId,
        vendor_name ?? null,
@@ -433,14 +445,15 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
        contract_date ?? null,
        reference_number ?? null,
        status ?? null,
-       file_reference ?? null,
-       phase_budget_line_id != null ? Number(phase_budget_line_id) : null]);
+       file_reference ?? null]);
 
-    // Replace line items when provided (full replace)
+    // Replace line items when provided (full replace), resolving phase_budget_line_id from GL account
     if (Array.isArray(lineItems)) {
       await client.query('DELETE FROM contract_line_items WHERE contract_id = $1', [contractId]);
       for (let i = 0; i < lineItems.length; i++) {
         const li = lineItems[i];
+        const qbAccountId = li.qb_account_id ? Number(li.qb_account_id) : null;
+        const pblId = await resolvePbl(client, phase_id ? Number(phase_id) : null, qbAccountId);
         await client.query(
           `INSERT INTO contract_line_items
              (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id, qb_account_id)
@@ -450,8 +463,8 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
            li.description || null,
            Number(li.budgeted_amount) || 0,
            i,
-           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null,
-           li.qb_account_id ? Number(li.qb_account_id) : null]
+           pblId,
+           qbAccountId]
         );
       }
     }

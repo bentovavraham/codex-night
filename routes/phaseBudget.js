@@ -514,6 +514,14 @@ router.get('/phases/:phaseId/contracts', requireAuth, async (req, res, next) => 
         c.created_at,
         pbl.task_name AS budget_line_name,
 
+        -- Primary GL account from contract line items (most common code)
+        (SELECT qa.account_number
+         FROM contract_line_items cli
+         JOIN qb_accounts qa ON qa.id = cli.qb_account_id
+         WHERE cli.contract_id = c.id AND qa.account_number IS NOT NULL
+         GROUP BY qa.account_number ORDER BY COUNT(*) DESC LIMIT 1
+        ) AS gl_account_number,
+
         -- Approved COs
         COALESCE((
           SELECT SUM(co.amount)
@@ -603,6 +611,7 @@ router.get('/phases/:phaseId/contracts', requireAuth, async (req, res, next) => 
         status:                r.status,
         contract_date:         r.contract_date,
         budget_line_name:      r.budget_line_name ?? null,
+        gl_account_number:     r.gl_account_number ?? null,
         co_count,
         co_value,
         total_commitment,
