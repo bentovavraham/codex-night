@@ -7,7 +7,7 @@ import styles from './ContractsTab.module.css';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface QbAccount { id: number; account_number: string; full_name: string; short_name: string; }
+export interface QbAccount { id: number; account_number: string; full_name: string; short_name: string; }
 
 interface ContractLine {
   billing_type: 'fixed' | 'tm' | 'expense';
@@ -271,10 +271,9 @@ function InlineBudgetLinePicker({ lines, value, onChange }: {
 
 // ─── Contract list ────────────────────────────────────────────────────────────
 
-function ContractList({ contracts, phaseId, onUpload, onEdit }: {
+function ContractList({ contracts, phaseId, onEdit }: {
   contracts: any[];
   phaseId: number;
-  onUpload: () => void;
   onEdit: (id: number) => void;
 }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
@@ -293,12 +292,10 @@ function ContractList({ contracts, phaseId, onUpload, onEdit }: {
     <div className={styles.listWrap} onClick={() => setConfirmDeleteId(null)}>
       <div className={styles.toolbar}>
         <span className={styles.toolLabel}>Contracts</span>
-        <button className={styles.uploadBtn} onClick={onUpload}>+ Upload Contract</button>
       </div>
       {contracts.length === 0 ? (
         <div className={styles.emptyState}>
-          <p>No contracts yet.</p>
-          <button className={styles.uploadBtnLg} onClick={onUpload}>Upload Contract PDF</button>
+          <p>No contracts yet. Use <strong>↑ Import Contract</strong> in the Audit tab to add one.</p>
         </div>
       ) : (
         <div className={styles.scrollArea}>
@@ -384,7 +381,7 @@ function ContractList({ contracts, phaseId, onUpload, onEdit }: {
 
 // ─── Upload + review panel ────────────────────────────────────────────────────
 
-function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, editId }: {
+export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, editId }: {
   qbAccounts: QbAccount[];
   projectId: number;
   phaseId: number;
@@ -816,7 +813,6 @@ export default function ContractsTab() {
     <ContractList
       contracts={contracts}
       phaseId={phaseIdNum}
-      onUpload={() => setUploadOpen(true)}
       onEdit={handleEdit}
     />
   );

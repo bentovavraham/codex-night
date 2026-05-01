@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { ImportDrawer } from './ImportDrawer';
+import { UploadPanel } from './ContractsTab';
 import styles from './AuditTab.module.css';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -290,16 +291,18 @@ function VendorGroup({ vendor, rows, accounts, statusFilter, onValidateGl, onImp
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AuditTab() {
-  const { phaseId } = useParams();
-  const pid = Number(phaseId);
-  const qc  = useQueryClient();
+  const { phaseId, projectId } = useParams();
+  const pid  = Number(phaseId);
+  const proj = Number(projectId);
+  const qc   = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [importing, setImporting]     = useState(false);
-  const [importMsg, setImportMsg]     = useState<string | null>(null);
-  const [showImport, setShowImport]   = useState(false);
-  const [vendorFilter, setVendorFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'verified' | 'unverified' | 'issues'>('all');
+  const [importing,           setImporting]           = useState(false);
+  const [importMsg,           setImportMsg]           = useState<string | null>(null);
+  const [showImport,          setShowImport]          = useState(false);
+  const [showContractUpload,  setShowContractUpload]  = useState(false);
+  const [vendorFilter,        setVendorFilter]        = useState('');
+  const [statusFilter,        setStatusFilter]        = useState<'all' | 'verified' | 'unverified' | 'issues'>('all');
 
   const { data, isLoading, error } = useQuery<ReportData>({
     queryKey: ['txnReport', pid],
@@ -402,6 +405,9 @@ export default function AuditTab() {
           <button className={`${styles.btnSecondary} ${styles.btnImport}`} onClick={() => setShowImport(true)}>
             ↑ Import Invoices
           </button>
+          <button className={`${styles.btnSecondary} ${styles.btnImport}`} onClick={() => setShowContractUpload(true)}>
+            ↑ Import Contract
+          </button>
         </div>
       </div>
 
@@ -474,7 +480,7 @@ export default function AuditTab() {
         </div>
       )}
 
-      {/* ── Import drawer ── */}
+      {/* ── Import invoice drawer ── */}
       {showImport && (
         <ImportDrawer
           phaseId={pid}
@@ -484,6 +490,23 @@ export default function AuditTab() {
             qc.invalidateQueries({ queryKey: ['audit', pid] });
           }}
         />
+      )}
+
+      {/* ── Import contract overlay ── */}
+      {showContractUpload && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'var(--bg)' }}>
+          <UploadPanel
+            qbAccounts={accounts as any[]}
+            projectId={proj}
+            phaseId={pid}
+            onClose={() => setShowContractUpload(false)}
+            onSaved={() => {
+              setShowContractUpload(false);
+              qc.invalidateQueries({ queryKey: ['phaseContracts', pid] });
+              qc.invalidateQueries({ queryKey: ['budget', pid] });
+            }}
+          />
+        </div>
       )}
     </div>
   );
