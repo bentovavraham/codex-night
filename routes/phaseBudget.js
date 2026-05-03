@@ -303,10 +303,12 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
     // For source=qb or source=compare we additionally roll up qb_transactions
     // by qb_gl_code so we can graft the QB-derived actuals onto the rows.
     let qbByCode = new Map();
+    let qbGlNameByCode = new Map();
     if (source === 'qb' || source === 'compare') {
       const qbAgg = await pool.query(`
         SELECT
           qb_gl_code,
+          MAX(qb_gl_name)              AS qb_gl_name,
           COALESCE(SUM(amount),       0) AS qb_billed,
           COALESCE(SUM(paid_amount),  0) AS qb_paid,
           COALESCE(SUM(open_balance), 0) AS qb_amount_due
@@ -320,6 +322,9 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
           qb_paid:       parseFloat(r.qb_paid)       || 0,
           qb_amount_due: parseFloat(r.qb_amount_due) || 0,
         }]),
+      );
+      qbGlNameByCode = new Map(
+        qbAgg.rows.map(r => [String(r.qb_gl_code || '').trim(), String(r.qb_gl_name || '').trim()]),
       );
     }
 
@@ -410,6 +415,84 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
       }
       return base;
     });
+
+    // For QB Source / Compare: append "phantom" rows for QB GL codes that
+    // don't match any phase_budget_line. These represent QB activity on GL
+    // accounts the PM never put in the budget template. Without these rows
+    // the QB Source totals silently undercount vs the Audit tab.
+    if (source === 'qb' || source === 'compare') {
+      const knownAccountNumbers = new Set(
+        rows
+          .map(r => (r.qb_account_number ? String(r.qb_account_number).trim() : ''))
+          .filter(Boolean)
+      );
+      const phantomEntries = [...qbByCode.entries()]
+        .filter(([code]) => code && !knownAccountNumbers.has(code))
+        .sort(([a], [b]) => a.localeCompare(b));
+
+      for (const [code, qb] of phantomEntries) {
+        const glName = qbGlNameByCode.get(code) || `GL ${code}`;
+        const phantom = {
+          id: -Math.abs([...code].reduce((h, c) => h * 31 + c.charCodeAt(0), 7)), // negative pseudo-id
+          phase_id: Number(phaseId),
+          task_name: glName,
+          discipline: null,
+          section: 'QB-only',
+          sub_group: null,
+          calculation_method: null,
+          calc_hint: null,
+          budgeted_amount: 0,
+          consultant: null,
+          notes: null,
+          sort_order: 99999,
+          source: 'qb',
+          amount_modified: false,
+          qb_account_id: null,
+          qb_account_number: code,
+          qb_short_name: glName,
+          qb_sort_order: 99999,
+          qb_parent_id: null,
+          qb_parent_number: null,
+          qb_parent_name: 'Auto-added from QB',
+          qb_parent_sort: 99999,
+          qb_category: null,
+          committed: 0,
+          co_count: 0,
+          co_value: 0,
+          total_commitment: 0,
+          fixed_charges:   0,
+          tm_charges:      0,
+          expense_charges: 0,
+          billed:          source === 'qb' ? qb.qb_billed     : 0,
+          paid:            source === 'qb' ? qb.qb_paid       : 0,
+          amount_due:      source === 'qb' ? qb.qb_amount_due : 0,
+          remaining_budget: -(source === 'qb' ? qb.qb_billed : 0),
+          remaining_commit: 0,
+          pct_billed: null,
+          qb_codes_used: '',
+          has_direct_invoices: false,
+          source_view: source,
+          phantom_from_qb: true,   // frontend marker
+        };
+        if (source === 'compare') {
+          Object.assign(phantom, {
+            pm_fixed_charges:   0,
+            pm_tm_charges:      0,
+            pm_expense_charges: 0,
+            pm_billed:          0,
+            pm_paid:            0,
+            pm_amount_due:      0,
+            qb_fixed_charges:   0,
+            qb_tm_charges:      0,
+            qb_expense_charges: 0,
+            qb_billed:          qb.qb_billed,
+            qb_paid:            qb.qb_paid,
+            qb_amount_due:      qb.qb_amount_due,
+          });
+        }
+        rows.push(phantom);
+      }
+    }
 
     res.json(rows);
   } catch (err) { next(err); }

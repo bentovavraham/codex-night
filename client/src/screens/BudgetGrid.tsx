@@ -34,8 +34,9 @@ export interface BudgetRow {
   pct_billed: number | null;
   qb_codes_used: string;
   has_direct_invoices: boolean;
-  source: 'template' | 'user';
+  source: 'template' | 'user' | 'qb';
   amount_modified: boolean;
+  phantom_from_qb?: boolean;
   qb_account_id: number | null;
   qb_account_number: string | null;
   qb_short_name: string | null;
@@ -453,6 +454,16 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     }, zero());
   }, [filteredRows, isQbSourced]);
 
+  // Phantom QB rows (qb_account_id is null). Render in their own section.
+  const phantomRows = useMemo(
+    () => filteredRows.filter(r => r.phantom_from_qb),
+    [filteredRows]
+  );
+  const phantomTotals = useMemo(
+    () => phantomRows.reduce((a, r) => addRow(a, r), zero()),
+    [phantomRows]
+  );
+
   // For leaf rendering: rows whose qb_account_id is shared with siblings
   // should display blank in the actuals columns (the GL-code total is shown on
   // the subtotal row instead). Pre-compute a display version of each row.
@@ -785,6 +796,21 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
           </thead>
           <tbody>
             {qbRoots.length > 0 ? renderAccts(qbRoots, 0) : null}
+            {/* Phantom QB rows: GL codes that exist in qb_transactions but not
+                in this phase's budget template. Surfaced so QB Source totals
+                match the Audit tab (no silent drops). */}
+            {phantomRows.length > 0 && (
+              <>
+                <tr className={styles.catRow}>
+                  <td className={styles.catGutter} />
+                  <td className={styles.catLabel} colSpan={2}>
+                    Auto-added from QB ({phantomRows.length}) — GL codes not in budget template
+                  </td>
+                  <SumCells t={phantomTotals} variant="root" />
+                </tr>
+                {phantomRows.map(renderRow)}
+              </>
+            )}
           </tbody>
           <tfoot>
             <tr className={styles.totalRow}>
