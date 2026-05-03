@@ -152,6 +152,16 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
               AND ili.phase_budget_line_id IS NULL
               AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id
+              -- Only credit this leaf when it's the unique pbl for the GL code.
+              -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
+              -- amount appears as a separate "General [GL]" row instead, so it
+              -- visibly burns down as Richard assigns items to specific tasks.
+              AND NOT EXISTS (
+                SELECT 1 FROM phase_budget_lines pbl_other
+                WHERE pbl_other.phase_id = pbl.phase_id
+                  AND pbl_other.qb_account_id = pbl.qb_account_id
+                  AND pbl_other.id <> pbl.id
+              )
             UNION ALL
             SELECT ili.amount AS contribution
             FROM invoice_line_items ili
@@ -189,6 +199,16 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
               AND ili.phase_budget_line_id IS NULL
               AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id
+              -- Only credit this leaf when it's the unique pbl for the GL code.
+              -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
+              -- amount appears as a separate "General [GL]" row instead, so it
+              -- visibly burns down as Richard assigns items to specific tasks.
+              AND NOT EXISTS (
+                SELECT 1 FROM phase_budget_lines pbl_other
+                WHERE pbl_other.phase_id = pbl.phase_id
+                  AND pbl_other.qb_account_id = pbl.qb_account_id
+                  AND pbl_other.id <> pbl.id
+              )
             UNION ALL
             SELECT ili.amount AS contribution
             FROM invoice_line_items ili
@@ -226,6 +246,16 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
               AND ili.phase_budget_line_id IS NULL
               AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id
+              -- Only credit this leaf when it's the unique pbl for the GL code.
+              -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
+              -- amount appears as a separate "General [GL]" row instead, so it
+              -- visibly burns down as Richard assigns items to specific tasks.
+              AND NOT EXISTS (
+                SELECT 1 FROM phase_budget_lines pbl_other
+                WHERE pbl_other.phase_id = pbl.phase_id
+                  AND pbl_other.qb_account_id = pbl.qb_account_id
+                  AND pbl_other.id <> pbl.id
+              )
             UNION ALL
             SELECT ili.amount AS contribution
             FROM invoice_line_items ili
@@ -261,6 +291,16 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
               AND ili.phase_budget_line_id IS NULL
               AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id
+              -- Only credit this leaf when it's the unique pbl for the GL code.
+              -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
+              -- amount appears as a separate "General [GL]" row instead, so it
+              -- visibly burns down as Richard assigns items to specific tasks.
+              AND NOT EXISTS (
+                SELECT 1 FROM phase_budget_lines pbl_other
+                WHERE pbl_other.phase_id = pbl.phase_id
+                  AND pbl_other.qb_account_id = pbl.qb_account_id
+                  AND pbl_other.id <> pbl.id
+              )
             UNION ALL
             SELECT ili.amount AS contribution
             FROM invoice_line_items ili
@@ -294,6 +334,16 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
               AND ili.phase_budget_line_id IS NULL
               AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id
+              -- Only credit this leaf when it's the unique pbl for the GL code.
+              -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
+              -- amount appears as a separate "General [GL]" row instead, so it
+              -- visibly burns down as Richard assigns items to specific tasks.
+              AND NOT EXISTS (
+                SELECT 1 FROM phase_budget_lines pbl_other
+                WHERE pbl_other.phase_id = pbl.phase_id
+                  AND pbl_other.qb_account_id = pbl.qb_account_id
+                  AND pbl_other.id <> pbl.id
+              )
             UNION ALL
             SELECT ili.amount AS contribution
             FROM invoice_line_items ili
@@ -463,6 +513,112 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
       }
       return base;
     });
+
+    // ── "General [GL]" rows for shared GL codes (PM Source / Compare) ────
+    // For each GL code that has 2+ pbls in this phase, sum the line items
+    // that are GL-coded but not yet assigned to a specific PM task. Append
+    // these as synthetic "General — Unassigned" rows above the specific
+    // task rows. As Richard assigns line items to specific tasks via the
+    // Edit modal, the General row burns down toward zero.
+    if (source !== 'qb') {
+      const sharedGl = await pool.query(`
+        SELECT
+          qa.id              AS qb_account_id,
+          qa.account_number  AS qb_account_number,
+          qa.short_name      AS qb_short_name,
+          qa.sort_order      AS qb_sort_order,
+          qp.id              AS qb_parent_id,
+          qp.account_number  AS qb_parent_number,
+          qp.short_name      AS qb_parent_name,
+          qp.sort_order      AS qb_parent_sort,
+          COALESCE(SUM(CASE WHEN ili.billing_type = 'fixed'   THEN ili.amount ELSE 0 END), 0) AS fixed,
+          COALESCE(SUM(CASE WHEN ili.billing_type = 'tm'      THEN ili.amount ELSE 0 END), 0) AS tm,
+          COALESCE(SUM(CASE WHEN ili.billing_type = 'expense' THEN ili.amount ELSE 0 END), 0) AS expense,
+          COALESCE(SUM(ili.amount), 0)                                                        AS billed,
+          COALESCE(SUM(CASE WHEN inv.status = 'paid' THEN ili.amount ELSE 0 END), 0)          AS paid
+        FROM invoice_line_items ili
+        JOIN invoices inv      ON inv.id = ili.invoice_id
+        JOIN qb_accounts qa    ON qa.id = ili.qb_account_id
+        LEFT JOIN qb_accounts qp ON qp.id = qa.parent_id
+        WHERE inv.status NOT IN ('voided','draft','rejected')
+          AND ili.phase_budget_line_id IS NULL
+          AND ili.qb_account_id IN (
+            SELECT qb_account_id
+              FROM phase_budget_lines
+             WHERE phase_id = $1
+               AND qb_account_id IS NOT NULL
+             GROUP BY qb_account_id
+            HAVING COUNT(*) > 1
+          )
+        GROUP BY qa.id, qa.account_number, qa.short_name, qa.sort_order,
+                 qp.id, qp.account_number, qp.short_name, qp.sort_order
+      `, [phaseId]);
+
+      for (const r of sharedGl.rows) {
+        const billed   = parseFloat(r.billed)  || 0;
+        const paid     = parseFloat(r.paid)    || 0;
+        if (billed === 0) continue;
+        const general = {
+          id: -1_000_000 - Number(r.qb_account_id), // distinct negative id range for general rows
+          phase_id: Number(phaseId),
+          task_name: `General — Unassigned`,
+          discipline: null,
+          section: 'general',
+          sub_group: null,
+          calculation_method: null,
+          calc_hint: null,
+          budgeted_amount: 0,
+          consultant: null,
+          notes: null,
+          sort_order: -1, // sorts before the assigned tasks within the same GL group
+          source: 'general',
+          amount_modified: false,
+          qb_account_id:      r.qb_account_id,
+          qb_account_number:  r.qb_account_number,
+          qb_short_name:      r.qb_short_name,
+          qb_sort_order:      Number(r.qb_sort_order ?? 9999),
+          qb_parent_id:       r.qb_parent_id,
+          qb_parent_number:   r.qb_parent_number,
+          qb_parent_name:     r.qb_parent_name,
+          qb_parent_sort:     Number(r.qb_parent_sort ?? 9999),
+          qb_category:        null,
+          committed: 0,
+          co_count: 0,
+          co_value: 0,
+          total_commitment: 0,
+          fixed_charges:    parseFloat(r.fixed)   || 0,
+          tm_charges:       parseFloat(r.tm)      || 0,
+          expense_charges:  parseFloat(r.expense) || 0,
+          billed,
+          paid,
+          amount_due:       billed - paid,
+          remaining_budget: -billed,
+          remaining_commit: 0,
+          pct_billed: null,
+          qb_codes_used: r.qb_account_number || '',
+          has_direct_invoices: false,
+          source_view: source,
+          general_unassigned: true,  // frontend marker
+        };
+        if (source === 'compare') {
+          Object.assign(general, {
+            pm_fixed_charges:   parseFloat(r.fixed)   || 0,
+            pm_tm_charges:      parseFloat(r.tm)      || 0,
+            pm_expense_charges: parseFloat(r.expense) || 0,
+            pm_billed:          billed,
+            pm_paid:            paid,
+            pm_amount_due:      billed - paid,
+            qb_fixed_charges:   0,
+            qb_tm_charges:      0,
+            qb_expense_charges: 0,
+            qb_billed:          0,
+            qb_paid:            0,
+            qb_amount_due:      0,
+          });
+        }
+        rows.push(general);
+      }
+    }
 
     // For QB Source / Compare: append "phantom" rows for QB GL codes that
     // don't match any phase_budget_line. These represent QB activity on GL

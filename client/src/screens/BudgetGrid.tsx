@@ -34,9 +34,10 @@ export interface BudgetRow {
   pct_billed: number | null;
   qb_codes_used: string;
   has_direct_invoices: boolean;
-  source: 'template' | 'user' | 'qb';
+  source: 'template' | 'user' | 'qb' | 'general';
   amount_modified: boolean;
   phantom_from_qb?: boolean;
+  general_unassigned?: boolean;
   qb_account_id: number | null;
   qb_account_number: string | null;
   qb_short_name: string | null;
@@ -421,24 +422,18 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
   }, [filteredRows]);
 
   // Totals per account, rolled up to all ancestors
-  // SHARED-GL DEDUP — applies to BOTH source='pm' (line items routed via
-  // ili.qb_account_id when ili.phase_budget_line_id is null) AND source='qb'
-  // (qb_transactions inherently coded at GL-account level).
-  //
-  // When N pbls share one qb_account_id, the backend credits each pbl with
-  // the FULL GL-code total (it has to, since SQL aggregates per-row). If we
-  // then sum N leaves, we'd multiply the actual amount by N. Instead:
-  //   - Subtotal/grand totals: count each qb_account_id once.
-  //   - Leaf rendering: blank the actuals columns on shared-code leaves
-  //     (the GL-code total surfaces on the existing subtotal row).
-  //
-  // Note this does NOT affect leaves whose ili.phase_budget_line_id is set
-  // (Option C path) — those flow to ONE specific pbl and aren't double-counted
-  // by the backend in the first place. The dedup only kicks in for shared GL
-  // codes where multiple pbls match.
+  // SHARED-GL DEDUP — only applies in QB Source mode.
+  // In QB Source, qb_transactions are coded at GL-account level. When N pbls
+  // share one qb_account_id, each leaf gets the FULL GL-code total credited,
+  // so we dedup at the rollup to count it once.
+  // In PM Source, the SQL Path 2 only fires for unique-GL pbls; shared-GL
+  // unassigned amounts come back as synthetic "General — Unassigned" rows
+  // (with their own row, not multiplied across siblings), so dedup is NOT
+  // needed and would in fact be wrong (it would suppress real per-task data).
+  const isQbSourced = source === 'qb';
   const acctTotals = useMemo(() => {
     const t = new Map<number, Totals>();
-    const counted = new Map<number, Set<number>>(); // ancestor.id → set of qb_account_ids already summed
+    const counted = new Map<number, Set<number>>();
     for (const r of filteredRows) {
       if (r.qb_account_id == null) continue;
       let cur: QbAccount | undefined = qbById.get(r.qb_account_id);
@@ -446,27 +441,27 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         if (!t.has(cur.id)) t.set(cur.id, zero());
         if (!counted.has(cur.id)) counted.set(cur.id, new Set());
         const seen = counted.get(cur.id)!;
-        const skip = seen.has(r.qb_account_id);
+        const skip = isQbSourced && seen.has(r.qb_account_id);
         seen.add(r.qb_account_id);
         t.set(cur.id, addRow(t.get(cur.id)!, r, skip));
         cur = cur.parent_id != null ? qbById.get(cur.parent_id) : undefined;
       }
     }
     return t;
-  }, [filteredRows, qbById]);
+  }, [filteredRows, qbById, isQbSourced]);
 
   const grand = useMemo(() => {
     const seen = new Set<number>();
     return filteredRows.reduce((a, r) => {
-      const skip = r.qb_account_id != null && seen.has(r.qb_account_id);
+      const skip = isQbSourced && r.qb_account_id != null && seen.has(r.qb_account_id);
       if (r.qb_account_id != null) seen.add(r.qb_account_id);
       return addRow(a, r, skip);
     }, zero());
-  }, [filteredRows]);
+  }, [filteredRows, isQbSourced]);
 
   // Phantom QB rows (qb_account_id is null, source='qb' only). Their own section.
   const phantomRows = useMemo(
-    () => filteredRows.filter(r => r.phantom_from_qb),
+    () => filteredRows.filter(r => (r as any).phantom_from_qb),
     [filteredRows]
   );
   const phantomTotals = useMemo(
@@ -474,21 +469,26 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     [phantomRows]
   );
 
-  // Leaves whose qb_account_id is shared with siblings render blank in the
-  // actuals columns regardless of source. (Same logic for PM and QB.)
+  // Leaves to blank: only shared-GL leaves in QB Source view (where each leaf
+  // gets the full GL total). PM Source's "General — Unassigned" synthetic rows
+  // don't need blanking — they're their own row carrying the unassigned amount.
   const sharedQbAccountIds = useMemo(() => {
+    if (!isQbSourced) return new Set<number>();
     const counts = new Map<number, number>();
     for (const r of filteredRows) {
       if (r.qb_account_id == null) continue;
+      // Don't count synthetic "general" rows when measuring sharing
+      if ((r as any).general_unassigned) continue;
       counts.set(r.qb_account_id, (counts.get(r.qb_account_id) ?? 0) + 1);
     }
     return new Set([...counts.entries()].filter(([, c]) => c > 1).map(([id]) => id));
-  }, [filteredRows]);
+  }, [filteredRows, isQbSourced]);
 
   const blankActualsForShared = (r: BudgetRow): BudgetRow => {
     if (r.qb_account_id == null || !sharedQbAccountIds.has(r.qb_account_id)) {
       return r;
     }
+    if ((r as any).general_unassigned) return r; // never blank the General row itself
     return { ...r, fixed_charges: 0, tm_charges: 0, expense_charges: 0,
              billed: 0, paid: 0, amount_due: 0, remaining_budget: r.budgeted_amount };
   };
@@ -545,7 +545,8 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     const isA = (f: string) => active.rowId === row.id && active.field === f;
     const isDrillActive = drillTarget?.rowId === row.id;
     return (
-      <tr key={row.id} className={`${styles.dataRow} ${row.source === 'user' ? styles.rowUserAdded : ''} ${isDrillActive ? styles.drillActiveRow : ''}`}>
+      <tr key={row.id} className={`${styles.dataRow} ${row.source === 'user' ? styles.rowUserAdded : ''} ${isDrillActive ? styles.drillActiveRow : ''}`}
+        style={(row as any).general_unassigned ? { background: '#fef9f3', fontStyle: 'italic' } : undefined}>
         <td className={styles.rowGutter} onClick={() => setPanelRow(row)} style={{ cursor: 'pointer' }}
           title={row.has_direct_invoices ? 'Has invoices billed directly (no contract)' : undefined}>
           <span className={`${styles.rowArrow} ${row.has_direct_invoices ? styles.rowArrowDirect : ''}`}>›</span>
@@ -609,7 +610,15 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
   const renderAccts = (accounts: QbAccount[], depth: number): React.ReactNode[] => {
     return accounts.flatMap(acct => {
       const children = qbChildrenOf.get(acct.id) ?? [];
-      const leafRows = rowsByLeafId.get(acct.id) ?? [];
+      const leafRowsRaw = rowsByLeafId.get(acct.id) ?? [];
+      // Place "General — Unassigned" synthetic rows first within each shared GL group,
+      // so the eye sees the bucket-to-burn-down before the specific tasks.
+      const leafRows = [...leafRowsRaw].sort((a, b) => {
+        const aGen = (a as any).general_unassigned ? 0 : 1;
+        const bGen = (b as any).general_unassigned ? 0 : 1;
+        if (aGen !== bGen) return aGen - bGen;
+        return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+      });
       const t = acctTotals.get(acct.id) ?? zero();
       const key = acct.account_number;
       const isOpen = !collapsed.has(key);
