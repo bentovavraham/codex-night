@@ -671,10 +671,11 @@ function UploadPanel({
         file_reference:       fileRef                 || null,
         invoice_type:         invoiceType,
         project_id:           projectId,
-        // Legacy invoice-level task assignment is no longer used by aggregations.
-        // Always clear it on save so re-saving an old invoice migrates it to the
-        // new GL-code-driven allocation model.
-        phase_budget_line_id: null,
+        // Preserve the legacy invoice-level task assignment as-is. Aggregations
+        // use it only as a fallback for line items that don't have their own
+        // GL code or pbl assignment yet — once Richard adds GL codes per line,
+        // those line items naturally bypass the legacy field.
+        phase_budget_line_id: form.phase_budget_line_id || null,
         status:               form.status,
         invoice_line_items: form.line_items
           .filter(li => Number(li.amount) > 0)
