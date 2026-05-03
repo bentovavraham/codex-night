@@ -385,12 +385,13 @@ function InvoiceList({ invoices, phaseId, onEdit }: {
 // ─── Upload + review panel ────────────────────────────────────────────────────
 
 function UploadPanel({
-  contracts, budgetLines, qbAccounts, projectId, onClose, onSaved, editId,
+  contracts, budgetLines, qbAccounts, projectId, phaseIdNum, onClose, onSaved, editId,
 }: {
   contracts: any[];
   budgetLines: any[];
   qbAccounts: QbAccount[];
   projectId: number;
+  phaseIdNum: number;
   onClose: () => void;
   onSaved: () => void;
   editId?: number;
@@ -1125,6 +1126,7 @@ export default function InvoicesTab() {
         budgetLines={budgetLines}
         qbAccounts={qbAccounts}
         projectId={projectIdNum}
+        phaseIdNum={phaseIdNum}
         editId={editInvoiceId ?? undefined}
         onClose={handleClose}
         onSaved={handleSaved}
