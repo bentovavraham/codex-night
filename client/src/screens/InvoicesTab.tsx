@@ -517,6 +517,76 @@ function UploadPanel({
     });
   }
 
+  // ── AI task suggestions for shared GL codes ────────────────────────────────
+  // For line items whose GL code is shared by multiple PM tasks, ask Claude to
+  // pick the right task per line (using the PM/engineer persona prompt).
+  // Triggered automatically once on modal open if there are unassigned shared
+  // lines, or manually via the AI Suggest button.
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<Map<number, { id: number; reason: string; confidence: string }>>(new Map());
+  const autoSuggestedRef = useRef(false);
+
+  const runSuggestions = useCallback(async (silent = false) => {
+    if (suggesting) return;
+    if (!form.line_items.length) return;
+    if (!phaseIdNum) return;
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const res = await api.suggestLineTasks(phaseIdNum, {
+        vendor_name: form.vendor_name,
+        description: form.description,
+        line_items: form.line_items.map(li => ({
+          description: li.description,
+          billing_type: li.billing_type,
+          amount: Number(li.amount) || 0,
+          qb_account_id: li.qb_account_id ?? null,
+        })),
+      });
+      const map = new Map<number, { id: number; reason: string; confidence: string }>();
+      // Apply suggestions to lines that don't already have phase_budget_line_id
+      const newPicks: { idx: number; pbl_id: number }[] = [];
+      (res.suggestions ?? []).forEach(s => {
+        if (s.budget_line_id == null) return;
+        map.set(s.line_index, { id: s.budget_line_id, reason: s.reason, confidence: s.confidence });
+        const li = form.line_items[s.line_index];
+        if (li && li.phase_budget_line_id == null) {
+          newPicks.push({ idx: s.line_index, pbl_id: s.budget_line_id });
+        }
+      });
+      if (newPicks.length > 0) {
+        setForm(f => {
+          const items = [...f.line_items];
+          newPicks.forEach(p => { items[p.idx] = { ...items[p.idx], phase_budget_line_id: p.pbl_id }; });
+          return { ...f, line_items: items };
+        });
+      }
+      setAiSuggestions(map);
+    } catch (err: any) {
+      if (!silent) setSuggestError(err?.message || 'AI suggestion failed');
+    } finally {
+      setSuggesting(false);
+    }
+  }, [form.line_items, form.vendor_name, form.description, phaseIdNum, suggesting]);
+
+  // Auto-trigger once when modal opens with unassigned shared-GL lines
+  useEffect(() => {
+    if (autoSuggestedRef.current) return;
+    if (!budgetLines || budgetLines.length === 0) return;
+    if (form.line_items.length === 0) return;
+    const hasUnassignedShared = form.line_items.some(li => {
+      if (li.phase_budget_line_id != null) return false;
+      if (li.qb_account_id == null) return false;
+      const matching = (budgetLines as any[]).filter(b => b.qb_account_id === li.qb_account_id);
+      return matching.length > 1;
+    });
+    if (hasUnassignedShared) {
+      autoSuggestedRef.current = true;
+      runSuggestions(true);
+    }
+  }, [budgetLines, form.line_items, runSuggestions]);
+
   // Auto-resolve / auto-clear `phase_budget_line_id` based on the line item's
   // GL code and the available PM tasks in this phase. Runs whenever line items
   // or budget lines change.
@@ -778,7 +848,28 @@ function UploadPanel({
 
             {/* ── Category details (QB-style line items) ── */}
             <div className={styles.catSection}>
-              <div className={styles.catTitle}>Category details</div>
+              <div className={styles.catTitle} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Category details</span>
+                <button
+                  type="button"
+                  onClick={() => runSuggestions(false)}
+                  disabled={suggesting}
+                  style={{
+                    fontSize: 11, padding: '4px 10px', borderRadius: 3,
+                    border: '1px solid var(--accent)', background: 'var(--accent-light)',
+                    color: 'var(--accent)', fontWeight: 700, cursor: suggesting ? 'wait' : 'pointer',
+                    letterSpacing: '0.02em',
+                  }}
+                  title="Ask Claude (acting as a senior PM) to assign each line item to the right PM task within its GL code group"
+                >
+                  {suggesting ? '✦ Thinking…' : '✦ AI Suggest tasks'}
+                </button>
+              </div>
+              {suggestError && (
+                <div style={{ fontSize: 11, color: '#b45309', padding: '4px 8px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 3, marginBottom: 6 }}>
+                  ⚠ {suggestError}
+                </div>
+              )}
               <table className={styles.catTable}>
                 <thead>
                   <tr className={styles.catThead}>
@@ -815,23 +906,38 @@ function UploadPanel({
                         {/* Conditional task picker — appears only when the GL code
                             maps to multiple PM tasks. Required field for shared GL
                             codes; the value is written to ili.phase_budget_line_id. */}
-                        {isShared && (
-                          <select
-                            value={li.phase_budget_line_id ?? ''}
-                            onChange={e => setLine(i, { phase_budget_line_id: e.target.value ? Number(e.target.value) : null })}
-                            style={{
-                              marginTop: 4, width: '100%', fontSize: 11,
-                              padding: '3px 4px',
-                              border: li.phase_budget_line_id ? '1px solid #d0d0d0' : '1px solid #f59e0b',
-                              borderRadius: 3, background: li.phase_budget_line_id ? '#fff' : '#fffbeb',
-                            }}
-                          >
-                            <option value="">⚠ Pick task ({matchingTasks.length} share this GL)</option>
-                            {matchingTasks.map((t: any) => (
-                              <option key={t.id} value={t.id}>{t.task_name}</option>
-                            ))}
-                          </select>
-                        )}
+                        {isShared && (() => {
+                          const ai = aiSuggestions.get(i);
+                          const isAiPick = !!ai && ai.id === li.phase_budget_line_id;
+                          return (
+                            <>
+                              <select
+                                value={li.phase_budget_line_id ?? ''}
+                                onChange={e => setLine(i, { phase_budget_line_id: e.target.value ? Number(e.target.value) : null })}
+                                style={{
+                                  marginTop: 4, width: '100%', fontSize: 11,
+                                  padding: '3px 4px',
+                                  border: li.phase_budget_line_id ? (isAiPick ? '1px solid var(--accent)' : '1px solid #d0d0d0') : '1px solid #f59e0b',
+                                  borderRadius: 3,
+                                  background: li.phase_budget_line_id
+                                    ? (isAiPick ? 'var(--accent-light)' : '#fff')
+                                    : '#fffbeb',
+                                }}
+                              >
+                                <option value="">⚠ Pick task ({matchingTasks.length} share this GL)</option>
+                                {matchingTasks.map((t: any) => (
+                                  <option key={t.id} value={t.id}>{t.task_name}</option>
+                                ))}
+                              </select>
+                              {ai && isAiPick && (
+                                <div style={{ marginTop: 2, fontSize: 10, color: 'var(--accent)', fontStyle: 'italic' }}
+                                  title={ai.reason}>
+                                  ✦ AI ({ai.confidence}): {ai.reason.length > 80 ? ai.reason.slice(0, 80) + '…' : ai.reason}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                         {noMatch && (
                           <div style={{
                             marginTop: 4, fontSize: 11, color: '#b45309',

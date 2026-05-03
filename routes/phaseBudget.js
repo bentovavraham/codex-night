@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const TEMPLATE = require('../db/budget-template');
+const { suggestLineBudgets } = require('../lib/extract');
 
 const router = express.Router();
 
@@ -823,6 +824,92 @@ router.get('/phases/:phaseId/contracts', requireAuth, async (req, res, next) => 
   } catch (err) { next(err); }
 });
 
+// POST /api/phases/:phaseId/suggest-line-tasks
+// Body: { vendor_name, description, line_items: [{ description, billing_type, amount, qb_account_id }] }
+// Returns AI suggestions for which PM task each invoice line item should be allocated to.
+// Used by the Edit Invoice modal to pre-fill ili.phase_budget_line_id when GL code is shared.
+//
+// The AI's pick is validated to respect the line's qb_account_id — if it picks a task
+// outside the GL group, we override with the first task within the correct group. This
+// keeps allocation honest while preserving AI judgment for the within-group choice.
+router.post('/phases/:phaseId/suggest-line-tasks', requireAuth, async (req, res, next) => {
+  try {
+    const { phaseId } = req.params;
+    const { vendor_name, description, line_items } = req.body || {};
+    if (!Array.isArray(line_items) || line_items.length === 0) {
+      return res.json({ suggestions: [] });
+    }
+
+    const blRes = await pool.query(
+      `SELECT id, task_name, discipline, section, sub_group, qb_account_id
+         FROM phase_budget_lines
+        WHERE phase_id = $1
+        ORDER BY sort_order, id`,
+      [phaseId],
+    );
+    const budgetLines = blRes.rows;
+    if (budgetLines.length === 0) return res.json({ suggestions: [] });
+
+    // Pass to Claude as-is (prompt expects budgeted_amount; map invoice 'amount' to that field).
+    const aiInput = line_items.map(li => ({
+      description: li.description || '',
+      billing_type: li.billing_type || 'fixed',
+      budgeted_amount: Number(li.amount) || 0,
+    }));
+
+    let result = null;
+    try {
+      result = await suggestLineBudgets(aiInput, budgetLines, {
+        vendor_name: vendor_name || '',
+        description: description || '',
+      });
+    } catch (err) {
+      console.warn('suggestLineBudgets endpoint error:', err.message);
+      return res.json({ suggestions: [] });
+    }
+    if (!result || !Array.isArray(result.lines)) return res.json({ suggestions: [] });
+
+    // Validate each suggestion respects the line's GL code constraint.
+    const suggestions = result.lines.map(s => {
+      const li = line_items[s.line_index];
+      if (!li) return null;
+      const lineGl = li.qb_account_id;
+      const picked = budgetLines.find(b => b.id === s.budget_line_id);
+      let final = s.budget_line_id;
+      let reason = s.reason;
+      let confidence = s.confidence;
+      // If the AI's pick has a different GL than the line item's GL, override
+      // with the first matching task. (Honors the user's explicit GL code.)
+      if (lineGl != null && picked && picked.qb_account_id !== lineGl) {
+        const fallback = budgetLines.find(b => b.qb_account_id === lineGl);
+        if (fallback) {
+          final = fallback.id;
+          reason = `Constrained to GL ${lineGl} (AI suggested a different code: ${picked.qb_account_id ?? 'none'})`;
+          confidence = 'low';
+        } else {
+          // No task in this phase has the line's GL code at all — leave AI's pick but flag
+          confidence = 'low';
+          reason = `${reason} — note: no task in this phase has GL ${lineGl}`;
+        }
+      }
+      // If line had no GL code, just trust the AI
+      return {
+        line_index: s.line_index,
+        budget_line_id: final,
+        confidence,
+        reason,
+      };
+    }).filter(Boolean);
+
+    res.json({
+      suggestions,
+      primary_budget_line_id: result.primary_budget_line_id,
+      primary_confidence: result.primary_confidence,
+      primary_reason: result.primary_reason,
+    });
+  } catch (err) { next(err); }
+});
+
 // GET /api/phases/:phaseId/budget-lines — lightweight list for pickers
 router.get('/phases/:phaseId/budget-lines', requireAuth, async (req, res, next) => {
   try {
@@ -830,7 +917,8 @@ router.get('/phases/:phaseId/budget-lines', requireAuth, async (req, res, next) 
     const phaseCheck = await pool.query('SELECT id FROM phases WHERE id = $1', [phaseId]);
     if (!phaseCheck.rows.length) return res.status(404).json({ error: 'Phase not found' });
     const result = await pool.query(
-      `SELECT id, task_name, discipline, section, sub_group, budgeted_amount, sort_order
+      `SELECT id, task_name, discipline, section, sub_group, budgeted_amount, sort_order,
+              qb_account_id
        FROM phase_budget_lines WHERE phase_id = $1
        ORDER BY CASE section WHEN 'professional_fees' THEN 1 WHEN 'application_fees' THEN 2 WHEN 'construction' THEN 3 ELSE 4 END, sort_order, id`,
       [phaseId]

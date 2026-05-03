@@ -50,6 +50,16 @@ export const api = {
   getQbTransactionsForGl: (phaseId: number, glCode: string) =>
     request<{ transactions: any[]; totals: { total: number; paid: number; open_balance: number }; gl_code: string }>(
       'GET', `/api/phases/${phaseId}/qb-transactions?gl_code=${encodeURIComponent(glCode)}`),
+  suggestLineTasks: (phaseId: number, body: {
+    vendor_name?: string;
+    description?: string;
+    line_items: { description?: string; billing_type?: string; amount?: number; qb_account_id?: number | null }[];
+  }) => request<{
+    suggestions: { line_index: number; budget_line_id: number | null; confidence: string; reason: string }[];
+    primary_budget_line_id?: number | null;
+    primary_confidence?: string;
+    primary_reason?: string;
+  }>('POST', `/api/phases/${phaseId}/suggest-line-tasks`, body),
   drillBudgetLine: (phaseId: number, lineId: number) => request<any>('GET', `/api/phases/${phaseId}/budget-lines/${lineId}/drill`),
   initBudget:   (phaseId: number, template: string) => request<any>('POST', `/api/phases/${phaseId}/budget/init`, { template }),
 
