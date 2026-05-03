@@ -517,6 +517,43 @@ function UploadPanel({
     });
   }
 
+  // Auto-resolve / auto-clear `phase_budget_line_id` based on the line item's
+  // GL code and the available PM tasks in this phase. Runs whenever line items
+  // or budget lines change.
+  //   - GL code maps to exactly 1 task → auto-set phase_budget_line_id
+  //   - GL code maps to multiple tasks → leave alone (user picks via dropdown)
+  //   - GL code maps to 0 tasks → clear phase_budget_line_id (it would be stale)
+  //   - GL code changed and old phase_budget_line_id no longer matches → clear
+  useEffect(() => {
+    if (!budgetLines || budgetLines.length === 0) return;
+    const updated: { idx: number; pbl_id: number | null }[] = [];
+    form.line_items.forEach((li, idx) => {
+      if (li.qb_account_id == null) {
+        if (li.phase_budget_line_id != null) updated.push({ idx, pbl_id: null });
+        return;
+      }
+      const matching = (budgetLines as any[]).filter(b => b.qb_account_id === li.qb_account_id);
+      if (matching.length === 1) {
+        if (li.phase_budget_line_id !== matching[0].id) {
+          updated.push({ idx, pbl_id: matching[0].id });
+        }
+      } else if (matching.length === 0) {
+        if (li.phase_budget_line_id != null) updated.push({ idx, pbl_id: null });
+      } else {
+        // Shared GL code: keep current pick if still valid, otherwise clear
+        if (li.phase_budget_line_id != null && !matching.find(t => t.id === li.phase_budget_line_id)) {
+          updated.push({ idx, pbl_id: null });
+        }
+      }
+    });
+    if (updated.length === 0) return;
+    setForm(f => {
+      const items = [...f.line_items];
+      updated.forEach(u => { items[u.idx] = { ...items[u.idx], phase_budget_line_id: u.pbl_id }; });
+      return { ...f, line_items: items };
+    });
+  }, [form.line_items, budgetLines]);
+
   function addLine() {
     setForm(f => ({
       ...f,
@@ -563,7 +600,10 @@ function UploadPanel({
         file_reference:       fileRef                 || null,
         invoice_type:         invoiceType,
         project_id:           projectId,
-        phase_budget_line_id: form.phase_budget_line_id || null,
+        // Legacy invoice-level task assignment is no longer used by aggregations.
+        // Always clear it on save so re-saving an old invoice migrates it to the
+        // new GL-code-driven allocation model.
+        phase_budget_line_id: null,
         status:               form.status,
         invoice_line_items: form.line_items
           .filter(li => Number(li.amount) > 0)
@@ -706,20 +746,9 @@ function UploadPanel({
                 </div>
               )}
 
-              {/* Budget line — required when no contract so the invoice rolls up correctly */}
-              {!form.contract_id && (
-                <div className={styles.hfGroup}>
-                  <label className={styles.hfLabel}>
-                    Task / Budget Line <span className={styles.hfRequired}>required</span>
-                  </label>
-                  <BudgetLinePicker
-                    lines={budgetLines}
-                    value={form.phase_budget_line_id}
-                    onChange={id => setF('phase_budget_line_id', id)}
-                  />
-                  <div className={styles.hfHint}>Which budget task does this invoice roll up to?</div>
-                </div>
-              )}
+              {/* Invoice-level Task / Budget Line removed: allocation is now driven
+                  by per-line-item GL codes (and an optional per-line task picker
+                  when the GL code is shared by multiple PM tasks). */}
 
               {/* Date + Ref row */}
               <div className={styles.hfRow}>
@@ -762,7 +791,17 @@ function UploadPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {form.line_items.map((li, i) => (
+                  {form.line_items.map((li, i) => {
+                    // Determine which PM tasks share this GL code in this phase.
+                    // - 1 match: phase_budget_line_id auto-set by useEffect below
+                    // - >1 match: show task picker (Option C — required when shared)
+                    // - 0 match: warn (uncoded GL — surfaces in integrity report)
+                    const matchingTasks = li.qb_account_id != null
+                      ? budgetLines.filter((b: any) => b.qb_account_id === li.qb_account_id)
+                      : [];
+                    const isShared = matchingTasks.length > 1;
+                    const noMatch  = li.qb_account_id != null && matchingTasks.length === 0;
+                    return (
                     <tr key={i} className={styles.catRow}>
                       <td className={styles.colHash}>{i + 1}</td>
                       <td className={styles.colCat}>
@@ -771,8 +810,37 @@ function UploadPanel({
                           value={li.qb_account_id}
                           suggestedId={li.suggested_qb_account_id}
                           suggestionConfidence={li.qb_suggestion_confidence}
-                          onChange={id => setLine(i, { qb_account_id: id })}
+                          onChange={id => setLine(i, { qb_account_id: id, phase_budget_line_id: null })}
                         />
+                        {/* Conditional task picker — appears only when the GL code
+                            maps to multiple PM tasks. Required field for shared GL
+                            codes; the value is written to ili.phase_budget_line_id. */}
+                        {isShared && (
+                          <select
+                            value={li.phase_budget_line_id ?? ''}
+                            onChange={e => setLine(i, { phase_budget_line_id: e.target.value ? Number(e.target.value) : null })}
+                            style={{
+                              marginTop: 4, width: '100%', fontSize: 11,
+                              padding: '3px 4px',
+                              border: li.phase_budget_line_id ? '1px solid #d0d0d0' : '1px solid #f59e0b',
+                              borderRadius: 3, background: li.phase_budget_line_id ? '#fff' : '#fffbeb',
+                            }}
+                          >
+                            <option value="">⚠ Pick task ({matchingTasks.length} share this GL)</option>
+                            {matchingTasks.map((t: any) => (
+                              <option key={t.id} value={t.id}>{t.task_name}</option>
+                            ))}
+                          </select>
+                        )}
+                        {noMatch && (
+                          <div style={{
+                            marginTop: 4, fontSize: 11, color: '#b45309',
+                            padding: '3px 6px', background: '#fffbeb',
+                            border: '1px solid #fde68a', borderRadius: 3,
+                          }}>
+                            ⚠ No PM task uses this GL code in this phase
+                          </div>
+                        )}
                       </td>
                       <td className={styles.colType}>
                         <select
@@ -823,7 +891,7 @@ function UploadPanel({
                         <button className={styles.delBtn} onClick={() => removeLine(i)} title="Remove">✕</button>
                       </td>
                     </tr>
-                  ))}
+                  );})}
                 </tbody>
               </table>
 

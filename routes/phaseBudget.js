@@ -123,18 +123,24 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             AND co.status = 'approved'
         ), 0) AS co_value,
 
+        -- Allocation cascade for invoice line items (used by all 5 aggregations below):
+        --   Path 1 (primary): ili.phase_budget_line_id = pbl.id  (Option C — explicit per-line)
+        --   Path 2 (fallback): ili.qb_account_id = pbl.qb_account_id  (auto-resolves unique GL codes;
+        --                       for shared GL codes, every sibling pbl receives the amount —
+        --                       frontend dedup logic handles display correctly)
+        -- The legacy invoice-level inv.phase_budget_line_id is no longer read.
+        -- Invoices with no line items at all are NOT counted (financial-integrity surface —
+        -- they appear as cleanup-needed in the integrity report).
+
         -- T&M invoice charges
-        -- Path 1: line items with pbl_id explicitly set
-        -- Path 2: line items with billing_type='tm' but no pbl_id, routed via invoice-level pbl
-        -- Path 3: invoice-level fallback for legacy invoices with invoice_type='tm' and no typed line items
         COALESCE((
           SELECT SUM(contribution) FROM (
             SELECT ili.amount AS contribution
             FROM invoice_line_items ili
             JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','draft','rejected')
-              AND ili.phase_budget_line_id = pbl.id
               AND ili.billing_type = 'tm'
+              AND ili.phase_budget_line_id = pbl.id
             UNION ALL
             SELECT ili.amount AS contribution
             FROM invoice_line_items ili
@@ -142,18 +148,8 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             WHERE inv.status NOT IN ('voided','draft','rejected')
               AND ili.billing_type = 'tm'
               AND ili.phase_budget_line_id IS NULL
-              AND inv.phase_budget_line_id = pbl.id
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
-            UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
-            WHERE inv.invoice_type = 'tm'
-              AND inv.status NOT IN ('voided','draft','rejected')
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.billing_type IS NOT NULL)
-              AND (
-                inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
-              )
+              AND ili.qb_account_id IS NOT NULL
+              AND ili.qb_account_id = pbl.qb_account_id
           ) sub
         ), 0) AS tm_charges,
 
@@ -164,8 +160,8 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             FROM invoice_line_items ili
             JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','draft','rejected')
-              AND ili.phase_budget_line_id = pbl.id
               AND ili.billing_type = 'expense'
+              AND ili.phase_budget_line_id = pbl.id
             UNION ALL
             SELECT ili.amount AS contribution
             FROM invoice_line_items ili
@@ -173,33 +169,20 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             WHERE inv.status NOT IN ('voided','draft','rejected')
               AND ili.billing_type = 'expense'
               AND ili.phase_budget_line_id IS NULL
-              AND inv.phase_budget_line_id = pbl.id
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
-            UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
-            WHERE inv.invoice_type = 'expense'
-              AND inv.status NOT IN ('voided','draft','rejected')
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.billing_type IS NOT NULL)
-              AND (
-                inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
-              )
+              AND ili.qb_account_id IS NOT NULL
+              AND ili.qb_account_id = pbl.qb_account_id
           ) sub
         ), 0) AS expense_charges,
 
         -- Fixed invoice charges
-        -- Path 1: line items with pbl_id explicitly set
-        -- Path 2: line items with billing_type='fixed' but no pbl_id, routed via invoice-level pbl
-        -- Path 3: invoice-level fallback when there are no typed line items at all
         COALESCE((
           SELECT SUM(contribution) FROM (
             SELECT ili.amount AS contribution
             FROM invoice_line_items ili
             JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','draft','rejected')
-              AND ili.phase_budget_line_id = pbl.id
               AND ili.billing_type = 'fixed'
+              AND ili.phase_budget_line_id = pbl.id
             UNION ALL
             SELECT ili.amount AS contribution
             FROM invoice_line_items ili
@@ -207,18 +190,8 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             WHERE inv.status NOT IN ('voided','draft','rejected')
               AND ili.billing_type = 'fixed'
               AND ili.phase_budget_line_id IS NULL
-              AND inv.phase_budget_line_id = pbl.id
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
-            UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
-            WHERE inv.invoice_type = 'fixed'
-              AND inv.status NOT IN ('voided','draft','rejected')
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.billing_type IS NOT NULL)
-              AND (
-                inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
-              )
+              AND ili.qb_account_id IS NOT NULL
+              AND ili.qb_account_id = pbl.qb_account_id
           ) sub
         ), 0) AS fixed_charges,
 
@@ -231,14 +204,13 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             WHERE inv.status NOT IN ('voided','draft','rejected')
               AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
+            SELECT ili.amount AS contribution
+            FROM invoice_line_items ili
+            JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','draft','rejected')
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
-              AND (
-                inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
-              )
+              AND ili.phase_budget_line_id IS NULL
+              AND ili.qb_account_id IS NOT NULL
+              AND ili.qb_account_id = pbl.qb_account_id
           ) sub
         ), 0) AS billed,
 
@@ -251,14 +223,13 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             WHERE inv.status = 'paid'
               AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
+            SELECT ili.amount AS contribution
+            FROM invoice_line_items ili
+            JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status = 'paid'
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
-              AND (
-                inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
-              )
+              AND ili.phase_budget_line_id IS NULL
+              AND ili.qb_account_id IS NOT NULL
+              AND ili.qb_account_id = pbl.qb_account_id
           ) sub
         ), 0) AS paid,
 
@@ -272,21 +243,20 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             AND qa.account_number IS NOT NULL
             AND (
               ili.phase_budget_line_id = pbl.id
-              OR (
-                ili.phase_budget_line_id IS NULL
-                AND (
-                  inv.phase_budget_line_id = pbl.id
-                  OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
-                )
-              )
+              OR (ili.phase_budget_line_id IS NULL AND ili.qb_account_id = pbl.qb_account_id)
             )
         ), '') AS qb_codes_used,
 
-        -- Flag: any direct invoices against this line
+        -- Flag: any direct invoices against this line — kept for legacy display
+        -- but does not drive aggregation anymore.
         EXISTS (
-          SELECT 1 FROM invoices inv
-          WHERE inv.phase_budget_line_id = pbl.id
-            AND inv.status NOT IN ('voided','draft','rejected')
+          SELECT 1 FROM invoice_line_items ili
+          JOIN invoices inv ON inv.id = ili.invoice_id
+          WHERE inv.status NOT IN ('voided','draft','rejected')
+            AND (
+              ili.phase_budget_line_id = pbl.id
+              OR (ili.phase_budget_line_id IS NULL AND ili.qb_account_id = pbl.qb_account_id)
+            )
         ) AS has_direct_invoices
 
       FROM phase_budget_lines pbl

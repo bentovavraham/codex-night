@@ -421,11 +421,21 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
   }, [filteredRows]);
 
   // Totals per account, rolled up to all ancestors
-  // In QB Source mode, the actuals from each leaf are the FULL GL-code total
-  // (QB doesn't carry task-level granularity). Roll them up only once per unique
-  // qb_account_id so subtotals show the right number — not 10× the value when
-  // 10 PM tasks share one GL code.
-  const isQbSourced = source === 'qb';
+  // SHARED-GL DEDUP — applies to BOTH source='pm' (line items routed via
+  // ili.qb_account_id when ili.phase_budget_line_id is null) AND source='qb'
+  // (qb_transactions inherently coded at GL-account level).
+  //
+  // When N pbls share one qb_account_id, the backend credits each pbl with
+  // the FULL GL-code total (it has to, since SQL aggregates per-row). If we
+  // then sum N leaves, we'd multiply the actual amount by N. Instead:
+  //   - Subtotal/grand totals: count each qb_account_id once.
+  //   - Leaf rendering: blank the actuals columns on shared-code leaves
+  //     (the GL-code total surfaces on the existing subtotal row).
+  //
+  // Note this does NOT affect leaves whose ili.phase_budget_line_id is set
+  // (Option C path) — those flow to ONE specific pbl and aren't double-counted
+  // by the backend in the first place. The dedup only kicks in for shared GL
+  // codes where multiple pbls match.
   const acctTotals = useMemo(() => {
     const t = new Map<number, Totals>();
     const counted = new Map<number, Set<number>>(); // ancestor.id → set of qb_account_ids already summed
@@ -436,25 +446,25 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         if (!t.has(cur.id)) t.set(cur.id, zero());
         if (!counted.has(cur.id)) counted.set(cur.id, new Set());
         const seen = counted.get(cur.id)!;
-        const skip = isQbSourced && seen.has(r.qb_account_id);
+        const skip = seen.has(r.qb_account_id);
         seen.add(r.qb_account_id);
         t.set(cur.id, addRow(t.get(cur.id)!, r, skip));
         cur = cur.parent_id != null ? qbById.get(cur.parent_id) : undefined;
       }
     }
     return t;
-  }, [filteredRows, qbById, isQbSourced]);
+  }, [filteredRows, qbById]);
 
   const grand = useMemo(() => {
     const seen = new Set<number>();
     return filteredRows.reduce((a, r) => {
-      const skip = isQbSourced && r.qb_account_id != null && seen.has(r.qb_account_id);
+      const skip = r.qb_account_id != null && seen.has(r.qb_account_id);
       if (r.qb_account_id != null) seen.add(r.qb_account_id);
       return addRow(a, r, skip);
     }, zero());
-  }, [filteredRows, isQbSourced]);
+  }, [filteredRows]);
 
-  // Phantom QB rows (qb_account_id is null). Render in their own section.
+  // Phantom QB rows (qb_account_id is null, source='qb' only). Their own section.
   const phantomRows = useMemo(
     () => filteredRows.filter(r => r.phantom_from_qb),
     [filteredRows]
@@ -464,21 +474,19 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     [phantomRows]
   );
 
-  // For leaf rendering: rows whose qb_account_id is shared with siblings
-  // should display blank in the actuals columns (the GL-code total is shown on
-  // the subtotal row instead). Pre-compute a display version of each row.
+  // Leaves whose qb_account_id is shared with siblings render blank in the
+  // actuals columns regardless of source. (Same logic for PM and QB.)
   const sharedQbAccountIds = useMemo(() => {
-    if (!isQbSourced) return new Set<number>();
     const counts = new Map<number, number>();
     for (const r of filteredRows) {
       if (r.qb_account_id == null) continue;
       counts.set(r.qb_account_id, (counts.get(r.qb_account_id) ?? 0) + 1);
     }
     return new Set([...counts.entries()].filter(([, c]) => c > 1).map(([id]) => id));
-  }, [filteredRows, isQbSourced]);
+  }, [filteredRows]);
 
   const blankActualsForShared = (r: BudgetRow): BudgetRow => {
-    if (!isQbSourced || r.qb_account_id == null || !sharedQbAccountIds.has(r.qb_account_id)) {
+    if (r.qb_account_id == null || !sharedQbAccountIds.has(r.qb_account_id)) {
       return r;
     }
     return { ...r, fixed_charges: 0, tm_charges: 0, expense_charges: 0,
