@@ -9,6 +9,7 @@ import styles from './CompareGrid.module.css';
 interface CompareRow {
   id: number;
   task_name: string;
+  qb_account_id: number | null;
   qb_account_number: string | null;
   qb_short_name: string | null;
   qb_parent_number: string | null;
@@ -95,17 +96,51 @@ export default function CompareGrid() {
     enabled: !!phaseIdNum,
   });
 
-  // Group rows by qb_parent_number for visual section breaks (matches BudgetGrid)
+  // GL-code-level groupings within each parent. A parent (e.g. "1720 Engineering")
+  // can contain multiple GL codes (1720.01, 1720.02 …); each GL code can have
+  // multiple PM tasks (the shared-code case). For shared codes the QB amount is
+  // the same on every leaf (backend duplicates it), so leaves are deduped to ONE
+  // representative for the QB side and a "GL Total" row displays the comparison.
   const grouped = useMemo(() => {
-    const out: { parent: { number: string | null; name: string | null }; rows: CompareRow[] }[] = [];
+    type GlGroup = {
+      qb_account_id: number | null;
+      qb_account_number: string | null;
+      qb_short_name: string | null;
+      tasks: CompareRow[];           // PM tasks under this code
+      qbBilled: number;              // GL-code-level QB amount (one number)
+      qbPaid: number;
+      qbAmountDue: number;
+    };
+    type ParentGroup = {
+      parent: { number: string | null; name: string | null };
+      glGroups: GlGroup[];
+    };
+
+    const out: ParentGroup[] = [];
     let currentParent = '__none__';
+    let currentGlAccountId: number | null = -999;
+
     rows.forEach(r => {
-      const key = r.qb_parent_number || r.qb_account_number || '__none__';
-      if (key !== currentParent) {
-        out.push({ parent: { number: r.qb_parent_number, name: r.qb_parent_name }, rows: [] });
-        currentParent = key;
+      const parentKey = r.qb_parent_number || r.qb_account_number || '__none__';
+      if (parentKey !== currentParent) {
+        out.push({ parent: { number: r.qb_parent_number, name: r.qb_parent_name }, glGroups: [] });
+        currentParent = parentKey;
+        currentGlAccountId = -999;
       }
-      out[out.length - 1].rows.push(r);
+      const lastParent = out[out.length - 1];
+      if (r.qb_account_id !== currentGlAccountId) {
+        lastParent.glGroups.push({
+          qb_account_id:     r.qb_account_id,
+          qb_account_number: r.qb_account_number,
+          qb_short_name:     r.qb_short_name,
+          tasks: [],
+          qbBilled:    r.qb_billed,     // same on every leaf — take the first
+          qbPaid:      r.qb_paid,
+          qbAmountDue: r.qb_amount_due,
+        });
+        currentGlAccountId = r.qb_account_id;
+      }
+      lastParent.glGroups[lastParent.glGroups.length - 1].tasks.push(r);
     });
     return out;
   }, [rows]);
@@ -222,11 +257,11 @@ export default function CompareGrid() {
           </thead>
 
           <tbody>
-            {grouped.map((group, gi) => (
-              <RenderGroup
+            {grouped.map((parentGrp, gi) => (
+              <RenderParent
                 key={gi}
-                parent={group.parent}
-                rows={group.rows}
+                parent={parentGrp.parent}
+                glGroups={parentGrp.glGroups}
                 showBreakdownDelta={showBreakdownDelta}
               />
             ))}
@@ -237,11 +272,19 @@ export default function CompareGrid() {
   );
 }
 
-function RenderGroup({
-  parent, rows, showBreakdownDelta,
+function RenderParent({
+  parent, glGroups, showBreakdownDelta,
 }: {
   parent: { number: string | null; name: string | null };
-  rows: CompareRow[];
+  glGroups: {
+    qb_account_id: number | null;
+    qb_account_number: string | null;
+    qb_short_name: string | null;
+    tasks: CompareRow[];
+    qbBilled: number;
+    qbPaid: number;
+    qbAmountDue: number;
+  }[];
   showBreakdownDelta: boolean;
 }) {
   const colSpan = showBreakdownDelta ? 19 : 16;
@@ -255,7 +298,50 @@ function RenderGroup({
           </td>
         </tr>
       )}
-      {rows.map(r => (
+      {glGroups.map(g => (
+        <RenderGlGroup key={`${g.qb_account_id}-${g.qb_account_number}`} group={g} showBreakdownDelta={showBreakdownDelta} />
+      ))}
+    </>
+  );
+}
+
+function RenderGlGroup({
+  group, showBreakdownDelta,
+}: {
+  group: {
+    qb_account_id: number | null;
+    qb_account_number: string | null;
+    qb_short_name: string | null;
+    tasks: CompareRow[];
+    qbBilled: number;
+    qbPaid: number;
+    qbAmountDue: number;
+  };
+  showBreakdownDelta: boolean;
+}) {
+  const isShared = group.tasks.length > 1;
+
+  // Sum of PM-side actuals across all tasks under this GL code
+  const pmTotals = group.tasks.reduce((acc, t) => ({
+    fixed:  acc.fixed  + t.pm_fixed_charges,
+    tm:     acc.tm     + t.pm_tm_charges,
+    expense:acc.expense+ t.pm_expense_charges,
+    billed: acc.billed + t.pm_billed,
+    paid:   acc.paid   + t.pm_paid,
+    amtDue: acc.amtDue + t.pm_amount_due,
+  }), { fixed: 0, tm: 0, expense: 0, billed: 0, paid: 0, amtDue: 0 });
+
+  // Aggregated PM/budget at GL-code level (for shared groups)
+  const groupBudgeted   = group.tasks.reduce((s, t) => s + t.budgeted_amount, 0);
+  const groupCommitted  = group.tasks.reduce((s, t) => s + t.committed, 0);
+  const groupCoValue    = group.tasks.reduce((s, t) => s + t.co_value, 0);
+  const groupTotalCommit= group.tasks.reduce((s, t) => s + t.total_commitment, 0);
+  const groupRemBudget  = groupBudgeted - pmTotals.billed;
+
+  return (
+    <>
+      {/* Individual task rows */}
+      {group.tasks.map(r => (
         <tr key={r.id} className={styles.dataRow}>
           <td className={styles.tdAcct}>{r.qb_account_number || '—'}</td>
           <td className={styles.tdTask}>{r.task_name}</td>
@@ -269,11 +355,17 @@ function RenderGroup({
           {showBreakdownDelta ? (
             <>
               <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_fixed_charges)}</td>
-              <DeltaCell pm={r.pm_fixed_charges} qb={r.qb_fixed_charges} structurallyBlank />
+              {isShared
+                ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
+                : <DeltaCell pm={r.pm_fixed_charges} qb={r.qb_fixed_charges} structurallyBlank />}
               <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_tm_charges)}</td>
-              <DeltaCell pm={r.pm_tm_charges} qb={r.qb_tm_charges} structurallyBlank />
+              {isShared
+                ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
+                : <DeltaCell pm={r.pm_tm_charges} qb={r.qb_tm_charges} structurallyBlank />}
               <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_expense_charges)}</td>
-              <DeltaCell pm={r.pm_expense_charges} qb={r.qb_expense_charges} structurallyBlank />
+              {isShared
+                ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
+                : <DeltaCell pm={r.pm_expense_charges} qb={r.qb_expense_charges} structurallyBlank />}
             </>
           ) : (
             <>
@@ -283,14 +375,63 @@ function RenderGroup({
             </>
           )}
 
+          {/* For shared GL codes, blank the QB columns + Δ at the leaf level —
+              the comparison lives on the GL-code Total row below. */}
           <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_billed)}</td>
-          <DeltaCell pm={r.pm_billed} qb={r.qb_billed} />
+          {isShared
+            ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
+            : <DeltaCell pm={r.pm_billed} qb={r.qb_billed} />}
           <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_amount_due)}</td>
-          <DeltaCell pm={r.pm_amount_due} qb={r.qb_amount_due} />
+          {isShared
+            ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
+            : <DeltaCell pm={r.pm_amount_due} qb={r.qb_amount_due} />}
           <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_paid)}</td>
-          <DeltaCell pm={r.pm_paid} qb={r.qb_paid} />
+          {isShared
+            ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
+            : <DeltaCell pm={r.pm_paid} qb={r.qb_paid} />}
         </tr>
       ))}
+
+      {/* GL-code Total row — only when multiple PM tasks share the same GL code.
+          QB has no per-task data, so the comparison must live at this level. */}
+      {isShared && (
+        <tr style={{ background: '#f7f7f7', fontWeight: 600 }}>
+          <td className={styles.tdAcct}>{group.qb_account_number}</td>
+          <td className={styles.tdTask} style={{ fontStyle: 'italic', color: '#5f6368' }}>
+            {group.qb_short_name} — Total ({group.tasks.length} tasks)
+          </td>
+          <td className={styles.tdMoney}>{money(groupBudgeted)}</td>
+          <td className={styles.tdMoney}>{money(groupRemBudget)}</td>
+          <td className={styles.tdMoneyMuted}>{remPct(pmTotals.billed, groupBudgeted)}</td>
+          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(groupCommitted)}</td>
+          <td className={styles.tdMoney}>{money(groupCoValue)}</td>
+          <td className={styles.tdMoney}>{money(groupTotalCommit)}</td>
+
+          {showBreakdownDelta ? (
+            <>
+              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(pmTotals.fixed)}</td>
+              <DeltaCell pm={pmTotals.fixed} qb={0} structurallyBlank />
+              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(pmTotals.tm)}</td>
+              <DeltaCell pm={pmTotals.tm} qb={0} structurallyBlank />
+              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(pmTotals.expense)}</td>
+              <DeltaCell pm={pmTotals.expense} qb={0} structurallyBlank />
+            </>
+          ) : (
+            <>
+              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(pmTotals.fixed)}</td>
+              <td className={styles.tdMoney}>{money(pmTotals.tm)}</td>
+              <td className={styles.tdMoney}>{money(pmTotals.expense)}</td>
+            </>
+          )}
+
+          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(pmTotals.billed)}</td>
+          <DeltaCell pm={pmTotals.billed} qb={group.qbBilled} />
+          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(pmTotals.amtDue)}</td>
+          <DeltaCell pm={pmTotals.amtDue} qb={group.qbAmountDue} />
+          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(pmTotals.paid)}</td>
+          <DeltaCell pm={pmTotals.paid} qb={group.qbPaid} />
+        </tr>
+      )}
     </>
   );
 }

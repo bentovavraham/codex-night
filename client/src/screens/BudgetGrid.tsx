@@ -290,18 +290,22 @@ const zero = (): Totals => ({
   budgeted: 0, committed: 0, co_value: 0, total_commitment: 0, remaining_commit: 0,
   fixed: 0, tm: 0, expenses: 0, billed: 0, paid: 0, rem_budget: 0,
 });
-const addRow = (t: Totals, r: BudgetRow): Totals => ({
+// `skipActualsSum` skips the QB-derived actuals fields. Used in QB Source mode
+// where multiple pbls share one qb_account_id: each leaf gets the FULL GL-code
+// total from the backend (because QB has no task-level granularity), so we sum
+// the actuals only ONCE per unique qb_account_id when rolling up into ancestors.
+const addRow = (t: Totals, r: BudgetRow, skipActualsSum = false): Totals => ({
   budgeted:          t.budgeted          + r.budgeted_amount,
   committed:         t.committed         + r.committed,
   co_value:          t.co_value          + r.co_value,
   total_commitment:  t.total_commitment  + r.total_commitment,
   remaining_commit:  t.remaining_commit  + r.remaining_commit,
-  fixed:             t.fixed             + r.fixed_charges,
-  tm:                t.tm               + r.tm_charges,
-  expenses:          t.expenses          + r.expense_charges,
-  billed:            t.billed            + r.billed,
-  paid:              t.paid              + r.paid,
-  rem_budget:        t.rem_budget        + r.remaining_budget,
+  fixed:             t.fixed             + (skipActualsSum ? 0 : r.fixed_charges),
+  tm:                t.tm                + (skipActualsSum ? 0 : r.tm_charges),
+  expenses:          t.expenses          + (skipActualsSum ? 0 : r.expense_charges),
+  billed:            t.billed            + (skipActualsSum ? 0 : r.billed),
+  paid:              t.paid              + (skipActualsSum ? 0 : r.paid),
+  rem_budget:        t.rem_budget        + (skipActualsSum ? 0 : r.remaining_budget),
 });
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -416,21 +420,59 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
   }, [filteredRows]);
 
   // Totals per account, rolled up to all ancestors
+  // In QB Source mode, the actuals from each leaf are the FULL GL-code total
+  // (QB doesn't carry task-level granularity). Roll them up only once per unique
+  // qb_account_id so subtotals show the right number — not 10× the value when
+  // 10 PM tasks share one GL code.
+  const isQbSourced = source === 'qb';
   const acctTotals = useMemo(() => {
     const t = new Map<number, Totals>();
+    const counted = new Map<number, Set<number>>(); // ancestor.id → set of qb_account_ids already summed
     for (const r of filteredRows) {
       if (r.qb_account_id == null) continue;
       let cur: QbAccount | undefined = qbById.get(r.qb_account_id);
       while (cur) {
         if (!t.has(cur.id)) t.set(cur.id, zero());
-        t.set(cur.id, addRow(t.get(cur.id)!, r));
+        if (!counted.has(cur.id)) counted.set(cur.id, new Set());
+        const seen = counted.get(cur.id)!;
+        const skip = isQbSourced && seen.has(r.qb_account_id);
+        seen.add(r.qb_account_id);
+        t.set(cur.id, addRow(t.get(cur.id)!, r, skip));
         cur = cur.parent_id != null ? qbById.get(cur.parent_id) : undefined;
       }
     }
     return t;
-  }, [filteredRows, qbById]);
+  }, [filteredRows, qbById, isQbSourced]);
 
-  const grand = useMemo(() => filteredRows.reduce((a, r) => addRow(a, r), zero()), [filteredRows]);
+  const grand = useMemo(() => {
+    const seen = new Set<number>();
+    return filteredRows.reduce((a, r) => {
+      const skip = isQbSourced && r.qb_account_id != null && seen.has(r.qb_account_id);
+      if (r.qb_account_id != null) seen.add(r.qb_account_id);
+      return addRow(a, r, skip);
+    }, zero());
+  }, [filteredRows, isQbSourced]);
+
+  // For leaf rendering: rows whose qb_account_id is shared with siblings
+  // should display blank in the actuals columns (the GL-code total is shown on
+  // the subtotal row instead). Pre-compute a display version of each row.
+  const sharedQbAccountIds = useMemo(() => {
+    if (!isQbSourced) return new Set<number>();
+    const counts = new Map<number, number>();
+    for (const r of filteredRows) {
+      if (r.qb_account_id == null) continue;
+      counts.set(r.qb_account_id, (counts.get(r.qb_account_id) ?? 0) + 1);
+    }
+    return new Set([...counts.entries()].filter(([, c]) => c > 1).map(([id]) => id));
+  }, [filteredRows, isQbSourced]);
+
+  const blankActualsForShared = (r: BudgetRow): BudgetRow => {
+    if (!isQbSourced || r.qb_account_id == null || !sharedQbAccountIds.has(r.qb_account_id)) {
+      return r;
+    }
+    return { ...r, fixed_charges: 0, tm_charges: 0, expense_charges: 0,
+             billed: 0, paid: 0, amount_due: 0, remaining_budget: r.budgeted_amount };
+  };
 
   const handleTabNext = useCallback((rowId: number, field: string) => {
     const fi = TAB_FIELDS.indexOf(field);
@@ -590,7 +632,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
       // Leaf account: task rows + optional subtotal
       const multiTask = leafRows.length > 1;
       return [
-        ...leafRows.map(renderRow),
+        ...leafRows.map(r => renderRow(blankActualsForShared(r))),
         ...(multiTask ? [
           <tr key={`leaf:${key}:sub`} className={styles.leafSubRow}>
             <td />
