@@ -769,45 +769,83 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
       ORDER BY c.contract_date DESC NULLS LAST, c.id
     `, [lineId]);
 
-    // Invoices against this budget line.
-    // For invoices with per-line-item budget assignments (import tab), return the
-    // apportioned amount (sum of matching line items). For simple invoices, return
-    // the full invoice amount as before.
+    // Invoices that contribute to this budget line — using the SAME 4 allocation
+    // paths as the budget aggregation in the main GET /budget endpoint:
+    //   1. ili.phase_budget_line_id = pbl.id                     (explicit per-line)
+    //   2. ili.qb_account_id = pbl.qb_account_id (when unique-GL) (GL-driven)
+    //   3. ili has neither pbl_id nor qb_account_id → inv.phase_budget_line_id
+    //   4. invoice has no line items → inv.phase_budget_line_id
+    // Allocated amount per invoice = sum of contributions across whichever paths apply.
     const invoicesQ = await pool.query(`
+      WITH pbl AS (
+        SELECT id, phase_id, qb_account_id FROM phase_budget_lines WHERE id = $1
+      ),
+      gl_sharing AS (
+        SELECT
+          (SELECT COUNT(*) FROM phase_budget_lines pbl2
+            WHERE pbl2.phase_id = (SELECT phase_id FROM pbl)
+              AND pbl2.qb_account_id = (SELECT qb_account_id FROM pbl)
+          ) AS share_count
+      )
       SELECT
         i.id, i.vendor_name, i.invoice_number, i.invoice_date,
         i.status, i.invoice_type, i.contract_id, i.file_reference,
         i.amount AS total_amount,
         c.reference_number AS contract_ref,
-        c.vendor_name AS contract_vendor,
-        CASE
-          WHEN EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = i.id AND x.phase_budget_line_id IS NOT NULL)
-          THEN COALESCE((SELECT SUM(ili.amount) FROM invoice_line_items ili WHERE ili.invoice_id = i.id AND ili.phase_budget_line_id = $1), 0)
-          ELSE i.amount
-        END AS amount
+        c.vendor_name      AS contract_vendor,
+        (
+          -- Path 1: explicit per-line
+          COALESCE((
+            SELECT SUM(ili.amount) FROM invoice_line_items ili
+             WHERE ili.invoice_id = i.id AND ili.phase_budget_line_id = $1
+          ), 0)
+          -- Path 2: GL-driven (only when this pbl is the sole pbl with this GL)
+          + CASE WHEN (SELECT share_count FROM gl_sharing) = 1
+                 THEN COALESCE((
+                   SELECT SUM(ili.amount) FROM invoice_line_items ili
+                    WHERE ili.invoice_id = i.id
+                      AND ili.phase_budget_line_id IS NULL
+                      AND ili.qb_account_id IS NOT NULL
+                      AND ili.qb_account_id = (SELECT qb_account_id FROM pbl)
+                 ), 0)
+                 ELSE 0 END
+          -- Path 3: legacy line items with neither pbl_id nor qb_account_id
+          + CASE WHEN i.phase_budget_line_id = $1
+                 THEN COALESCE((
+                   SELECT SUM(ili.amount) FROM invoice_line_items ili
+                    WHERE ili.invoice_id = i.id
+                      AND ili.phase_budget_line_id IS NULL
+                      AND ili.qb_account_id IS NULL
+                 ), 0)
+                 ELSE 0 END
+          -- Path 4: legacy invoice with no line items at all
+          + CASE WHEN i.phase_budget_line_id = $1
+                  AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = i.id)
+                 THEN i.amount ELSE 0 END
+        ) AS amount
       FROM invoices i
       LEFT JOIN contracts c ON c.id = i.contract_id
       WHERE i.status NOT IN ('voided','draft','rejected')
         AND (
-          -- Path 1: invoice has per-line-item budget assignments pointing here
           EXISTS (
             SELECT 1 FROM invoice_line_items ili
-            WHERE ili.invoice_id = i.id AND ili.phase_budget_line_id = $1
+             WHERE ili.invoice_id = i.id AND ili.phase_budget_line_id = $1
           )
-          OR (
-            -- Path 2: invoice has no per-line-item assignments — use invoice-level
-            NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = i.id AND x.phase_budget_line_id IS NOT NULL)
-            AND (
-              i.phase_budget_line_id = $1
-              OR (
-                i.phase_budget_line_id IS NULL
-                AND i.contract_id IN (
-                  SELECT id FROM contracts
-                  WHERE phase_budget_line_id = $1 AND status NOT IN ('voided')
-                )
-              )
-            )
-          )
+          OR ((SELECT share_count FROM gl_sharing) = 1 AND EXISTS (
+            SELECT 1 FROM invoice_line_items ili
+             WHERE ili.invoice_id = i.id
+               AND ili.phase_budget_line_id IS NULL
+               AND ili.qb_account_id IS NOT NULL
+               AND ili.qb_account_id = (SELECT qb_account_id FROM pbl)
+          ))
+          OR (i.phase_budget_line_id = $1 AND EXISTS (
+            SELECT 1 FROM invoice_line_items ili
+             WHERE ili.invoice_id = i.id
+               AND ili.phase_budget_line_id IS NULL
+               AND ili.qb_account_id IS NULL
+          ))
+          OR (i.phase_budget_line_id = $1
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = i.id))
         )
       ORDER BY i.invoice_date DESC NULLS LAST, i.id
     `, [lineId]);
