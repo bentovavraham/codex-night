@@ -915,16 +915,14 @@ function UploadPanel({
                 </thead>
                 <tbody>
                   {form.line_items.map((li, i) => {
-                    // Tasks under this GL code (preferred picks) and ALL tasks (fallback).
-                    // Never block the user — always show a picker with options.
+                    // ALWAYS show a picker so Richard + the user can verify/change every
+                    // line at a glance during bulk review — even unique-GL auto-resolves.
                     const matchingTasks = li.qb_account_id != null
                       ? budgetLines.filter((b: any) => b.qb_account_id === li.qb_account_id)
                       : [];
                     const allTasks: any[] = budgetLines as any[];
                     const isShared = matchingTasks.length > 1;
-                    // Show a picker whenever the GL is set: required for shared groups,
-                    // helpful (but optional) for non-matching codes too.
-                    const showPicker = li.qb_account_id != null && (isShared || matchingTasks.length === 0);
+                    const showPicker = true; // always — high-fidelity bulk review surface
                     return (
                     <tr key={i} className={styles.catRow}>
                       <td className={styles.colHash}>{i + 1}</td>
@@ -936,45 +934,55 @@ function UploadPanel({
                           suggestionConfidence={li.qb_suggestion_confidence}
                           onChange={id => setLine(i, { qb_account_id: id, phase_budget_line_id: null })}
                         />
-                        {/* Task picker. Always-available — never blocks the user.
-                            Shown when the GL code maps to multiple PM tasks (Option C
-                            requirement) OR when no PM task uses the exact GL code (so
-                            the user can still pick any task in the phase to assign to). */}
+                        {/* Task picker — ALWAYS shown. Built for bulk review by
+                            Richard + the user: big fonts, high contrast, current
+                            assignment is impossible to miss. */}
                         {showPicker && (() => {
                           const ai = aiSuggestions.get(i);
                           const isAiPick = !!ai && ai.id === li.phase_budget_line_id;
-                          // If we have direct GL matches, show those first; otherwise
-                          // fall back to all tasks. Group visually for clarity.
                           const hasMatching = matchingTasks.length > 0;
+                          const isAssigned = li.phase_budget_line_id != null;
                           const placeholder = hasMatching
-                            ? `Pick task (${matchingTasks.length} match this GL)`
-                            : `No PM task on this GL — pick any task`;
+                            ? `⚠ Pick task (${matchingTasks.length} match this GL)`
+                            : `⚠ Pick any task`;
+                          // Border + background reflect status:
+                          //   AI-picked → accent (orange)
+                          //   user-picked → green (confirmed)
+                          //   unassigned → red-ish (action needed)
+                          const borderColor = !isAssigned
+                            ? '#dc2626'
+                            : isAiPick ? 'var(--accent)' : '#16a34a';
+                          const bgColor = !isAssigned
+                            ? '#fef2f2'
+                            : isAiPick ? 'var(--accent-light)' : '#f0fdf4';
                           return (
-                            <>
+                            <div style={{ marginTop: 6 }}>
                               <select
                                 value={li.phase_budget_line_id ?? ''}
                                 onChange={e => setLine(i, { phase_budget_line_id: e.target.value ? Number(e.target.value) : null })}
-                                title="You can change this anytime, even if AI picked it. Pick any task — the GL code is the source of truth for the rollup."
+                                title="Click to verify or change the task assignment. Always editable."
                                 style={{
-                                  marginTop: 4, width: '100%', fontSize: 11,
-                                  padding: '3px 4px',
-                                  border: li.phase_budget_line_id ? (isAiPick ? '1px solid var(--accent)' : '1px solid #d0d0d0') : '1px solid #d0d0d0',
-                                  borderRadius: 3,
-                                  background: li.phase_budget_line_id
-                                    ? (isAiPick ? 'var(--accent-light)' : '#fff')
-                                    : '#fafafa',
+                                  width: '100%',
+                                  fontSize: 14,
+                                  fontWeight: isAssigned ? 600 : 500,
+                                  padding: '7px 8px',
+                                  border: `2px solid ${borderColor}`,
+                                  borderRadius: 4,
+                                  background: bgColor,
+                                  color: '#1a1714',
                                   cursor: 'pointer',
+                                  letterSpacing: '0',
                                 }}
                               >
                                 <option value="">{placeholder}</option>
                                 {hasMatching && (
-                                  <optgroup label={`On GL ${matchingTasks[0].qb_account_id ?? ''}`}>
+                                  <optgroup label={`✓ Match this GL code`}>
                                     {matchingTasks.map((t: any) => (
                                       <option key={t.id} value={t.id}>{t.task_name}</option>
                                     ))}
                                   </optgroup>
                                 )}
-                                <optgroup label={hasMatching ? 'All other tasks in this phase' : 'All tasks in this phase'}>
+                                <optgroup label={hasMatching ? '— Other tasks in this phase —' : '— All tasks in this phase —'}>
                                   {allTasks
                                     .filter((t: any) => !matchingTasks.find((m: any) => m.id === t.id))
                                     .map((t: any) => (
@@ -986,13 +994,20 @@ function UploadPanel({
                                 </optgroup>
                               </select>
                               {ai && isAiPick && (
-                                <div style={{ marginTop: 2, fontSize: 10, color: 'var(--accent)', fontStyle: 'italic' }}
-                                  title={ai.reason}>
-                                  ✦ AI ({ai.confidence}): {ai.reason.length > 80 ? ai.reason.slice(0, 80) + '…' : ai.reason}
-                                  <span style={{ marginLeft: 6, color: '#666', fontStyle: 'normal' }}>· you can override</span>
+                                <div style={{
+                                  marginTop: 4, fontSize: 12, color: 'var(--accent)',
+                                  fontStyle: 'italic', lineHeight: 1.35,
+                                }} title={ai.reason}>
+                                  ✦ AI ({ai.confidence}): {ai.reason.length > 100 ? ai.reason.slice(0, 100) + '…' : ai.reason}
+                                  <span style={{ marginLeft: 8, color: '#888', fontStyle: 'normal', fontWeight: 600 }}>· you can override</span>
                                 </div>
                               )}
-                            </>
+                              {!isAssigned && (
+                                <div style={{ marginTop: 4, fontSize: 12, color: '#dc2626', fontWeight: 600 }}>
+                                  ⚠ This line is not assigned to a task — its amount sits in "General — Unassigned"
+                                </div>
+                              )}
+                            </div>
                           );
                         })()}
                       </td>
