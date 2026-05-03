@@ -349,10 +349,13 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
         const liAmt = Number(li.amount);
         if (!liAmt) continue;
         const liType = ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : invoiceType;
+        // CRITICAL: include qb_account_id and phase_budget_line_id — these are the
+        // primary allocation signals. Dropping them silently corrupts the budget grid.
         await client.query(
           `INSERT INTO invoice_line_items
-             (invoice_id, billing_type, description, person, line_date, hours, rate, amount, sort_order)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+             (invoice_id, billing_type, description, person, line_date, hours, rate,
+              amount, sort_order, qb_account_id, phase_budget_line_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
           [invoiceId, liType,
            li.description || null,
            li.person      || null,
@@ -360,7 +363,9 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
            li.hours  != null ? Number(li.hours)  : null,
            li.rate   != null ? Number(li.rate)   : null,
            liAmt,
-           li.sort_order != null ? Number(li.sort_order) : idx]
+           li.sort_order != null ? Number(li.sort_order) : idx,
+           li.qb_account_id        != null ? Number(li.qb_account_id)        : null,
+           li.phase_budget_line_id != null ? Number(li.phase_budget_line_id) : null]
         );
       }
     }
@@ -417,6 +422,69 @@ router.get('/invoices/:id', requireAuth, async (req, res, next) => {
 });
 
 // GET /api/invoices/:id/history ---------------------------------------------
+// POST /api/invoices/:id/suggest-line-codes
+// Tier-1 AI: looks at the saved invoice PDF and suggests a GL code (qb_account_id)
+// for each line item that doesn't have one. Used by the Edit modal to fill in
+// missing GL codes before the Tier-2 task picker (suggest-line-tasks) runs.
+router.post('/invoices/:id/suggest-line-codes', requireAuth, async (req, res, next) => {
+  try {
+    const invId = Number(req.params.id);
+    const invRes = await pool.query(
+      'SELECT id, vendor_name, file_reference FROM invoices WHERE id = $1',
+      [invId],
+    );
+    const inv = invRes.rows[0];
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    if (!inv.file_reference) return res.json({ suggestions: [] });
+
+    const linesRes = await pool.query(
+      `SELECT id, billing_type, description, amount, sort_order
+         FROM invoice_line_items
+        WHERE invoice_id = $1
+        ORDER BY sort_order, id`,
+      [invId],
+    );
+    if (linesRes.rows.length === 0) return res.json({ suggestions: [] });
+
+    const accountsRes = await pool.query(
+      `SELECT id, account_number, full_name, short_name
+         FROM qb_accounts ORDER BY sort_order`,
+    );
+
+    let pdfBuffer;
+    try {
+      const stored = await storage.read(inv.file_reference);
+      pdfBuffer = stored.buffer;
+    } catch (e) {
+      return res.json({ suggestions: [], note: 'PDF not available for AI extraction' });
+    }
+
+    const linesForAi = linesRes.rows.map(r => ({
+      description: r.description || '',
+      amount: Number(r.amount) || 0,
+    }));
+    const suggestions = await suggestInvoiceLineCodes(
+      pdfBuffer,
+      linesForAi,
+      accountsRes.rows,
+      inv.vendor_name,
+    );
+    // Map AI suggestions (line_index → qb_account_id) to actual line_item ids.
+    const out = (suggestions || []).map(s => {
+      const li = linesRes.rows[s.line_index];
+      return li ? {
+        line_item_id: li.id,
+        line_index:   s.line_index,
+        qb_account_id: s.qb_account_id,
+        account_number: s.account_number,
+        confidence: s.confidence,
+        reason: s.reason,
+      } : null;
+    }).filter(Boolean);
+    res.json({ suggestions: out });
+  } catch (err) { next(err); }
+});
+
 router.get('/invoices/:id/history', requireAuth, async (req, res, next) => {
   try {
     const inv = await getInvoiceWithProject(Number(req.params.id));
@@ -490,10 +558,14 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
         const liAmt = Number(li.amount);
         if (!liAmt) continue;
         const liType = ['fixed', 'tm', 'expense'].includes(li.billing_type) ? li.billing_type : invoiceType;
+        // CRITICAL: include qb_account_id and phase_budget_line_id in the INSERT.
+        // Without these the GL code (the source of truth for budget allocation)
+        // and the per-task assignment are silently dropped on every save.
         await client.query(
           `INSERT INTO invoice_line_items
-             (invoice_id, billing_type, description, person, line_date, hours, rate, amount, sort_order)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+             (invoice_id, billing_type, description, person, line_date, hours, rate,
+              amount, sort_order, qb_account_id, phase_budget_line_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
           [invId, liType,
            li.description || null,
            li.person      || null,
@@ -501,7 +573,9 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
            li.hours  != null ? Number(li.hours)  : null,
            li.rate   != null ? Number(li.rate)   : null,
            liAmt,
-           li.sort_order != null ? Number(li.sort_order) : idx]
+           li.sort_order != null ? Number(li.sort_order) : idx,
+           li.qb_account_id        != null ? Number(li.qb_account_id)        : null,
+           li.phase_budget_line_id != null ? Number(li.phase_budget_line_id) : null]
         );
       }
       if (lineItems.length > 0) changes.push(`line items updated (${lineItems.length} lines)`);

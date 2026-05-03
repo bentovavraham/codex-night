@@ -535,10 +535,47 @@ function UploadPanel({
     setSuggesting(true);
     setSuggestError(null);
     try {
+      // ── Tier 1: AI GL code suggestion ──────────────────────────────
+      // For lines that don't have a qb_account_id yet, ask Claude to look
+      // at the original PDF and suggest one. Only available when editing an
+      // existing invoice (we need the saved file_reference).
+      let lineItemsForTier2 = form.line_items;
+      if (editId) {
+        const needGl = form.line_items
+          .map((li, i) => ({ li, i }))
+          .filter(({ li }) => li.qb_account_id == null);
+        if (needGl.length > 0) {
+          try {
+            const t1 = await api.suggestInvoiceLineCodes(editId);
+            // Build a quick lookup line_index → qb_account_id
+            const byIndex = new Map<number, number>();
+            (t1.suggestions ?? []).forEach(s => {
+              if (s.qb_account_id != null && Number.isInteger(s.line_index)) {
+                byIndex.set(s.line_index, s.qb_account_id);
+              }
+            });
+            if (byIndex.size > 0) {
+              const updated = [...form.line_items];
+              byIndex.forEach((qbId, idx) => {
+                if (updated[idx] && updated[idx].qb_account_id == null) {
+                  updated[idx] = { ...updated[idx], qb_account_id: qbId };
+                }
+              });
+              setForm(f => ({ ...f, line_items: updated }));
+              lineItemsForTier2 = updated; // use freshly-coded lines for Tier 2
+            }
+          } catch (t1err) {
+            // Tier 1 failure is non-fatal — Tier 2 still runs on whatever GL codes exist.
+            console.warn('Tier 1 (GL code) suggestion failed:', t1err);
+          }
+        }
+      }
+
+      // ── Tier 2: AI task suggestion within the GL code group ────────
       const res = await api.suggestLineTasks(phaseIdNum, {
         vendor_name: form.vendor_name,
         description: form.description,
-        line_items: form.line_items.map(li => ({
+        line_items: lineItemsForTier2.map(li => ({
           description: li.description,
           billing_type: li.billing_type,
           amount: Number(li.amount) || 0,
@@ -546,12 +583,11 @@ function UploadPanel({
         })),
       });
       const map = new Map<number, { id: number; reason: string; confidence: string }>();
-      // Apply suggestions to lines that don't already have phase_budget_line_id
       const newPicks: { idx: number; pbl_id: number }[] = [];
       (res.suggestions ?? []).forEach(s => {
         if (s.budget_line_id == null) return;
         map.set(s.line_index, { id: s.budget_line_id, reason: s.reason, confidence: s.confidence });
-        const li = form.line_items[s.line_index];
+        const li = lineItemsForTier2[s.line_index];
         if (li && li.phase_budget_line_id == null) {
           newPicks.push({ idx: s.line_index, pbl_id: s.budget_line_id });
         }
@@ -569,20 +605,22 @@ function UploadPanel({
     } finally {
       setSuggesting(false);
     }
-  }, [form.line_items, form.vendor_name, form.description, phaseIdNum, suggesting]);
+  }, [form.line_items, form.vendor_name, form.description, phaseIdNum, suggesting, editId]);
 
-  // Auto-trigger once when modal opens with unassigned shared-GL lines
+  // Auto-trigger once when modal opens if any line item needs help:
+  //   - Missing GL code → Tier 1 (suggest qb_account_id from PDF), then
+  //   - Shared GL code with no task picked → Tier 2 (suggest task)
   useEffect(() => {
     if (autoSuggestedRef.current) return;
     if (!budgetLines || budgetLines.length === 0) return;
     if (form.line_items.length === 0) return;
-    const hasUnassignedShared = form.line_items.some(li => {
+    const needsHelp = form.line_items.some(li => {
+      if (li.qb_account_id == null) return true; // Tier 1 needed
       if (li.phase_budget_line_id != null) return false;
-      if (li.qb_account_id == null) return false;
       const matching = (budgetLines as any[]).filter(b => b.qb_account_id === li.qb_account_id);
-      return matching.length > 1;
+      return matching.length > 1; // Tier 2 needed
     });
-    if (hasUnassignedShared) {
+    if (needsHelp) {
       autoSuggestedRef.current = true;
       runSuggestions(true);
     }

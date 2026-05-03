@@ -50,6 +50,11 @@ export const api = {
   getQbTransactionsForGl: (phaseId: number, glCode: string) =>
     request<{ transactions: any[]; totals: { total: number; paid: number; open_balance: number }; gl_code: string }>(
       'GET', `/api/phases/${phaseId}/qb-transactions?gl_code=${encodeURIComponent(glCode)}`),
+  suggestInvoiceLineCodes: (invoiceId: number) =>
+    request<{
+      suggestions: { line_item_id: number; line_index: number; qb_account_id: number; account_number: string; confidence: string; reason: string }[];
+      note?: string;
+    }>('POST', `/api/invoices/${invoiceId}/suggest-line-codes`),
   suggestLineTasks: (phaseId: number, body: {
     vendor_name?: string;
     description?: string;
