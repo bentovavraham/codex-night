@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../api/client';
@@ -954,6 +954,7 @@ function UploadPanel({
                               <select
                                 value={li.phase_budget_line_id ?? ''}
                                 onChange={e => setLine(i, { phase_budget_line_id: e.target.value ? Number(e.target.value) : null })}
+                                title="You can change this anytime, even if AI picked it. Just click and pick a different task."
                                 style={{
                                   marginTop: 4, width: '100%', fontSize: 11,
                                   padding: '3px 4px',
@@ -962,6 +963,7 @@ function UploadPanel({
                                   background: li.phase_budget_line_id
                                     ? (isAiPick ? 'var(--accent-light)' : '#fff')
                                     : '#fffbeb',
+                                  cursor: 'pointer',
                                 }}
                               >
                                 <option value="">⚠ Pick task ({matchingTasks.length} share this GL)</option>
@@ -973,6 +975,7 @@ function UploadPanel({
                                 <div style={{ marginTop: 2, fontSize: 10, color: 'var(--accent)', fontStyle: 'italic' }}
                                   title={ai.reason}>
                                   ✦ AI ({ai.confidence}): {ai.reason.length > 80 ? ai.reason.slice(0, 80) + '…' : ai.reason}
+                                  <span style={{ marginLeft: 6, color: '#666', fontStyle: 'normal' }}>· you can override</span>
                                 </div>
                               )}
                             </>
@@ -1112,6 +1115,23 @@ export default function InvoicesTab() {
 
   const [uploadOpen, setUploadOpen] = useState(false);
   const [editInvoiceId, setEditInvoiceId] = useState<number | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Open Edit modal when navigated here with ?edit=X (from drill panel etc.)
+  useEffect(() => {
+    const editParam = searchParams.get('edit');
+    if (editParam) {
+      const id = Number(editParam);
+      if (Number.isInteger(id) && id > 0) {
+        setEditInvoiceId(id);
+        setUploadOpen(true);
+        // Clear the param so it doesn't re-fire on tab re-mount
+        const next = new URLSearchParams(searchParams);
+        next.delete('edit');
+        setSearchParams(next, { replace: true });
+      }
+    }
+  }, [searchParams, setSearchParams]);
 
   const { data: invoices = [], isLoading } = useQuery<any[]>({
     queryKey: ['invoices', phaseIdNum],

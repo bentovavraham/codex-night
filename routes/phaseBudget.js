@@ -707,6 +707,43 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
   try {
     const phaseId = Number(req.params.phaseId);
     const lineId  = Number(req.params.lineId);
+
+    // Synthetic "General — Unassigned" rows have negative IDs encoding the
+    // qb_account_id: id = -1_000_000 - qb_account_id. Decode and return the
+    // line items GL-coded to that account but not yet assigned to a task.
+    if (lineId <= -1_000_000) {
+      const qbAccountId = -1_000_000 - lineId;
+      const invoicesQ = await pool.query(`
+        SELECT
+          i.id, i.vendor_name, i.invoice_number, i.invoice_date,
+          i.status, i.invoice_type, i.contract_id, i.file_reference,
+          i.amount AS total_amount,
+          c.reference_number AS contract_ref,
+          c.vendor_name      AS contract_vendor,
+          COALESCE((
+            SELECT SUM(ili.amount) FROM invoice_line_items ili
+             WHERE ili.invoice_id = i.id
+               AND ili.phase_budget_line_id IS NULL
+               AND ili.qb_account_id = $1
+          ), 0) AS amount
+        FROM invoices i
+        LEFT JOIN contracts c ON c.id = i.contract_id
+        WHERE i.status NOT IN ('voided','draft','rejected')
+          AND EXISTS (
+            SELECT 1 FROM invoice_line_items ili
+             WHERE ili.invoice_id = i.id
+               AND ili.phase_budget_line_id IS NULL
+               AND ili.qb_account_id = $1
+          )
+        ORDER BY i.invoice_date DESC NULLS LAST, i.id
+      `, [qbAccountId]);
+      return res.json({
+        contracts: [],          // contracts don't apply to "general unassigned"
+        invoices:  invoicesQ.rows,
+        is_general_unassigned: true,
+        qb_account_id: qbAccountId,
+      });
+    }
     // Contracts: primary (phase_budget_line_id = lineId) or partial (cli line items)
     const contractsQ = await pool.query(`
       SELECT

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './BudgetGrid.module.css';
@@ -123,14 +123,20 @@ function EditCell({ value, rowId, field, numeric, isActive, onActivate, onCommit
 type DrillCell = 'committed' | 'billed';
 interface DrillTarget { rowId: number; rowName: string; cell: DrillCell; }
 
-function DrillPanel({ phaseId, target, onClose }: {
-  phaseId: number; target: DrillTarget; onClose: () => void;
+function DrillPanel({ phaseId, projectId, target, onClose }: {
+  phaseId: number; projectId: number | string | undefined; target: DrillTarget; onClose: () => void;
 }) {
+  const navigate = useNavigate();
   const { data, isLoading } = useQuery({
     queryKey: ['drill', phaseId, target.rowId],
     queryFn: () => api.drillBudgetLine(phaseId, target.rowId),
     staleTime: 0,
   });
+  const isGeneralUnassigned = (data as any)?.is_general_unassigned;
+  function openEdit(invoiceId: number) {
+    onClose();
+    navigate(`/projects/${projectId}/phases/${phaseId}/invoices?edit=${invoiceId}`);
+  }
   const contracts: any[] = data?.contracts ?? [];
   const invoices:  any[] = data?.invoices  ?? [];
   const contractTotal = contracts.reduce((s: number, c: any) => s + Number(c.allocated_amount), 0);
@@ -184,8 +190,21 @@ function DrillPanel({ phaseId, target, onClose }: {
         )}
         {!isLoading && target.cell === 'billed' && (
           <div className={styles.drillBody}>
+            {isGeneralUnassigned && invoices.length > 0 && (
+              <div style={{
+                margin: '8px 12px', padding: '8px 12px', borderRadius: 4,
+                background: 'var(--accent-light)', border: '1px solid var(--accent)',
+                fontSize: 12, color: '#6b3e1e',
+              }}>
+                These invoices have line items GL-coded to this account but not yet
+                assigned to a specific PM task. <strong>Click "Edit" on any row</strong> to
+                pick the right task — the General amount will burn down as you do.
+              </div>
+            )}
             {invoices.length === 0
-              ? <div className={styles.drillEmpty}>No invoices billed against this line.</div>
+              ? <div className={styles.drillEmpty}>{isGeneralUnassigned
+                  ? 'No unassigned line items on this GL code.'
+                  : 'No invoices billed against this line.'}</div>
               : <table className={styles.drillTable}>
                   <thead><tr>
                     <th>Invoice #</th><th>Vendor</th><th>Date</th><th>Type</th>
@@ -226,7 +245,13 @@ function DrillPanel({ phaseId, target, onClose }: {
                           </td>
                           <td className={`${styles.drillAmt} ${styles.drillAmtBold}`}>{usd.format(allocated)}</td>
                           <td className={`${styles.drillAmt} ${styles.drillAmtDim}`}>{isPartial ? usd.format(total) : '—'}</td>
-                          <td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <button className={styles.drillPdfBtn}
+                              onClick={() => openEdit(inv.id)}
+                              title="Open Edit Invoice — assign GL codes and tasks"
+                              style={{ marginRight: 4, background: 'var(--accent-light)', color: 'var(--accent)', border: '1px solid var(--accent)', fontWeight: 700 }}>
+                              Edit
+                            </button>
                             {inv.file_reference && (
                               <button className={styles.drillPdfBtn}
                                 onClick={() => window.open(`/api/files/${encodeURIComponent(inv.file_reference)}`, '_blank')}
@@ -701,7 +726,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
   return (
     <div className={styles.wrapper}>
       {panelRow    && <LineItemPanel row={panelRow} onClose={() => setPanelRow(null)} source={source} />}
-      {drillTarget && <DrillPanel phaseId={phaseIdNum} target={drillTarget} onClose={() => setDrillTarget(null)} />}
+      {drillTarget && <DrillPanel phaseId={phaseIdNum} projectId={projectId} target={drillTarget} onClose={() => setDrillTarget(null)} />}
 
       <div className={styles.toolbar}>
         <span className={styles.toolLabel}>{viewMode === 'variance' ? 'Variance Report' : 'Budget'}</span>
