@@ -10,6 +10,7 @@ import ProjectList from './screens/ProjectList';
 import ProjectDetail from './screens/ProjectDetail';
 import PhaseHome from './screens/PhaseHome';
 import BudgetGrid from './screens/BudgetGrid';
+import BudgetTab, { QBSourceView, CompareView } from './screens/BudgetTab';
 import CommitmentsGrid from './screens/CommitmentsGrid';
 import PlaceholderTab from './screens/PlaceholderTab';
 import InvoicesTab from './screens/InvoicesTab';
@@ -33,7 +34,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="projects/:projectId" element={<ProjectDetail />} />
             <Route path="projects/:projectId/phases/:phaseId" element={<PhaseHome />}>
               <Route index element={<Navigate to="budget" replace />} />
-              <Route path="budget"        element={<BudgetGrid />} />
+              <Route path="budget" element={<BudgetTab />}>
+                <Route index element={<Navigate to="pm" replace />} />
+                <Route path="pm"      element={<BudgetGrid />} />
+                <Route path="qb"      element={<QBSourceView />} />
+                <Route path="compare" element={<CompareView />} />
+              </Route>
               <Route path="commitments"   element={<CommitmentsGrid />} />
               <Route path="contracts"     element={<ContractsTab />} />
               <Route path="invoices"      element={<InvoicesTab />} />
