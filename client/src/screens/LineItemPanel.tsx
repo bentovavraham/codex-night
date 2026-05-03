@@ -39,9 +39,10 @@ function PdfModal({ fileRef, onClose }: { fileRef: string; onClose: () => void }
 interface Props {
   row: BudgetRow;
   onClose: () => void;
+  source?: 'pm' | 'qb';
 }
 
-export function LineItemPanel({ row, onClose }: Props) {
+export function LineItemPanel({ row, onClose, source = 'pm' }: Props) {
   const [pdfRef, setPdfRef] = useState<string | null>(null);
 
   const { data, isLoading, isError, error } = useQuery({
@@ -53,6 +54,19 @@ export function LineItemPanel({ row, onClose }: Props) {
 
   const contracts: any[] = data?.contracts ?? [];
   const invoices: any[]  = data?.invoices  ?? [];
+
+  // QB Transactions section: only fetched in QB Source view (and any future
+  // Compare drilldown). The data is the QB transactions on this row's GL code
+  // for this phase — possibly shared with sibling tasks.
+  const showQbSection = source === 'qb' && !!row.qb_account_number;
+  const qbQuery = useQuery({
+    queryKey: ['qb-tx-for-gl', row.phase_id, row.qb_account_number],
+    queryFn: () => api.getQbTransactionsForGl(row.phase_id, row.qb_account_number!),
+    enabled: showQbSection,
+    staleTime: 30_000,
+  });
+  const qbTxns: any[] = qbQuery.data?.transactions ?? [];
+  const qbTotals = qbQuery.data?.totals;
 
   const totalCommitted = contracts
     .filter(c => c.status !== 'voided')
@@ -147,6 +161,48 @@ export function LineItemPanel({ row, onClose }: Props) {
                 ))
               )}
             </div>
+
+            {/* QB Transactions — shown only in QB Source view. Lists actual
+                qb_transactions on this row's GL code for this phase. The same
+                section is shared by every task with the same GL code, so the
+                header notes how many tasks share the GL code. */}
+            {showQbSection && (
+              <div className={styles.section}>
+                <div className={styles.sectionHead}>
+                  QB Transactions <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 400, marginLeft: 6 }}>
+                    on GL {row.qb_account_number}
+                  </span>
+                  {qbTxns.length > 0 && <span className={styles.sectionCount}>{qbTxns.length}</span>}
+                  {qbTotals && qbTotals.total > 0 && (
+                    <span className={styles.sectionTotal}>{usd.format(qbTotals.total)}</span>
+                  )}
+                </div>
+                {qbQuery.isLoading ? (
+                  <div className={styles.empty}>Loading…</div>
+                ) : qbTxns.length === 0 ? (
+                  <div className={styles.empty}>No QB transactions on this GL code.</div>
+                ) : (
+                  qbTxns.map(t => (
+                    <div key={t.id} className={styles.invoiceRow}>
+                      <div className={styles.invoiceMain}>
+                        <span className={`${styles.badge} ${styles[t.is_paid ? 'sPaid' : 'sPending']}`}>
+                          {t.is_paid ? 'Paid' : 'Open'}
+                        </span>
+                        <span className={styles.invNum}>{t.ref_number || '—'}</span>
+                        <span className={styles.invDate}>
+                          {t.txn_date ? String(t.txn_date).slice(0, 10) : ''}
+                        </span>
+                        <span className={styles.invAmt}>{usd.format(Number(t.amount || 0))}</span>
+                      </div>
+                      <div className={styles.invoiceSub}>
+                        {t.vendor_name || '—'}
+                        {t.memo && <span className={styles.contractRef}> · {t.memo}</span>}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
 
             {/* Invoices */}
             <div className={styles.section}>

@@ -47,6 +47,9 @@ export const api = {
   },
   updateBudgetLine: (id: number, data: any) => request<any>('PATCH', `/api/budget-lines/${id}`, data),
   getLineActivity: (lineId: number)          => request<any>('GET',  `/api/budget-lines/${lineId}/activity`),
+  getQbTransactionsForGl: (phaseId: number, glCode: string) =>
+    request<{ transactions: any[]; totals: { total: number; paid: number; open_balance: number }; gl_code: string }>(
+      'GET', `/api/phases/${phaseId}/qb-transactions?gl_code=${encodeURIComponent(glCode)}`),
   drillBudgetLine: (phaseId: number, lineId: number) => request<any>('GET', `/api/phases/${phaseId}/budget-lines/${lineId}/drill`),
   initBudget:   (phaseId: number, template: string) => request<any>('POST', `/api/phases/${phaseId}/budget/init`, { template }),
 

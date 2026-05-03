@@ -672,7 +672,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
 
   return (
     <div className={styles.wrapper}>
-      {panelRow    && <LineItemPanel row={panelRow} onClose={() => setPanelRow(null)} />}
+      {panelRow    && <LineItemPanel row={panelRow} onClose={() => setPanelRow(null)} source={source} />}
       {drillTarget && <DrillPanel phaseId={phaseIdNum} target={drillTarget} onClose={() => setDrillTarget(null)} />}
 
       <div className={styles.toolbar}>

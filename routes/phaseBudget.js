@@ -5,6 +5,39 @@ const TEMPLATE = require('../db/budget-template');
 
 const router = express.Router();
 
+// GET /api/phases/:phaseId/qb-transactions?gl_code=1720.01
+// Lists QB transactions for a specific GL code in this phase. Used by the
+// LineItemPanel drawer to surface "where the QB number actually came from"
+// when a leaf task is on a shared GL code.
+router.get('/phases/:phaseId/qb-transactions', requireAuth, async (req, res, next) => {
+  try {
+    const { phaseId } = req.params;
+    const glCode = String(req.query.gl_code || '').trim();
+    if (!glCode) return res.status(400).json({ error: 'gl_code query param required' });
+
+    const result = await pool.query(
+      `SELECT id, txn_date, vendor_name, ref_number, memo,
+              qb_gl_code, qb_gl_name, qb_project,
+              amount::float       AS amount,
+              paid_amount::float  AS paid_amount,
+              open_balance::float AS open_balance,
+              is_paid
+         FROM qb_transactions
+        WHERE phase_id = $1 AND TRIM(qb_gl_code) = $2
+        ORDER BY txn_date DESC NULLS LAST, id DESC`,
+      [phaseId, glCode],
+    );
+
+    const totals = result.rows.reduce((t, r) => ({
+      total:        t.total        + (r.amount || 0),
+      paid:         t.paid         + (r.paid_amount || 0),
+      open_balance: t.open_balance + (r.open_balance || 0),
+    }), { total: 0, paid: 0, open_balance: 0 });
+
+    res.json({ transactions: result.rows, totals, gl_code: glCode });
+  } catch (err) { next(err); }
+});
+
 // GET /api/phases/:phaseId/budget
 // Optional ?source=pm | qb | compare (default: pm)
 //   pm      → today's behavior — actuals from invoices/contracts/etc.

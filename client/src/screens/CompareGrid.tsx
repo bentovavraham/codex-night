@@ -117,8 +117,10 @@ export default function CompareGrid() {
     };
 
     const out: ParentGroup[] = [];
-    let currentParent = '__none__';
-    let currentGlAccountId: number | null = -999;
+    // Sentinel values that cannot match real data, so the first iteration
+    // always enters the "new parent / new GL group" branch.
+    let currentParent: string | null = '__init_sentinel__';
+    let currentGlAccountId: number | null | undefined = undefined;
 
     rows.forEach(r => {
       const parentKey = r.qb_parent_number || r.qb_account_number || '__none__';
