@@ -46,26 +46,62 @@ router.get('/contracts/:id/change-orders', requireAuth, async (req, res, next) =
 });
 
 // POST /api/contracts/:id/change-orders
+// Accepts an optional line_items array — each line item has its own GL code
+// and optional task assignment (Option C). When present, the CO's total amount
+// can be derived from the lines (sum of budgeted_amount). Default status is
+// 'active' since approval flow is deferred.
 router.post('/contracts/:id/change-orders', requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const contractId = Number(req.params.id);
     const access = await userCanAccessContract(req.session.userId, contractId);
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
-    const { co_number, description, amount, file_reference, qb_code_id } = req.body || {};
-    if (!description || amount == null) return res.status(400).json({ error: 'description and amount required' });
-    const amt = Number(amount);
-    if (!Number.isFinite(amt)) return res.status(400).json({ error: 'invalid amount' });
+    const {
+      co_number, description, amount, file_reference, qb_code_id,
+      line_items, status,
+    } = req.body || {};
+    const lines = Array.isArray(line_items) ? line_items : [];
+    // Total amount: prefer explicit amount; otherwise sum line items
+    let amt = amount != null ? Number(amount) : null;
+    if (amt == null && lines.length > 0) {
+      amt = lines.reduce((s, l) => s + (Number(l.budgeted_amount) || 0), 0);
+    }
+    if (!description || !Number.isFinite(amt)) {
+      return res.status(400).json({ error: 'description and amount (or line_items) required' });
+    }
     const qbId = qb_code_id ? Number(qb_code_id) : null;
+    const coStatus = status || 'active';
     await client.query('BEGIN');
     const result = await client.query(
-      `INSERT INTO change_orders (contract_id, co_number, description, amount, file_reference, created_by, qb_code_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [contractId, co_number || null, description, amt, file_reference || null, req.session.userId, qbId]);
-    await logCO(client, result.rows[0].id, 'created',
-      `Created CO${co_number ? ' ' + co_number : ''}: ${description} for $${amt.toFixed(2)}`, req.session.userId);
+      `INSERT INTO change_orders
+         (contract_id, co_number, description, amount, file_reference, created_by, qb_code_id, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [contractId, co_number || null, description, amt, file_reference || null,
+       req.session.userId, qbId, coStatus]);
+    const co = result.rows[0];
+    // Insert line items if provided
+    if (lines.length > 0) {
+      for (let i = 0; i < lines.length; i++) {
+        const li = lines[i];
+        const liAmt = Number(li.budgeted_amount) || 0;
+        if (liAmt === 0 && !li.description) continue;
+        const liType = ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed';
+        await client.query(
+          `INSERT INTO change_order_line_items
+             (change_order_id, billing_type, description, budgeted_amount,
+              qb_account_id, phase_budget_line_id, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [co.id, liType, li.description || null, liAmt,
+           li.qb_account_id != null ? Number(li.qb_account_id) : null,
+           li.phase_budget_line_id != null ? Number(li.phase_budget_line_id) : null,
+           i]);
+      }
+    }
+    await logCO(client, co.id, 'created',
+      `Created CO${co_number ? ' ' + co_number : ''}: ${description} for $${amt.toFixed(2)} (${lines.length} line items)`,
+      req.session.userId);
     await client.query('COMMIT');
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(co);
   } catch (err) { await client.query('ROLLBACK'); next(err); }
   finally { client.release(); }
 });

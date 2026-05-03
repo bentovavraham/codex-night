@@ -321,6 +321,39 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
   const [dragOver,     setDragOver]     = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Change Order mode — when ON, the upload writes to change_orders (with
+  // line_items) rather than creating a new contract.
+  const [isChangeOrder,    setIsChangeOrder]    = useState(false);
+  const [parentContractId, setParentContractId] = useState<number | null>(null);
+
+  // Existing contracts in this phase — used to populate the parent picker
+  // when isChangeOrder is on.
+  const { data: phaseContracts = [] } = useQuery<any[]>({
+    queryKey: ['phaseContracts', phaseId],
+    queryFn:  () => api.listContracts(phaseId),
+    enabled:  !!phaseId,
+    staleTime: 30_000,
+  });
+  // Filter to same vendor (with a fallback to all phase contracts when no
+  // vendor matches — rare cross-vendor CO case).
+  const sameVendorParents = (phaseContracts as any[]).filter(c =>
+    form.vendor_name &&
+    c.vendor_name &&
+    c.vendor_name.trim().toLowerCase() === form.vendor_name.trim().toLowerCase() &&
+    c.status !== 'voided' && c.status !== 'draft'
+  );
+  const parentChoices = sameVendorParents.length > 0
+    ? sameVendorParents
+    : (phaseContracts as any[]).filter(c => c.status !== 'voided' && c.status !== 'draft');
+
+  // PM tasks for the per-line task picker (Option C)
+  const { data: budgetLines = [] } = useQuery<any[]>({
+    queryKey: ['budgetLines', phaseId],
+    queryFn:  () => api.listBudgetLines(phaseId),
+    enabled:  !!phaseId,
+    staleTime: 60_000,
+  });
+
   // Only revoke blob URLs, not server URLs
   useEffect(() => () => { if (pdfUrl?.startsWith('blob:')) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
 
@@ -438,33 +471,55 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
     setSaveError(null);
     if (!form.vendor_name.trim()) return setSaveError('Vendor name is required.');
     if (!form.reviewed)           return setSaveError('Please check the review confirmation.');
+    if (isChangeOrder && !parentContractId) {
+      return setSaveError('Pick the parent contract that this change order modifies.');
+    }
 
     setSaving(true);
     try {
-      const payload = {
-        project_id:          projectId,
-        phase_id:            phaseId,
-        vendor_name:         form.vendor_name.trim(),
-        reference_number:    form.reference_number || null,
-        contract_date:       form.contract_date    || null,
-        description:         form.description      || null,
-        total_value:         fixedTotal,
-        status:              form.status,
-        file_reference:      fileRef               || null,
-        contract_line_items: form.line_items
-          .filter(li => li.description.trim())
-          .map((li, i) => ({
-            billing_type:    li.billing_type,
-            description:     li.description,
-            budgeted_amount: Number(li.budgeted_amount) || 0,
-            qb_account_id:   li.qb_account_id ?? li.suggested_qb_account_id ?? null,
-            sort_order:      i,
+      const usableLines = form.line_items.filter(li => li.description.trim());
+      if (isChangeOrder) {
+        // Write to change_orders + change_order_line_items
+        await api.createChangeOrder(parentContractId!, {
+          co_number:      form.reference_number || null,
+          description:    form.description || `Change Order — ${form.vendor_name.trim()}`,
+          amount:         fixedTotal,
+          file_reference: fileRef || null,
+          status:         'active', // skip approval flow for now
+          line_items: usableLines.map((li, i) => ({
+            billing_type:         li.billing_type,
+            description:          li.description,
+            budgeted_amount:      Number(li.budgeted_amount) || 0,
+            qb_account_id:        li.qb_account_id ?? li.suggested_qb_account_id ?? null,
+            phase_budget_line_id: li.phase_budget_line_id ?? null,
+            sort_order:           i,
           })),
-      };
-      if (editId) {
-        await api.updateContract(editId, payload);
+        });
       } else {
-        await api.createContract(payload);
+        const payload = {
+          project_id:          projectId,
+          phase_id:            phaseId,
+          vendor_name:         form.vendor_name.trim(),
+          reference_number:    form.reference_number || null,
+          contract_date:       form.contract_date    || null,
+          description:         form.description      || null,
+          total_value:         fixedTotal,
+          status:              form.status,
+          file_reference:      fileRef               || null,
+          contract_line_items: usableLines.map((li, i) => ({
+            billing_type:         li.billing_type,
+            description:          li.description,
+            budgeted_amount:      Number(li.budgeted_amount) || 0,
+            qb_account_id:        li.qb_account_id ?? li.suggested_qb_account_id ?? null,
+            phase_budget_line_id: li.phase_budget_line_id ?? null,
+            sort_order:           i,
+          })),
+        };
+        if (editId) {
+          await api.updateContract(editId, payload);
+        } else {
+          await api.createContract(payload);
+        }
       }
       onSaved();
     } catch (err: any) {
@@ -531,6 +586,71 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
               </div>
             )}
 
+            {/* Change Order toggle — first thing in the form because it
+                fundamentally changes what this upload becomes. */}
+            {!editId && (
+              <div style={{
+                margin: '12px 14px', padding: '12px 14px', borderRadius: 6,
+                background: isChangeOrder ? 'var(--accent-light)' : '#f7f5f2',
+                border: `2px solid ${isChangeOrder ? 'var(--accent)' : '#dadce0'}`,
+              }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
+                  <input
+                    type="checkbox"
+                    checked={isChangeOrder}
+                    onChange={e => {
+                      setIsChangeOrder(e.target.checked);
+                      if (!e.target.checked) setParentContractId(null);
+                    }}
+                    style={{ width: 18, height: 18, cursor: 'pointer' }}
+                  />
+                  <span>This is a Change Order to an existing contract</span>
+                </label>
+                {isChangeOrder && (
+                  <div style={{ marginTop: 10 }}>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#5f6368', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                      Parent Contract <span style={{ color: '#dc2626' }}>required</span>
+                    </label>
+                    <select
+                      value={parentContractId ?? ''}
+                      onChange={e => setParentContractId(e.target.value ? Number(e.target.value) : null)}
+                      style={{
+                        width: '100%', padding: '8px 10px', fontSize: 13.5,
+                        border: parentContractId ? '2px solid var(--accent)' : '2px solid #dc2626',
+                        borderRadius: 4,
+                        background: parentContractId ? '#fff' : '#fef2f2',
+                        cursor: 'pointer', fontWeight: 500,
+                      }}
+                    >
+                      <option value="">— Pick parent contract —</option>
+                      {sameVendorParents.length > 0 && (
+                        <optgroup label={`Same vendor (${form.vendor_name || ''})`}>
+                          {sameVendorParents.map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.reference_number || `Contract #${c.id}`} · ${Number(c.total_value || 0).toLocaleString()}
+                              {c.task_name ? ` · ${c.task_name}` : ''}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {sameVendorParents.length === 0 && parentChoices.length > 0 && (
+                        <optgroup label="All contracts in this phase">
+                          {parentChoices.map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.vendor_name} · {c.reference_number || `Contract #${c.id}`} · ${Number(c.total_value || 0).toLocaleString()}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                    <div style={{ marginTop: 6, fontSize: 11, color: '#5f6368', fontStyle: 'italic' }}>
+                      The CO amount adds to TOTAL COMMIT on the parent contract's task lines (or wherever its line items are coded). Burns down via the budget grid's COS column.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Header fields */}
             <div className={styles.headerFields}>
               <div className={styles.hfGroup}>
@@ -584,7 +704,16 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
                   </tr>
                 </thead>
                 <tbody>
-                  {form.line_items.map((li, i) => (
+                  {form.line_items.map((li, i) => {
+                    const matching = li.qb_account_id != null
+                      ? (budgetLines as any[]).filter(b => b.qb_account_id === li.qb_account_id)
+                      : [];
+                    const allTasks = (budgetLines as any[]);
+                    const isAssigned = li.phase_budget_line_id != null;
+                    const placeholder = matching.length > 0
+                      ? `⚠ Pick task (${matching.length} match this GL)`
+                      : `⚠ Pick any task`;
+                    return (
                     <tr key={i} className={`${styles.catRow} ${li.differs_from_primary ? styles.catRowFlagged : ''}`}>
                       <td className={styles.colHash}>{i + 1}</td>
                       <td className={styles.colCat}>
@@ -593,8 +722,37 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
                           value={li.qb_account_id}
                           suggestedId={li.suggested_qb_account_id}
                           suggestionConfidence={li.qb_suggestion_confidence}
-                          onChange={id => setLine(i, { qb_account_id: id })}
+                          onChange={id => setLine(i, { qb_account_id: id, phase_budget_line_id: null })}
                         />
+                        {/* Always-visible task picker (Option C, mirrors invoices) */}
+                        <select
+                          value={li.phase_budget_line_id ?? ''}
+                          onChange={e => setLine(i, { phase_budget_line_id: e.target.value ? Number(e.target.value) : null })}
+                          title="Pick a task. AI may suggest one, but you can override."
+                          style={{
+                            marginTop: 6, width: '100%', fontSize: 13,
+                            fontWeight: isAssigned ? 600 : 500,
+                            padding: '6px 8px',
+                            border: `2px solid ${isAssigned ? '#16a34a' : '#dc2626'}`,
+                            borderRadius: 4,
+                            background: isAssigned ? '#f0fdf4' : '#fef2f2',
+                            color: '#1a1714', cursor: 'pointer',
+                          }}
+                        >
+                          <option value="">{placeholder}</option>
+                          {matching.length > 0 && (
+                            <optgroup label="✓ Match this GL code">
+                              {matching.map(t => <option key={t.id} value={t.id}>{t.task_name}</option>)}
+                            </optgroup>
+                          )}
+                          <optgroup label={matching.length > 0 ? '— Other tasks in this phase —' : '— All tasks in this phase —'}>
+                            {allTasks.filter(t => !matching.find((m: any) => m.id === t.id)).map(t => (
+                              <option key={t.id} value={t.id}>
+                                {t.task_name}{t.discipline ? ` · ${t.discipline}` : ''}
+                              </option>
+                            ))}
+                          </optgroup>
+                        </select>
                       </td>
                       <td className={styles.colType}>
                         <select className={styles.typeSelect} value={li.billing_type}
@@ -625,7 +783,8 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
                         <button className={styles.delBtn} onClick={() => removeLine(i)} title="Remove">✕</button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
               <div className={styles.catFooter}>

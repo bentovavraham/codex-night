@@ -577,3 +577,21 @@ CREATE TABLE IF NOT EXISTS vendor_project_map (
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (vendor_name, vendor_job_number)
 );
+
+-- Change Order line items — mirror of contract_line_items so a CO can be
+-- multi-line with per-line GL code (qb_account_id) and per-line task
+-- (phase_budget_line_id). Budget grid's COS column rolls up from these.
+CREATE TABLE IF NOT EXISTS change_order_line_items (
+  id                    SERIAL PRIMARY KEY,
+  change_order_id       INTEGER NOT NULL REFERENCES change_orders(id) ON DELETE CASCADE,
+  billing_type          VARCHAR(16) NOT NULL DEFAULT 'fixed', -- fixed|tm|expense
+  description           TEXT,
+  budgeted_amount       NUMERIC(14,2) NOT NULL DEFAULT 0,
+  qb_account_id         INTEGER REFERENCES qb_accounts(id) ON DELETE SET NULL,
+  phase_budget_line_id  INTEGER REFERENCES phase_budget_lines(id) ON DELETE SET NULL,
+  sort_order            INTEGER NOT NULL DEFAULT 0,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_co_lines_co  ON change_order_line_items(change_order_id);
+CREATE INDEX IF NOT EXISTS idx_co_lines_pbl ON change_order_line_items(phase_budget_line_id);
+CREATE INDEX IF NOT EXISTS idx_co_lines_qba ON change_order_line_items(qb_account_id);

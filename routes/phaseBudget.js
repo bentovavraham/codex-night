@@ -106,22 +106,62 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
           ) sub
         ), 0) AS committed,
 
-        -- Change order count
+        -- Change order count: distinct COs that contribute to this pbl
+        -- (either via line items pointing here, or legacy CO with no line items
+        -- attached to a parent contract whose pbl is this one)
         COALESCE((
-          SELECT COUNT(co.id)
+          SELECT COUNT(DISTINCT co.id)
           FROM change_orders co
-          JOIN contracts c ON c.id = co.contract_id
-          WHERE c.phase_budget_line_id = pbl.id
-            AND co.status = 'approved'
+          LEFT JOIN contracts c ON c.id = co.contract_id
+          LEFT JOIN change_order_line_items col ON col.change_order_id = co.id
+          WHERE co.status NOT IN ('voided','draft','rejected')
+            AND (
+              col.phase_budget_line_id = pbl.id
+              OR (col.phase_budget_line_id IS NULL AND col.qb_account_id = pbl.qb_account_id
+                  AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o
+                                   WHERE o.phase_id = pbl.phase_id
+                                     AND o.qb_account_id = pbl.qb_account_id
+                                     AND o.id <> pbl.id))
+              OR (col.id IS NULL AND c.phase_budget_line_id = pbl.id)
+            )
         ), 0) AS co_count,
 
-        -- Change order total value
+        -- Change order total value (COS column).
+        -- Allocation cascade for change-order line items mirrors the invoice
+        -- model: explicit per-line pbl, then GL-driven for unique-GL pbls,
+        -- then legacy fallback via parent contract's pbl when CO has no line items.
         COALESCE((
-          SELECT SUM(co.amount)
-          FROM change_orders co
-          JOIN contracts c ON c.id = co.contract_id
-          WHERE c.phase_budget_line_id = pbl.id
-            AND co.status = 'approved'
+          SELECT SUM(contribution) FROM (
+            -- Path 1: CO line items explicitly assigned to this pbl
+            SELECT col.budgeted_amount AS contribution
+              FROM change_order_line_items col
+              JOIN change_orders co ON co.id = col.change_order_id
+             WHERE co.status NOT IN ('voided','draft','rejected')
+               AND col.phase_budget_line_id = pbl.id
+            UNION ALL
+            -- Path 2: CO line items GL-coded to this pbl (only when pbl is unique-GL)
+            SELECT col.budgeted_amount
+              FROM change_order_line_items col
+              JOIN change_orders co ON co.id = col.change_order_id
+             WHERE co.status NOT IN ('voided','draft','rejected')
+               AND col.phase_budget_line_id IS NULL
+               AND col.qb_account_id IS NOT NULL
+               AND col.qb_account_id = pbl.qb_account_id
+               AND NOT EXISTS (
+                 SELECT 1 FROM phase_budget_lines o
+                  WHERE o.phase_id = pbl.phase_id
+                    AND o.qb_account_id = pbl.qb_account_id
+                    AND o.id <> pbl.id
+               )
+            UNION ALL
+            -- Path 3: legacy COs with no line items — fall back to parent contract's pbl
+            SELECT co.amount
+              FROM change_orders co
+              JOIN contracts c ON c.id = co.contract_id
+             WHERE co.status NOT IN ('voided','draft','rejected')
+               AND c.phase_budget_line_id = pbl.id
+               AND NOT EXISTS (SELECT 1 FROM change_order_line_items x WHERE x.change_order_id = co.id)
+          ) sub
         ), 0) AS co_value,
 
         -- Allocation cascade for invoice line items (used by all 5 aggregations below):
