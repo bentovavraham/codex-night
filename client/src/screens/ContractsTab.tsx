@@ -172,10 +172,121 @@ function InlineEdit({ value, placeholder, onSave, mono }: {
 
 // ─── Contract list ────────────────────────────────────────────────────────────
 
-function ContractList({ contracts, phaseId, onEdit }: {
+// One contract row + (optional) expandable list of its change orders.
+function ContractRow({ c, patchMutation, deleteMutation, onEdit, onEditCo, confirmDeleteId, setConfirmDeleteId }: {
+  c: any;
+  patchMutation: any;
+  deleteMutation: any;
+  onEdit: (id: number) => void;
+  onEditCo?: (coId: number) => void;
+  confirmDeleteId: number | null;
+  setConfirmDeleteId: (id: number | null) => void;
+}) {
+  const [showCos, setShowCos] = useState(false);
+  const { data: cos = [] } = useQuery<any[]>({
+    queryKey: ['contractChangeOrders', c.id],
+    queryFn:  () => api.listChangeOrders(c.id),
+    enabled:  showCos,
+    staleTime: 30_000,
+  });
+  const coCount = Number(c.co_count ?? 0);
+  const coValue = Number(c.co_value ?? 0);
+  return (
+    <>
+      <tr className={styles.listRow}>
+        <td className={styles.ltd}>{c.vendor_name}</td>
+        <td className={`${styles.ltd} ${styles.mono}`}>{c.gl_account_number ?? c.budget_line_name ?? '—'}</td>
+        <td className={styles.ltd}>
+          <InlineEdit value={c.reference_number || null} placeholder="—" mono
+            onSave={v => patchMutation.mutate({ id: c.id, data: { reference_number: v || null } })} />
+        </td>
+        <td className={`${styles.ltd} ${styles.scopeCell}`}>
+          <InlineEdit value={c.description || null} placeholder="Add scope…"
+            onSave={v => patchMutation.mutate({ id: c.id, data: { description: v || null } })} />
+          {coCount > 0 && (
+            <button
+              onClick={() => setShowCos(s => !s)}
+              style={{
+                marginLeft: 8, fontSize: 11, padding: '2px 8px',
+                border: '1px solid var(--accent)', background: 'var(--accent-light)',
+                color: 'var(--accent)', borderRadius: 3, cursor: 'pointer', fontWeight: 700,
+              }}
+              title="Show / edit change orders on this contract"
+            >
+              {showCos ? '▾' : '▸'} {coCount} CO{coCount !== 1 ? 's' : ''} · ${coValue.toLocaleString()}
+            </button>
+          )}
+        </td>
+        <td className={`${styles.ltd} ${styles.mono} ${styles.right}`}>
+          {c.contract_date ? String(c.contract_date).slice(0, 10) : '—'}
+        </td>
+        <td className={`${styles.ltd} ${styles.mono} ${styles.right}`}>
+          {Number(c.total_value) > 0 ? usd.format(Number(c.total_value)) : <span className={styles.dim}>T&amp;M</span>}
+        </td>
+        <td className={`${styles.ltd} ${styles.center}`}>
+          <span className={`${styles.badge} ${styles[STATUS_CSS[c.status] ?? 'sDraft']}`}>
+            {STATUS_LABEL[c.status] ?? c.status}
+          </span>
+        </td>
+        <td className={styles.ltd}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {c.file_reference && (
+              <button className={styles.pdfBtn} onClick={() => onEdit(c.id)} title="View PDF">PDF</button>
+            )}
+            <button className={styles.editBtn} onClick={() => onEdit(c.id)} title="Edit contract">Edit</button>
+            {confirmDeleteId === c.id ? (
+              <button className={styles.confirmDeleteBtn}
+                onClick={e => { e.stopPropagation(); deleteMutation.mutate(c.id); }}
+                disabled={deleteMutation.isPending}>
+                Confirm?
+              </button>
+            ) : (
+              <button className={styles.deleteBtn} onClick={e => { e.stopPropagation(); setConfirmDeleteId(c.id); }} title="Delete contract">✕</button>
+            )}
+          </div>
+        </td>
+      </tr>
+      {showCos && cos.map((co: any) => (
+        <tr key={`co-${co.id}`} style={{ background: '#fef9f3' }}>
+          <td className={styles.ltd} style={{ paddingLeft: 30, color: '#5f6368', fontStyle: 'italic' }}>
+            ↳ Change Order
+          </td>
+          <td className={`${styles.ltd} ${styles.mono}`} style={{ color: '#5f6368' }}>
+            (multiple lines — open to view)
+          </td>
+          <td className={`${styles.ltd} ${styles.mono}`}>{co.co_number || `CO-${co.id}`}</td>
+          <td className={`${styles.ltd} ${styles.scopeCell}`} style={{ color: '#5f6368' }}>
+            {co.description || '—'}
+          </td>
+          <td className={`${styles.ltd} ${styles.mono} ${styles.right}`}>
+            {co.created_at ? String(co.created_at).slice(0, 10) : '—'}
+          </td>
+          <td className={`${styles.ltd} ${styles.mono} ${styles.right}`} style={{ fontWeight: 700, color: 'var(--accent)' }}>
+            +{usd.format(Number(co.amount || 0))}
+          </td>
+          <td className={`${styles.ltd} ${styles.center}`}>
+            <span className={`${styles.badge} ${styles[STATUS_CSS[co.status] ?? 'sDraft']}`}>
+              {STATUS_LABEL[co.status] ?? co.status}
+            </span>
+          </td>
+          <td className={styles.ltd}>
+            {onEditCo && (
+              <button className={styles.editBtn} onClick={() => onEditCo(co.id)} title="Edit change order — same flow as invoices">
+                Edit CO
+              </button>
+            )}
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function ContractList({ contracts, phaseId, onEdit, onEditCo }: {
   contracts: any[];
   phaseId: number;
   onEdit: (id: number) => void;
+  onEditCo?: (coId: number) => void;
 }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const qc = useQueryClient();
@@ -220,6 +331,19 @@ function ContractList({ contracts, phaseId, onEdit }: {
             </thead>
             <tbody>
               {contracts.map((c: any) => (
+                <ContractRow
+                  key={c.id}
+                  c={c}
+                  patchMutation={patchMutation}
+                  deleteMutation={deleteMutation}
+                  onEdit={onEdit}
+                  onEditCo={onEditCo}
+                  confirmDeleteId={confirmDeleteId}
+                  setConfirmDeleteId={setConfirmDeleteId}
+                />
+              ))}
+              {/* legacy inline render — kept commented during the refactor; safe to remove */}
+              {false && [].map((c: any) => (
                 <tr key={c.id} className={styles.listRow}>
                   <td className={styles.ltd}>{c.vendor_name}</td>
                   <td className={`${styles.ltd} ${styles.mono}`}>{c.gl_account_number ?? c.budget_line_name ?? '—'}</td>
@@ -302,15 +426,16 @@ function ContractList({ contracts, phaseId, onEdit }: {
 
 // ─── Upload + review panel ────────────────────────────────────────────────────
 
-export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, editId }: {
+export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, editId, coEditId }: {
   qbAccounts: QbAccount[];
   projectId: number;
   phaseId: number;
   onClose: () => void;
   onSaved: () => void;
   editId?: number;
+  coEditId?: number;
 }) {
-  const [stage,        setStage]        = useState<Stage>(editId ? 'extracting' : 'drop');
+  const [stage,        setStage]        = useState<Stage>(editId || coEditId ? 'extracting' : 'drop');
   const [pdfUrl,       setPdfUrl]       = useState<string | null>(null);
   const [fileRef,      setFileRef]      = useState<string | null>(null);
   const [extracted,    setExtracted]    = useState<any>(null);
@@ -356,6 +481,40 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
 
   // Only revoke blob URLs, not server URLs
   useEffect(() => () => { if (pdfUrl?.startsWith('blob:')) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+
+  // Load existing CHANGE ORDER when in CO-edit mode
+  useEffect(() => {
+    if (!coEditId) return;
+    setIsChangeOrder(true);
+    api.getChangeOrder(coEditId).then((co: any) => {
+      setParentContractId(co.contract_id ?? null);
+      if (co.file_reference) {
+        setPdfUrl(`/api/files/${encodeURIComponent(co.file_reference)}`);
+      }
+      setFileRef(co.file_reference ?? null);
+      setForm({
+        vendor_name:      co.contract_vendor_name ?? '',
+        reference_number: co.co_number ?? '',
+        contract_date:    co.created_at ? String(co.created_at).slice(0, 10) : '',
+        description:      co.description ?? '',
+        status:           co.status ?? 'active',
+        line_items: (co.line_items ?? []).map((li: any) => ({
+          billing_type:             li.billing_type ?? 'fixed',
+          description:              li.description ?? '',
+          budgeted_amount:          li.budgeted_amount != null ? String(li.budgeted_amount) : '',
+          qb_account_id:            li.qb_account_id ?? null,
+          suggested_qb_account_id:  null,
+          qb_suggestion_confidence: null,
+          phase_budget_line_id:     li.phase_budget_line_id ?? null,
+        })),
+        reviewed: true,
+      });
+      setStage('review');
+    }).catch(err => {
+      setExtractError(err.message ?? 'Failed to load change order');
+      setStage('review');
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load existing contract when in edit mode
   useEffect(() => {
@@ -479,13 +638,12 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
     try {
       const usableLines = form.line_items.filter(li => li.description.trim());
       if (isChangeOrder) {
-        // Write to change_orders + change_order_line_items
-        await api.createChangeOrder(parentContractId!, {
+        const coPayload = {
           co_number:      form.reference_number || null,
           description:    form.description || `Change Order — ${form.vendor_name.trim()}`,
           amount:         fixedTotal,
           file_reference: fileRef || null,
-          status:         'active', // skip approval flow for now
+          status:         form.status || 'active',
           line_items: usableLines.map((li, i) => ({
             billing_type:         li.billing_type,
             description:          li.description,
@@ -494,7 +652,12 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
             phase_budget_line_id: li.phase_budget_line_id ?? null,
             sort_order:           i,
           })),
-        });
+        };
+        if (coEditId) {
+          await api.updateChangeOrder(coEditId, coPayload);
+        } else {
+          await api.createChangeOrder(parentContractId!, coPayload);
+        }
       } else {
         const payload = {
           project_id:          projectId,
@@ -561,8 +724,9 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
         <div className={styles.formBar}>
           <span className={styles.formBarTitle}>
             {stage === 'extracting'
-              ? (editId ? 'Loading contract…' : 'Reading contract…')
+              ? (coEditId ? 'Loading change order…' : editId ? 'Loading contract…' : 'Reading contract…')
               : stage === 'drop' ? 'New Contract'
+              : coEditId ? `Edit Change Order${form.reference_number ? ` · ${form.reference_number}` : ''}`
               : `${editId ? 'Edit ' : ''}Contract${form.vendor_name ? ` · ${form.vendor_name}` : ''}`}
           </span>
           <button className={styles.closeBtn} onClick={onClose}>✕</button>
@@ -587,24 +751,26 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
             )}
 
             {/* Change Order toggle — first thing in the form because it
-                fundamentally changes what this upload becomes. */}
-            {!editId && (
+                fundamentally changes what this upload becomes. Locked in
+                edit mode (you can't convert between contract and CO). */}
+            {(!editId) && (
               <div style={{
                 margin: '12px 14px', padding: '12px 14px', borderRadius: 6,
                 background: isChangeOrder ? 'var(--accent-light)' : '#f7f5f2',
                 border: `2px solid ${isChangeOrder ? 'var(--accent)' : '#dadce0'}`,
               }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: coEditId ? 'default' : 'pointer', fontSize: 14, fontWeight: 600 }}>
                   <input
                     type="checkbox"
                     checked={isChangeOrder}
+                    disabled={!!coEditId}
                     onChange={e => {
                       setIsChangeOrder(e.target.checked);
                       if (!e.target.checked) setParentContractId(null);
                     }}
-                    style={{ width: 18, height: 18, cursor: 'pointer' }}
+                    style={{ width: 18, height: 18, cursor: coEditId ? 'default' : 'pointer' }}
                   />
-                  <span>This is a Change Order to an existing contract</span>
+                  <span>This is a Change Order to an existing contract{coEditId ? ' (editing)' : ''}</span>
                 </label>
                 {isChangeOrder && (
                   <div style={{ marginTop: 10 }}>
@@ -843,6 +1009,7 @@ export default function ContractsTab() {
   const qc = useQueryClient();
   const [uploadOpen,     setUploadOpen]     = useState(false);
   const [editContractId, setEditContractId] = useState<number | null>(null);
+  const [editCoId,       setEditCoId]       = useState<number | null>(null);
 
   const { data: contracts = [], isLoading } = useQuery<any[]>({
     queryKey: ['phaseContracts', phaseIdNum],
@@ -867,10 +1034,18 @@ export default function ContractsTab() {
   function handleClose() {
     setUploadOpen(false);
     setEditContractId(null);
+    setEditCoId(null);
   }
 
   function handleEdit(id: number) {
     setEditContractId(id);
+    setEditCoId(null);
+    setUploadOpen(true);
+  }
+
+  function handleEditCo(coId: number) {
+    setEditCoId(coId);
+    setEditContractId(null);
     setUploadOpen(true);
   }
 
@@ -883,6 +1058,7 @@ export default function ContractsTab() {
         projectId={projectIdNum}
         phaseId={phaseIdNum}
         editId={editContractId ?? undefined}
+        coEditId={editCoId ?? undefined}
         onClose={handleClose}
         onSaved={handleSaved}
       />
@@ -894,6 +1070,7 @@ export default function ContractsTab() {
       contracts={contracts}
       phaseId={phaseIdNum}
       onEdit={handleEdit}
+      onEditCo={handleEditCo}
     />
   );
 }

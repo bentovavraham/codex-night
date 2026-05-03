@@ -91,6 +91,8 @@ export const api = {
   // Change Orders
   listChangeOrders:(contractId: number) => request<any[]>('GET', `/api/contracts/${contractId}/change-orders`),
   createChangeOrder:(contractId: number, data: any) => request<any>('POST', `/api/contracts/${contractId}/change-orders`, data),
+  getChangeOrder:(id: number) => request<any>('GET', `/api/change-orders/${id}`),
+  updateChangeOrder:(id: number, data: any) => request<any>('PUT', `/api/change-orders/${id}`, data),
   approveChangeOrder:(id: number)     => request<any>('POST', `/api/change-orders/${id}/approve`),
   rejectChangeOrder:(id: number, note: string) => request<any>('POST', `/api/change-orders/${id}/reject`, { note }),
 

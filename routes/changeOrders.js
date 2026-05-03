@@ -106,14 +106,49 @@ router.post('/contracts/:id/change-orders', requireAuth, async (req, res, next) 
   finally { client.release(); }
 });
 
+// GET /api/change-orders/:id — single change order with line items
+router.get('/change-orders/:id', requireAuth, async (req, res, next) => {
+  try {
+    const coId = Number(req.params.id);
+    const access = await userCanAccessCO(req.session.userId, coId);
+    if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
+    const co = (await pool.query(
+      `SELECT co.*, c.vendor_name AS contract_vendor_name, c.reference_number AS contract_ref
+         FROM change_orders co
+         JOIN contracts c ON c.id = co.contract_id
+        WHERE co.id = $1`, [coId])).rows[0];
+    if (!co) return res.status(404).json({ error: 'Not found' });
+    const lines = (await pool.query(
+      `SELECT col.*, qa.account_number AS qb_account_number, qa.full_name AS qb_account_name,
+              pbl.task_name
+         FROM change_order_line_items col
+         LEFT JOIN qb_accounts qa  ON qa.id  = col.qb_account_id
+         LEFT JOIN phase_budget_lines pbl ON pbl.id = col.phase_budget_line_id
+        WHERE col.change_order_id = $1
+        ORDER BY col.sort_order, col.id`, [coId])).rows;
+    res.json({ ...co, line_items: lines });
+  } catch (err) { next(err); }
+});
+
 // PUT /api/change-orders/:id
+// Accepts an optional line_items array. If provided, REPLACES all existing
+// line items (matching the invoices update strategy). Total amount is derived
+// from the line sum unless explicitly provided.
 router.put('/change-orders/:id', requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const coId = Number(req.params.id);
     const access = await userCanAccessCO(req.session.userId, coId);
     if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
-    const { co_number, description, amount, file_reference, qb_code_id } = req.body || {};
+    const {
+      co_number, description, amount, file_reference, qb_code_id,
+      line_items, status,
+    } = req.body || {};
+    const lines = Array.isArray(line_items) ? line_items : null;
+    let amt = amount != null ? Number(amount) : null;
+    if (amt == null && lines && lines.length > 0) {
+      amt = lines.reduce((s, l) => s + (Number(l.budgeted_amount) || 0), 0);
+    }
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE change_orders SET
@@ -122,10 +157,33 @@ router.put('/change-orders/:id', requireAuth, async (req, res, next) => {
          amount = COALESCE($4, amount),
          file_reference = COALESCE($5, file_reference),
          qb_code_id = CASE WHEN $6::integer IS NOT NULL THEN $6::integer ELSE qb_code_id END,
+         status = COALESCE($7, status),
          updated_at = NOW()
        WHERE id = $1 RETURNING *`,
-      [coId, co_number ?? null, description ?? null, amount ?? null, file_reference ?? null, qb_code_id ?? null]);
-    await logCO(client, coId, 'edited', 'Updated change order', req.session.userId);
+      [coId, co_number ?? null, description ?? null, amt ?? null,
+       file_reference ?? null, qb_code_id ?? null, status ?? null]);
+    if (lines) {
+      // CRITICAL: include qb_account_id + phase_budget_line_id (same lesson as invoices.js)
+      await client.query('DELETE FROM change_order_line_items WHERE change_order_id = $1', [coId]);
+      for (let i = 0; i < lines.length; i++) {
+        const li = lines[i];
+        const liAmt = Number(li.budgeted_amount) || 0;
+        if (liAmt === 0 && !li.description) continue;
+        const liType = ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed';
+        await client.query(
+          `INSERT INTO change_order_line_items
+             (change_order_id, billing_type, description, budgeted_amount,
+              qb_account_id, phase_budget_line_id, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [coId, liType, li.description || null, liAmt,
+           li.qb_account_id != null ? Number(li.qb_account_id) : null,
+           li.phase_budget_line_id != null ? Number(li.phase_budget_line_id) : null,
+           i]);
+      }
+    }
+    await logCO(client, coId, 'edited',
+      lines ? `Updated CO + ${lines.length} line items` : 'Updated change order',
+      req.session.userId);
     await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); next(err); }
