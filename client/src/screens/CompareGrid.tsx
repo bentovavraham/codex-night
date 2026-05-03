@@ -340,65 +340,18 @@ function RenderGlGroup({
 
   return (
     <>
-      {/* Individual task rows */}
-      {group.tasks.map(r => (
-        <tr key={r.id} className={styles.dataRow}>
-          <td className={styles.tdAcct}>{r.qb_account_number || '—'}</td>
-          <td className={styles.tdTask}>{r.task_name}</td>
-          <td className={styles.tdMoney}>{money(r.budgeted_amount)}</td>
-          <td className={styles.tdMoney}>{money(r.remaining_budget)}</td>
-          <td className={styles.tdMoneyMuted}>{remPct(r.pm_billed, r.budgeted_amount)}</td>
-          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.committed)}</td>
-          <td className={styles.tdMoney}>{money(r.co_value)}</td>
-          <td className={styles.tdMoney}>{money(r.total_commitment)}</td>
-
-          {showBreakdownDelta ? (
-            <>
-              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_fixed_charges)}</td>
-              {isShared
-                ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
-                : <DeltaCell pm={r.pm_fixed_charges} qb={r.qb_fixed_charges} structurallyBlank />}
-              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_tm_charges)}</td>
-              {isShared
-                ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
-                : <DeltaCell pm={r.pm_tm_charges} qb={r.qb_tm_charges} structurallyBlank />}
-              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_expense_charges)}</td>
-              {isShared
-                ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
-                : <DeltaCell pm={r.pm_expense_charges} qb={r.qb_expense_charges} structurallyBlank />}
-            </>
-          ) : (
-            <>
-              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_fixed_charges)}</td>
-              <td className={styles.tdMoney}>{money(r.pm_tm_charges)}</td>
-              <td className={styles.tdMoney}>{money(r.pm_expense_charges)}</td>
-            </>
-          )}
-
-          {/* For shared GL codes, blank the QB columns + Δ at the leaf level —
-              the comparison lives on the GL-code Total row below. */}
-          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_billed)}</td>
-          {isShared
-            ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
-            : <DeltaCell pm={r.pm_billed} qb={r.qb_billed} />}
-          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_amount_due)}</td>
-          {isShared
-            ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
-            : <DeltaCell pm={r.pm_amount_due} qb={r.qb_amount_due} />}
-          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_paid)}</td>
-          {isShared
-            ? <td className={`${styles.tdDelta} ${styles.deltaNeutral}`}>—</td>
-            : <DeltaCell pm={r.pm_paid} qb={r.qb_paid} />}
-        </tr>
-      ))}
-
-      {/* GL-code Total row — only when multiple PM tasks share the same GL code.
-          QB has no per-task data, so the comparison must live at this level. */}
+      {/* GL-Code Total row first when shared — leads with the comparison
+          (the question users come here to answer); leaves follow as detail. */}
       {isShared && (
-        <tr style={{ background: '#f7f7f7', fontWeight: 600 }}>
-          <td className={styles.tdAcct}>{group.qb_account_number}</td>
-          <td className={styles.tdTask} style={{ fontStyle: 'italic', color: '#5f6368' }}>
-            {group.qb_short_name} — Total ({group.tasks.length} tasks)
+        <tr className={styles.glTotalRow}>
+          <td className={styles.tdAcct}>
+            <span className={styles.glTotalLabel}>{group.qb_account_number}</span>
+          </td>
+          <td className={styles.tdTask}>
+            <span className={styles.glTotalLabel}>GL Total</span>
+            <span className={styles.glTotalLabelSmall}>
+              {group.qb_short_name} · {group.tasks.length} tasks
+            </span>
           </td>
           <td className={styles.tdMoney}>{money(groupBudgeted)}</td>
           <td className={styles.tdMoney}>{money(groupRemBudget)}</td>
@@ -432,6 +385,57 @@ function RenderGlGroup({
           <DeltaCell pm={pmTotals.paid} qb={group.qbPaid} />
         </tr>
       )}
+
+      {/* Individual task rows. For shared groups, leaf-level Δ cells are
+          left empty (the comparison lives on the GL Total row above). */}
+      {group.tasks.map(r => (
+        <tr key={r.id} className={`${styles.dataRow} ${isShared ? styles.sharedLeaf : ''}`}>
+          <td className={styles.tdAcct}>{r.qb_account_number || ''}</td>
+          <td className={styles.tdTask}>{r.task_name}</td>
+          <td className={styles.tdMoney}>{money(r.budgeted_amount)}</td>
+          <td className={styles.tdMoney}>{money(r.remaining_budget)}</td>
+          <td className={styles.tdMoneyMuted}>{remPct(r.pm_billed, r.budgeted_amount)}</td>
+          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.committed)}</td>
+          <td className={styles.tdMoney}>{money(r.co_value)}</td>
+          <td className={styles.tdMoney}>{money(r.total_commitment)}</td>
+
+          {showBreakdownDelta ? (
+            <>
+              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_fixed_charges)}</td>
+              {isShared
+                ? <td className={styles.tdDelta} />
+                : <DeltaCell pm={r.pm_fixed_charges} qb={r.qb_fixed_charges} structurallyBlank />}
+              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_tm_charges)}</td>
+              {isShared
+                ? <td className={styles.tdDelta} />
+                : <DeltaCell pm={r.pm_tm_charges} qb={r.qb_tm_charges} structurallyBlank />}
+              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_expense_charges)}</td>
+              {isShared
+                ? <td className={styles.tdDelta} />
+                : <DeltaCell pm={r.pm_expense_charges} qb={r.qb_expense_charges} structurallyBlank />}
+            </>
+          ) : (
+            <>
+              <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_fixed_charges)}</td>
+              <td className={styles.tdMoney}>{money(r.pm_tm_charges)}</td>
+              <td className={styles.tdMoney}>{money(r.pm_expense_charges)}</td>
+            </>
+          )}
+
+          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_billed)}</td>
+          {isShared
+            ? <td className={styles.tdDelta} />
+            : <DeltaCell pm={r.pm_billed} qb={r.qb_billed} />}
+          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_amount_due)}</td>
+          {isShared
+            ? <td className={styles.tdDelta} />
+            : <DeltaCell pm={r.pm_amount_due} qb={r.qb_amount_due} />}
+          <td className={`${styles.tdMoney} ${styles.groupStart}`}>{money(r.pm_paid)}</td>
+          {isShared
+            ? <td className={styles.tdDelta} />
+            : <DeltaCell pm={r.pm_paid} qb={r.qb_paid} />}
+        </tr>
+      ))}
     </>
   );
 }

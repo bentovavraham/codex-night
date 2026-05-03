@@ -186,6 +186,41 @@
   font-size: 13px;
 }
 
+/* GL-Code Total row — the comparison row when many PM tasks share a GL code */
+.glTotalRow td {
+  background: #fef9f3;
+  font-weight: 600;
+  border-top: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  color: #202124;
+}
+.glTotalRow td:first-child {
+  border-left: 3px solid var(--accent);
+}
+.glTotalLabel {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 700;
+}
+.glTotalLabelSmall {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  color: #5f6368;
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+/* Leaf rows under a shared GL code — visually indented and slightly muted */
+.sharedLeaf td {
+  color: #5f6368;
+}
+.sharedLeaf td:nth-child(2) {
+  padding-left: 24px;  /* indent task name */
+}
+
 .warn {
   background: #fff8e1;
   border: 1px solid #ffe082;
