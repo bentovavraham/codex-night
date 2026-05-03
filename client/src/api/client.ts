@@ -40,7 +40,8 @@ export const api = {
   updatePhase:  (id: number, data: any) => request<any>('PATCH', `/api/phases/${id}`, data),
 
   // Budget
-  getBudget:    (phaseId: number)     => request<any[]>('GET',  `/api/phases/${phaseId}/budget`),
+  getBudget:    (phaseId: number, source?: 'pm' | 'qb' | 'compare') =>
+    request<any[]>('GET', `/api/phases/${phaseId}/budget${source && source !== 'pm' ? `?source=${source}` : ''}`),
   downloadBudgetExcel: (phaseId: number) => {
     window.location.href = `/api/phases/${phaseId}/budget/export-excel`;
   },

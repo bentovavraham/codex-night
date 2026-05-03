@@ -6,9 +6,19 @@ const TEMPLATE = require('../db/budget-template');
 const router = express.Router();
 
 // GET /api/phases/:phaseId/budget
+// Optional ?source=pm | qb | compare (default: pm)
+//   pm      → today's behavior — actuals from invoices/contracts/etc.
+//   qb      → same row shape, but FIXED/T&M/EXPENSE are 0 and BILLED/PAID/AMT DUE
+//             come from qb_transactions (matched by qb_account_number).
+//   compare → PM fields populated as default, plus extra qb_* fields per row
+//             (qb_billed, qb_paid, qb_amount_due) so the frontend can render Δs.
+// BUDGETED / CONTRACTED / COS always come from PM-side data (the plan is one fact).
 router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
   try {
     const { phaseId } = req.params;
+    const source = ['qb', 'compare'].includes(String(req.query.source))
+      ? String(req.query.source)
+      : 'pm';
 
     const phaseCheck = await pool.query('SELECT id FROM phases WHERE id = $1', [phaseId]);
     if (!phaseCheck.rows.length) return res.status(404).json({ error: 'Phase not found' });
@@ -257,23 +267,68 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         pbl.id
     `, [phaseId]);
 
+    // For source=qb or source=compare we additionally roll up qb_transactions
+    // by qb_gl_code so we can graft the QB-derived actuals onto the rows.
+    let qbByCode = new Map();
+    if (source === 'qb' || source === 'compare') {
+      const qbAgg = await pool.query(`
+        SELECT
+          qb_gl_code,
+          COALESCE(SUM(amount),       0) AS qb_billed,
+          COALESCE(SUM(paid_amount),  0) AS qb_paid,
+          COALESCE(SUM(open_balance), 0) AS qb_amount_due
+        FROM qb_transactions
+        WHERE phase_id = $1
+        GROUP BY qb_gl_code
+      `, [phaseId]);
+      qbByCode = new Map(
+        qbAgg.rows.map(r => [String(r.qb_gl_code || '').trim(), {
+          qb_billed:     parseFloat(r.qb_billed)     || 0,
+          qb_paid:       parseFloat(r.qb_paid)       || 0,
+          qb_amount_due: parseFloat(r.qb_amount_due) || 0,
+        }]),
+      );
+    }
+
     const rows = result.rows.map(r => {
       const budgeted          = parseFloat(r.budgeted_amount)   || 0;
       const committed         = parseFloat(r.committed)         || 0;
       const co_value          = parseFloat(r.co_value)          || 0;
       const co_count          = parseInt(r.co_count)            || 0;
       const total_commitment  = committed + co_value;
-      const fixed_charges     = parseFloat(r.fixed_charges)     || 0;
-      const tm_charges        = parseFloat(r.tm_charges)        || 0;
-      const expense_charges   = parseFloat(r.expense_charges)   || 0;
-      const billed            = parseFloat(r.billed)            || 0;
-      const paid              = parseFloat(r.paid)              || 0;
-      const amount_due        = billed - paid;
-      const remaining_budget  = budgeted - billed;
+      const pm_fixed          = parseFloat(r.fixed_charges)     || 0;
+      const pm_tm             = parseFloat(r.tm_charges)        || 0;
+      const pm_expense        = parseFloat(r.expense_charges)   || 0;
+      const pm_billed         = parseFloat(r.billed)            || 0;
+      const pm_paid           = parseFloat(r.paid)              || 0;
       const remaining_commit  = budgeted - total_commitment;
-      const pct_billed        = budgeted > 0 ? billed / budgeted : null;
 
-      return {
+      const acctNumber = r.qb_account_number ? String(r.qb_account_number).trim() : '';
+      const qb = qbByCode.get(acctNumber) || { qb_billed: 0, qb_paid: 0, qb_amount_due: 0 };
+
+      // Pick which actuals fill the canonical fields based on source.
+      let fixed_charges, tm_charges, expense_charges, billed, paid, amount_due;
+      if (source === 'qb') {
+        // QB has no Fixed/T&M/Expense breakdown
+        fixed_charges = 0;
+        tm_charges = 0;
+        expense_charges = 0;
+        billed     = qb.qb_billed;
+        paid       = qb.qb_paid;
+        amount_due = qb.qb_amount_due;
+      } else {
+        // pm and compare: canonical fields = PM-side (compare also returns qb_* below)
+        fixed_charges   = pm_fixed;
+        tm_charges      = pm_tm;
+        expense_charges = pm_expense;
+        billed          = pm_billed;
+        paid            = pm_paid;
+        amount_due      = pm_billed - pm_paid;
+      }
+      const remaining_budget = budgeted - billed;
+      const pct_billed       = budgeted > 0 ? billed / budgeted : null;
+
+      const base = {
         ...r,
         budgeted_amount: budgeted,
         committed,
@@ -299,7 +354,28 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         qb_parent_name:     r.qb_parent_name ?? null,
         qb_parent_sort:     r.qb_parent_sort != null ? Number(r.qb_parent_sort) : 9999,
         qb_category:        r.qb_category ?? null,
+        source_view:        source,
       };
+
+      if (source === 'compare') {
+        // Surface BOTH sides so the frontend can render Δ columns.
+        return {
+          ...base,
+          pm_fixed_charges:   pm_fixed,
+          pm_tm_charges:      pm_tm,
+          pm_expense_charges: pm_expense,
+          pm_billed,
+          pm_paid,
+          pm_amount_due:      pm_billed - pm_paid,
+          qb_fixed_charges:   0,        // structurally unavailable
+          qb_tm_charges:      0,
+          qb_expense_charges: 0,
+          qb_billed:          qb.qb_billed,
+          qb_paid:            qb.qb_paid,
+          qb_amount_due:      qb.qb_amount_due,
+        };
+      }
+      return base;
     });
 
     res.json(rows);

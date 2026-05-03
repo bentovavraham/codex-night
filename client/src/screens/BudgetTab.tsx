@@ -1,4 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import BudgetGrid from './BudgetGrid';
+import CompareGrid from './CompareGrid';
 import styles from './BudgetTab.module.css';
 
 const SUB_TABS = [
@@ -30,31 +32,13 @@ export default function BudgetTab() {
   );
 }
 
+// QB Source: same BudgetGrid, fed from qb_transactions instead of invoices.
+// FIXED/T&M/EXPENSE will be 0 (blank in render) because QB has no breakdown.
 export function QBSourceView() {
-  return (
-    <div className={styles.stub}>
-      <div className={styles.stubBadge}>Phase 2 — Coming soon</div>
-      <div className={styles.stubTitle}>QB Source</div>
-      <div className={styles.stubBody}>
-        Same Budget Grid populated from QuickBooks transactions instead of PDFs.
-        BUDGETED / CONTRACTED / COS columns mirror PM Source (the plan is one fact).
-        FIXED / T&amp;M / EXPENSE stay blank because QB doesn't carry that breakdown.
-        BILLED / AMT DUE / PAID populate from <code>qb_transactions</code>.
-      </div>
-    </div>
-  );
+  return <BudgetGrid source="qb" />;
 }
 
+// Compare: dedicated grid with Δ columns next to every actuals sub-column.
 export function CompareView() {
-  return (
-    <div className={styles.stub}>
-      <div className={styles.stubBadge}>Phase 3 — Coming soon</div>
-      <div className={styles.stubTitle}>Compare</div>
-      <div className={styles.stubBody}>
-        Same Budget Grid plus a Δ column next to each actuals sub-column
-        (FIXED, T&amp;M, EXPENSE, BILLED, AMT DUE, PAID). Active Only filter
-        hides Δ columns where the QB side is structurally blank.
-      </div>
-    </div>
-  );
+  return <CompareGrid />;
 }

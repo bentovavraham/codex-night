@@ -1,0 +1,197 @@
+/* CompareGrid — read-only side-by-side PM vs QB with deltas. */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid #dadce0;
+  flex-shrink: 0;
+  gap: 12px;
+  background: #fafafa;
+}
+
+.toolbarLabel {
+  font-size: 11px;
+  color: #5f6368;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #3c4043;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 10px;
+  border: 1px solid #dadce0;
+  border-radius: 3px;
+  background: #fff;
+  transition: border-color 0.1s;
+}
+.toggle:hover { border-color: var(--accent); }
+.toggle input { margin: 0; }
+
+.legend {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 11px;
+  color: #5f6368;
+}
+.legendDot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.scroller {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.table th, .table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  border-right: 1px solid #f0f0f0;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.table th { font-weight: 600; }
+
+/* Header rows */
+.headerGroup {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #f1f3f4;
+  color: #3c4043;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  text-align: center;
+  border-bottom: 1px solid #dadce0;
+}
+.headerSub {
+  position: sticky;
+  top: 28px;
+  z-index: 2;
+  background: #fafafa;
+  color: #3c4043;
+  text-align: right;
+  font-size: 11px;
+  border-bottom: 1px solid #dadce0;
+}
+.headerSub.left { text-align: left; }
+
+/* Group dividers — slightly heavier border between column groups */
+.groupStart {
+  border-left: 2px solid #dadce0 !important;
+}
+
+/* Section header rows */
+.catRow {
+  background: #37474f;
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.catRow td { background: #37474f; color: #fff; border-color: #455a64; }
+
+.secRow {
+  background: #e8eaed;
+  color: #202124;
+  font-weight: 600;
+  font-size: 12px;
+}
+.secRow td { background: #e8eaed; }
+
+/* Data rows */
+.dataRow:hover td { background: #fafbfc; }
+
+.tdAcct {
+  color: #5f6368;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tdTask {
+  color: #202124;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tdMoney {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #202124;
+}
+
+.tdMoneyMuted {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #9aa0a6;
+}
+
+.tdDelta {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.deltaPos { color: #16a34a; }       /* QB ≥ PM (green) */
+.deltaNeg { color: #dc2626; }       /* QB < PM (red — usually means we forgot to push something) */
+.deltaNeutral { color: #9aa0a6; }   /* zero-ish or only-one-side */
+
+.deltaPct {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10px;
+  color: #5f6368;
+  font-variant-numeric: tabular-nums;
+}
+
+.empty {
+  padding: 40px;
+  text-align: center;
+  color: #5f6368;
+  font-size: 13px;
+}
+
+.warn {
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 3px;
+  padding: 8px 12px;
+  margin: 12px;
+  font-size: 12px;
+  color: #5d4037;
+}

@@ -306,7 +306,9 @@ const addRow = (t: Totals, r: BudgetRow): Totals => ({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function BudgetGrid() {
+type BudgetSource = 'pm' | 'qb';
+
+export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } = {}) {
   const { projectId, phaseId } = useParams<{ projectId: string; phaseId: string }>();
   const phaseIdNum = Number(phaseId);
   const qc = useQueryClient();
@@ -328,8 +330,8 @@ export default function BudgetGrid() {
   const [viewMode,    setViewMode]    = useState<'budget' | 'variance'>('budget');
 
   const { data: rows = [], isLoading, error } = useQuery<BudgetRow[]>({
-    queryKey: ['budget', phaseIdNum],
-    queryFn: () => api.getBudget(phaseIdNum),
+    queryKey: ['budget', phaseIdNum, source],
+    queryFn: () => api.getBudget(phaseIdNum, source),
     enabled: !!phaseIdNum,
   });
 
