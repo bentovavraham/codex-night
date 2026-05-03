@@ -637,22 +637,14 @@ function UploadPanel({
     if (!budgetLines || budgetLines.length === 0) return;
     const updated: { idx: number; pbl_id: number | null }[] = [];
     form.line_items.forEach((li, idx) => {
-      if (li.qb_account_id == null) {
-        if (li.phase_budget_line_id != null) updated.push({ idx, pbl_id: null });
-        return;
-      }
+      // Only AUTO-RESOLVE: if GL maps to exactly one task, set phase_budget_line_id.
+      // Never AUTO-CLEAR — the user's manual or AI pick is preserved even if the GL
+      // doesn't match exactly. The picker shows all tasks, so any pick is valid.
+      if (li.qb_account_id == null) return;
       const matching = (budgetLines as any[]).filter(b => b.qb_account_id === li.qb_account_id);
-      if (matching.length === 1) {
-        if (li.phase_budget_line_id !== matching[0].id) {
-          updated.push({ idx, pbl_id: matching[0].id });
-        }
-      } else if (matching.length === 0) {
-        if (li.phase_budget_line_id != null) updated.push({ idx, pbl_id: null });
-      } else {
-        // Shared GL code: keep current pick if still valid, otherwise clear
-        if (li.phase_budget_line_id != null && !matching.find(t => t.id === li.phase_budget_line_id)) {
-          updated.push({ idx, pbl_id: null });
-        }
+      if (matching.length === 1 && li.phase_budget_line_id !== matching[0].id && li.phase_budget_line_id == null) {
+        // Auto-resolve only when the user/AI hasn't already picked something.
+        updated.push({ idx, pbl_id: matching[0].id });
       }
     });
     if (updated.length === 0) return;
@@ -923,15 +915,16 @@ function UploadPanel({
                 </thead>
                 <tbody>
                   {form.line_items.map((li, i) => {
-                    // Determine which PM tasks share this GL code in this phase.
-                    // - 1 match: phase_budget_line_id auto-set by useEffect below
-                    // - >1 match: show task picker (Option C — required when shared)
-                    // - 0 match: warn (uncoded GL — surfaces in integrity report)
+                    // Tasks under this GL code (preferred picks) and ALL tasks (fallback).
+                    // Never block the user — always show a picker with options.
                     const matchingTasks = li.qb_account_id != null
                       ? budgetLines.filter((b: any) => b.qb_account_id === li.qb_account_id)
                       : [];
+                    const allTasks: any[] = budgetLines as any[];
                     const isShared = matchingTasks.length > 1;
-                    const noMatch  = li.qb_account_id != null && matchingTasks.length === 0;
+                    // Show a picker whenever the GL is set: required for shared groups,
+                    // helpful (but optional) for non-matching codes too.
+                    const showPicker = li.qb_account_id != null && (isShared || matchingTasks.length === 0);
                     return (
                     <tr key={i} className={styles.catRow}>
                       <td className={styles.colHash}>{i + 1}</td>
@@ -943,33 +936,54 @@ function UploadPanel({
                           suggestionConfidence={li.qb_suggestion_confidence}
                           onChange={id => setLine(i, { qb_account_id: id, phase_budget_line_id: null })}
                         />
-                        {/* Conditional task picker — appears only when the GL code
-                            maps to multiple PM tasks. Required field for shared GL
-                            codes; the value is written to ili.phase_budget_line_id. */}
-                        {isShared && (() => {
+                        {/* Task picker. Always-available — never blocks the user.
+                            Shown when the GL code maps to multiple PM tasks (Option C
+                            requirement) OR when no PM task uses the exact GL code (so
+                            the user can still pick any task in the phase to assign to). */}
+                        {showPicker && (() => {
                           const ai = aiSuggestions.get(i);
                           const isAiPick = !!ai && ai.id === li.phase_budget_line_id;
+                          // If we have direct GL matches, show those first; otherwise
+                          // fall back to all tasks. Group visually for clarity.
+                          const hasMatching = matchingTasks.length > 0;
+                          const placeholder = hasMatching
+                            ? `Pick task (${matchingTasks.length} match this GL)`
+                            : `No PM task on this GL — pick any task`;
                           return (
                             <>
                               <select
                                 value={li.phase_budget_line_id ?? ''}
                                 onChange={e => setLine(i, { phase_budget_line_id: e.target.value ? Number(e.target.value) : null })}
-                                title="You can change this anytime, even if AI picked it. Just click and pick a different task."
+                                title="You can change this anytime, even if AI picked it. Pick any task — the GL code is the source of truth for the rollup."
                                 style={{
                                   marginTop: 4, width: '100%', fontSize: 11,
                                   padding: '3px 4px',
-                                  border: li.phase_budget_line_id ? (isAiPick ? '1px solid var(--accent)' : '1px solid #d0d0d0') : '1px solid #f59e0b',
+                                  border: li.phase_budget_line_id ? (isAiPick ? '1px solid var(--accent)' : '1px solid #d0d0d0') : '1px solid #d0d0d0',
                                   borderRadius: 3,
                                   background: li.phase_budget_line_id
                                     ? (isAiPick ? 'var(--accent-light)' : '#fff')
-                                    : '#fffbeb',
+                                    : '#fafafa',
                                   cursor: 'pointer',
                                 }}
                               >
-                                <option value="">⚠ Pick task ({matchingTasks.length} share this GL)</option>
-                                {matchingTasks.map((t: any) => (
-                                  <option key={t.id} value={t.id}>{t.task_name}</option>
-                                ))}
+                                <option value="">{placeholder}</option>
+                                {hasMatching && (
+                                  <optgroup label={`On GL ${matchingTasks[0].qb_account_id ?? ''}`}>
+                                    {matchingTasks.map((t: any) => (
+                                      <option key={t.id} value={t.id}>{t.task_name}</option>
+                                    ))}
+                                  </optgroup>
+                                )}
+                                <optgroup label={hasMatching ? 'All other tasks in this phase' : 'All tasks in this phase'}>
+                                  {allTasks
+                                    .filter((t: any) => !matchingTasks.find((m: any) => m.id === t.id))
+                                    .map((t: any) => (
+                                      <option key={t.id} value={t.id}>
+                                        {t.task_name}
+                                        {t.discipline ? ` · ${t.discipline}` : ''}
+                                      </option>
+                                    ))}
+                                </optgroup>
                               </select>
                               {ai && isAiPick && (
                                 <div style={{ marginTop: 2, fontSize: 10, color: 'var(--accent)', fontStyle: 'italic' }}
@@ -981,15 +995,6 @@ function UploadPanel({
                             </>
                           );
                         })()}
-                        {noMatch && (
-                          <div style={{
-                            marginTop: 4, fontSize: 11, color: '#b45309',
-                            padding: '3px 6px', background: '#fffbeb',
-                            border: '1px solid #fde68a', borderRadius: 3,
-                          }}>
-                            ⚠ No PM task uses this GL code in this phase
-                          </div>
-                        )}
                       </td>
                       <td className={styles.colType}>
                         <select
