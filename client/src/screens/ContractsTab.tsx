@@ -636,7 +636,17 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
 
     setSaving(true);
     try {
-      const usableLines = form.line_items.filter(li => li.description.trim());
+      // Auto-resolve task before save: any line whose GL maps to exactly one
+      // PM task gets that task assigned automatically. User can override later.
+      const usableLines = form.line_items
+        .filter(li => li.description.trim())
+        .map(li => {
+          if (li.phase_budget_line_id != null) return li;
+          if (li.qb_account_id == null) return li;
+          const matching = (budgetLines as any[]).filter(b => b.qb_account_id === li.qb_account_id);
+          if (matching.length === 1) return { ...li, phase_budget_line_id: matching[0].id };
+          return li;
+        });
       if (isChangeOrder) {
         const coPayload = {
           co_number:      form.reference_number || null,
@@ -1024,9 +1034,15 @@ export default function ContractsTab() {
   });
 
   function handleSaved() {
-    qc.invalidateQueries({ queryKey: ['phaseContracts', phaseIdNum] });
-    qc.invalidateQueries({ queryKey: ['budget',         phaseIdNum] });
-    qc.invalidateQueries({ queryKey: ['contractDetail', editContractId] });
+    // Invalidate everything that could have moved as a result of this save:
+    // budget grid (every source variant), contract list, change orders for
+    // every contract (we don't know which CO touched which contract from
+    // here), and any open contract detail drawer.
+    qc.invalidateQueries({ queryKey: ['phaseContracts',      phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['budget',              phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['contractChangeOrders'] });
+    qc.invalidateQueries({ queryKey: ['contractDetail'] });
+    qc.invalidateQueries({ queryKey: ['drill',               phaseIdNum] });
     setUploadOpen(false);
     setEditContractId(null);
   }

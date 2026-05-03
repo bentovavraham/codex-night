@@ -1179,9 +1179,16 @@ export default function InvoicesTab() {
   });
 
   function handleSaved() {
-    qc.invalidateQueries({ queryKey: ['invoices',      phaseIdNum] });
-    qc.invalidateQueries({ queryKey: ['budget',        phaseIdNum] });
-    qc.invalidateQueries({ queryKey: ['phaseContracts', phaseIdNum] });
+    // Invalidate every cached query that could be affected by an invoice save —
+    // budget grid (all source variants), invoices list, drill panels, contract
+    // detail, and the audit/transaction-report views.
+    qc.invalidateQueries({ queryKey: ['invoices',          phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['budget',            phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['phaseContracts',    phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['drill',             phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['contractDetail'] });
+    qc.invalidateQueries({ queryKey: ['audit',             phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['txnReport',         phaseIdNum] });
     setUploadOpen(false);
     setEditInvoiceId(null);
   }
