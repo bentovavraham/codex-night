@@ -1351,40 +1351,116 @@ router.get('/phases/:phaseId/invoices', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/budget-lines/:lineId/activity — contracts + invoices for a single budget line
+// GET /api/budget-lines/:lineId/activity — contracts + invoices for a single budget line.
+// Uses the SAME 4-path allocation logic as the main budget query and the drill endpoint
+// so the list of records always matches exactly what drives the numbers on screen.
 router.get('/budget-lines/:lineId/activity', requireAuth, async (req, res, next) => {
   try {
     const lineId = Number(req.params.lineId);
     const lineCheck = await pool.query(
-      'SELECT id FROM phase_budget_lines WHERE id = $1',
+      'SELECT id, phase_id, qb_account_id FROM phase_budget_lines WHERE id = $1',
       [lineId]
     );
     if (!lineCheck.rows.length) return res.status(404).json({ error: 'Not found' });
 
-    const [contracts, invoices] = await Promise.all([
-      pool.query(
-        `SELECT id, vendor_name, reference_number, status, total_value,
-                contract_date, file_reference, description
-         FROM contracts
-         WHERE phase_budget_line_id = $1
-         ORDER BY contract_date ASC NULLS LAST, id ASC`,
-        [lineId]
-      ),
-      pool.query(
-        `SELECT i.id, i.invoice_number, i.invoice_date, i.amount, i.status,
-                i.file_reference, i.description, i.vendor_name, i.invoice_type,
-                c.vendor_name AS contract_vendor, c.reference_number AS contract_ref, c.id AS contract_id
-         FROM invoices i
-         LEFT JOIN contracts c ON c.id = i.contract_id
-         WHERE i.status != 'voided'
-           AND (i.phase_budget_line_id = $1
-                OR i.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = $1))
-         ORDER BY i.invoice_date DESC NULLS LAST, i.id DESC`,
-        [lineId]
-      ),
-    ]);
+    // Contracts — mirrors committed calculation: CLI with explicit or fallback pbl,
+    // plus contracts with no CLIs at all (use contract-level pbl).
+    const contractsQ = await pool.query(`
+      SELECT
+        c.id, c.vendor_name, c.reference_number, c.status,
+        c.total_value, c.contract_date, c.file_reference, c.description,
+        COALESCE(
+          (SELECT SUM(cli.budgeted_amount) FROM contract_line_items cli
+           WHERE cli.contract_id = c.id
+             AND COALESCE(cli.phase_budget_line_id, c.phase_budget_line_id) = $1),
+          CASE WHEN c.phase_budget_line_id = $1
+                AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
+               THEN c.total_value ELSE 0 END
+        ) AS allocated_amount
+      FROM contracts c
+      WHERE c.status NOT IN ('voided','draft')
+        AND (
+          c.phase_budget_line_id = $1
+          OR EXISTS (
+            SELECT 1 FROM contract_line_items cli
+            WHERE cli.contract_id = c.id
+              AND COALESCE(cli.phase_budget_line_id, c.phase_budget_line_id) = $1
+          )
+        )
+      ORDER BY c.contract_date ASC NULLS LAST, c.id ASC
+    `, [lineId]);
 
-    res.json({ contracts: contracts.rows, invoices: invoices.rows });
+    // Invoices — same 4-path cascade as the main budget query.
+    const invoicesQ = await pool.query(`
+      WITH pbl AS (
+        SELECT id, phase_id, qb_account_id FROM phase_budget_lines WHERE id = $1
+      ),
+      gl_sharing AS (
+        SELECT COUNT(*) AS share_count
+        FROM phase_budget_lines o
+        WHERE o.phase_id = (SELECT phase_id FROM pbl)
+          AND o.qb_account_id = (SELECT qb_account_id FROM pbl)
+          AND o.qb_account_id IS NOT NULL
+      )
+      SELECT
+        i.id, i.invoice_number, i.invoice_date, i.amount, i.status,
+        i.file_reference, i.description, i.vendor_name, i.invoice_type,
+        c.vendor_name  AS contract_vendor,
+        c.reference_number AS contract_ref,
+        c.id           AS contract_id,
+        (
+          -- Path 1: ILI explicitly assigned to this line
+          COALESCE((SELECT SUM(ili.amount) FROM invoice_line_items ili
+                    WHERE ili.invoice_id = i.id AND ili.phase_budget_line_id = $1), 0)
+          -- Path 2: GL-driven (only when this pbl is the sole pbl for its GL in the phase)
+          + CASE WHEN (SELECT share_count FROM gl_sharing) = 1
+                 THEN COALESCE((SELECT SUM(ili.amount) FROM invoice_line_items ili
+                                WHERE ili.invoice_id = i.id
+                                  AND ili.phase_budget_line_id IS NULL
+                                  AND ili.qb_account_id IS NOT NULL
+                                  AND ili.qb_account_id = (SELECT qb_account_id FROM pbl)), 0)
+                 ELSE 0 END
+          -- Path 3: ILI has neither pbl nor GL → invoice-level fallback
+          + CASE WHEN i.phase_budget_line_id = $1
+                 THEN COALESCE((SELECT SUM(ili.amount) FROM invoice_line_items ili
+                                WHERE ili.invoice_id = i.id
+                                  AND ili.phase_budget_line_id IS NULL
+                                  AND ili.qb_account_id IS NULL), 0)
+                 ELSE 0 END
+          -- Path 4: invoice has no line items at all → invoice-level fallback
+          + CASE WHEN i.phase_budget_line_id = $1
+                  AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = i.id)
+                 THEN i.amount ELSE 0 END
+        ) AS allocated_amount
+      FROM invoices i
+      LEFT JOIN contracts c ON c.id = i.contract_id
+      WHERE i.status NOT IN ('voided','draft','rejected')
+        AND (
+          -- Path 1
+          EXISTS (SELECT 1 FROM invoice_line_items ili
+                  WHERE ili.invoice_id = i.id AND ili.phase_budget_line_id = $1)
+          -- Path 2
+          OR ((SELECT share_count FROM gl_sharing) = 1 AND EXISTS (
+            SELECT 1 FROM invoice_line_items ili
+            WHERE ili.invoice_id = i.id
+              AND ili.phase_budget_line_id IS NULL
+              AND ili.qb_account_id IS NOT NULL
+              AND ili.qb_account_id = (SELECT qb_account_id FROM pbl)
+          ))
+          -- Path 3
+          OR (i.phase_budget_line_id = $1 AND EXISTS (
+            SELECT 1 FROM invoice_line_items ili
+            WHERE ili.invoice_id = i.id
+              AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL
+          ))
+          -- Path 4
+          OR (i.phase_budget_line_id = $1
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = i.id))
+        )
+      ORDER BY i.invoice_date DESC NULLS LAST, i.id DESC
+    `, [lineId]);
+
+    res.json({ contracts: contractsQ.rows, invoices: invoicesQ.rows });
   } catch (err) { next(err); }
 });
 
