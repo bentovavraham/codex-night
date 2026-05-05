@@ -538,12 +538,21 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
 
   const dc = showDetails ? '' : styles.detailHidden;
 
-  const SumCells = ({ t, variant }: { t: Totals; variant: 'root' | 'grp' | 'sub' | 'leaf' }) => {
+  const SumCells = ({ t, variant, blank }: { t: Totals; variant: 'root' | 'grp' | 'sub' | 'leaf'; blank?: boolean }) => {
     const cls =
       variant === 'root' ? styles.rootNum :
       variant === 'sub'  ? styles.secSubNum :
       variant === 'leaf' ? styles.sgSubNum :
       styles.grpNum;
+    if (blank) return <>
+      <td className={cls}/><td className={cls}/><td className={cls}/>
+      <td className={cls}/><td className={cls}/><td className={cls}/>
+      <td className={cls}/><td className={cls}/><td className={cls}/>
+      <td className={cls}/><td className={cls}/><td className={cls}/>
+      <td className={cls}/><td className={cls}/><td className={cls}/>
+      <td className={`${cls} ${dc}`}/><td className={`${cls} ${dc}`}/>
+      <td className={`${cls} ${dc}`}/><td className={`${cls} ${dc}`}/>
+    </>;
     const amtDue = t.billed - t.paid;
     return <>
       <td className={cls}>{moneyD(t.budgeted)}</td>
@@ -653,24 +662,30 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
       );
 
       if (depth === 0) {
-        // Root: category band
+        // Root: category band — numbers shown only when collapsed; subtotal row at bottom when expanded
         return [
           <tr key={`root:${key}`} className={styles.catRow} onClick={() => toggle(key)}>
             <td className={styles.catGutter}><span className={styles.chevron}>{isOpen ? '▾' : '▸'}</span></td>
             <td className={styles.catLabel} colSpan={2}>{acctTag}{label}</td>
-            <SumCells t={t} variant="root" />
+            <SumCells t={t} variant="root" blank={isOpen} />
           </tr>,
-          ...(isOpen ? renderAccts(children, 1) : []),
+          ...(isOpen ? [
+            ...renderAccts(children, 1),
+            <tr key={`root:${key}:sub`} className={styles.catSubRow}>
+              <td /><td className={styles.catSubLabel} colSpan={2}>{acct.account_number} — Total</td>
+              <SumCells t={t} variant="root" />
+            </tr>,
+          ] : []),
         ];
       }
 
       if (children.length > 0) {
-        // Sub-group: collapsible group row
+        // Sub-group: collapsible group row — numbers shown only when collapsed
         return [
           <tr key={`grp:${key}`} className={styles.secRow} onClick={() => toggle(key)}>
             <td className={styles.secGutter}><span className={styles.chevron}>{isOpen ? '▾' : '▸'}</span></td>
             <td className={styles.secLabel} colSpan={2}>{acctTag}{label}</td>
-            <SumCells t={t} variant="grp" />
+            <SumCells t={t} variant="grp" blank={isOpen} />
           </tr>,
           ...(isOpen ? [
             ...renderAccts(children, depth + 1),
@@ -682,19 +697,8 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         ];
       }
 
-      // Leaf account: task rows + optional subtotal
-      const multiTask = leafRows.length > 1;
-      return [
-        ...leafRows.map(r => renderRow(blankActualsForShared(r))),
-        ...(multiTask ? [
-          <tr key={`leaf:${key}:sub`} className={styles.leafSubRow}>
-            <td />
-            <td className={styles.leafSubAcct}>{acct.account_number}</td>
-            <td className={styles.leafSubLabel}>{label} — Total</td>
-            <SumCells t={t} variant="leaf" />
-          </tr>,
-        ] : []),
-      ];
+      // Leaf account: task rows only
+      return leafRows.map(r => renderRow(blankActualsForShared(r)));
     });
   };
 

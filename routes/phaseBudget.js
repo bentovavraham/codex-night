@@ -118,6 +118,7 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             AND (
               col.phase_budget_line_id = pbl.id
               OR (col.phase_budget_line_id IS NULL AND col.qb_account_id = pbl.qb_account_id
+                  AND c.phase_id = pbl.phase_id
                   AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o
                                    WHERE o.phase_id = pbl.phase_id
                                      AND o.qb_account_id = pbl.qb_account_id
@@ -143,7 +144,9 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
             SELECT col.budgeted_amount
               FROM change_order_line_items col
               JOIN change_orders co ON co.id = col.change_order_id
+              JOIN contracts c2    ON c2.id  = co.contract_id
              WHERE co.status NOT IN ('voided','draft','rejected')
+               AND c2.phase_id = pbl.phase_id
                AND col.phase_budget_line_id IS NULL
                AND col.qb_account_id IS NOT NULL
                AND col.qb_account_id = pbl.qb_account_id
@@ -192,6 +195,7 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
               AND ili.phase_budget_line_id IS NULL
               AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id
+              AND inv.phase_id = pbl.phase_id
               -- Only credit this leaf when it's the unique pbl for the GL code.
               -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
               -- amount appears as a separate "General [GL]" row instead, so it
@@ -239,6 +243,7 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
               AND ili.phase_budget_line_id IS NULL
               AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id
+              AND inv.phase_id = pbl.phase_id
               -- Only credit this leaf when it's the unique pbl for the GL code.
               -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
               -- amount appears as a separate "General [GL]" row instead, so it
@@ -286,6 +291,7 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
               AND ili.phase_budget_line_id IS NULL
               AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id
+              AND inv.phase_id = pbl.phase_id
               -- Only credit this leaf when it's the unique pbl for the GL code.
               -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
               -- amount appears as a separate "General [GL]" row instead, so it
@@ -331,6 +337,7 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
               AND ili.phase_budget_line_id IS NULL
               AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id
+              AND inv.phase_id = pbl.phase_id
               -- Only credit this leaf when it's the unique pbl for the GL code.
               -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
               -- amount appears as a separate "General [GL]" row instead, so it
@@ -374,6 +381,7 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
               AND ili.phase_budget_line_id IS NULL
               AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id
+              AND inv.phase_id = pbl.phase_id
               -- Only credit this leaf when it's the unique pbl for the GL code.
               -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
               -- amount appears as a separate "General [GL]" row instead, so it
@@ -409,6 +417,7 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
           JOIN qb_accounts qa ON qa.id = ili.qb_account_id
           WHERE inv.status NOT IN ('voided','draft','rejected')
             AND qa.account_number IS NOT NULL
+            AND inv.phase_id = pbl.phase_id
             AND (
               ili.phase_budget_line_id = pbl.id
               OR (ili.phase_budget_line_id IS NULL AND ili.qb_account_id = pbl.qb_account_id)
@@ -421,6 +430,7 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
           SELECT 1 FROM invoice_line_items ili
           JOIN invoices inv ON inv.id = ili.invoice_id
           WHERE inv.status NOT IN ('voided','draft','rejected')
+            AND inv.phase_id = pbl.phase_id
             AND (
               ili.phase_budget_line_id = pbl.id
               OR (ili.phase_budget_line_id IS NULL AND ili.qb_account_id = pbl.qb_account_id)
@@ -581,6 +591,7 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         JOIN qb_accounts qa    ON qa.id = ili.qb_account_id
         LEFT JOIN qb_accounts qp ON qp.id = qa.parent_id
         WHERE inv.status NOT IN ('voided','draft','rejected')
+          AND inv.phase_id = $1
           AND ili.phase_budget_line_id IS NULL
           AND ili.qb_account_id IN (
             SELECT qb_account_id
@@ -765,10 +776,11 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
              WHERE ili.invoice_id = i.id
                AND ili.phase_budget_line_id IS NULL
                AND ili.qb_account_id = $1
-          ), 0) AS amount
+          ), 0) AS amount  -- outer WHERE already scopes to phase_id = $2
         FROM invoices i
         LEFT JOIN contracts c ON c.id = i.contract_id
         WHERE i.status NOT IN ('voided','draft','rejected')
+          AND i.phase_id = $2
           AND EXISTS (
             SELECT 1 FROM invoice_line_items ili
              WHERE ili.invoice_id = i.id
@@ -776,7 +788,7 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
                AND ili.qb_account_id = $1
           )
         ORDER BY i.invoice_date DESC NULLS LAST, i.id
-      `, [qbAccountId]);
+      `, [qbAccountId, phaseId]);
       return res.json({
         contracts: [],          // contracts don't apply to "general unassigned"
         invoices:  invoicesQ.rows,
@@ -1446,6 +1458,8 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         qp.account_number                       AS qb_parent_number,
         qp.short_name                           AS qb_parent_name,
         qp.full_name                            AS qb_parent_full_name,
+        qpp.account_number                      AS qb_grandparent_number,
+        qpp.short_name                          AS qb_grandparent_name,
 
         COALESCE((
           SELECT SUM(contribution) FROM (
@@ -1598,10 +1612,12 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         ), '') AS qb_codes_used
 
       FROM phase_budget_lines pbl
-      LEFT JOIN qb_accounts qa ON qa.id = pbl.qb_account_id
-      LEFT JOIN qb_accounts qp ON qp.id = qa.parent_id
+      LEFT JOIN qb_accounts qa  ON qa.id  = pbl.qb_account_id
+      LEFT JOIN qb_accounts qp  ON qp.id  = qa.parent_id
+      LEFT JOIN qb_accounts qpp ON qpp.id = qp.parent_id
       WHERE pbl.phase_id = $1
       ORDER BY
+        COALESCE(qpp.sort_order, qp.sort_order, qa.sort_order, 9999),
         COALESCE(qp.sort_order, qa.sort_order, 9999),
         COALESCE(qa.sort_order, 9999),
         pbl.sort_order,
@@ -1765,122 +1781,118 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
 
     ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 4 }];
 
-    // ── Data rows: section headers + leaf rows ────────────────────────────────
-    const totBudget = rows.reduce((s, r) => s + r.budgeted, 0);
-    const totCommit = rows.reduce((s, r) => s + r.total_commitment, 0);
-    const totBilled = rows.reduce((s, r) => s + r.billed, 0);
-    const totPaid   = rows.reduce((s, r) => s + r.paid, 0);
+    // ── Data rows: accounting structure ───────────────────────────────────────
+    // Section label (no numbers) → data rows → section subtotal (SUM formulas)
+    // Grand total uses SUM of section subtotals.
 
-    // Build section totals keyed by parent GL
-    const secMap = new Map();
-    const leafRows = rows.filter(r => r.task_name || r.budgeted > 0 || r.total_commitment > 0 || r.billed > 0);
-    for (const r of leafRows) {
-      const key = r.qb_parent_number || r.qb_account_number || '—';
-      if (!secMap.has(key)) secMap.set(key, {
-        key,
-        label: (r.qb_parent_full_name || r.qb_full_name || '').split(':').slice(1).join('').trim() || r.qb_parent_full_name || r.qb_full_name || '',
-        budgeted: 0, remaining_budget: 0,
-        committed: 0, co_value: 0, total_commitment: 0,
-        fixed_charges: 0, tm_charges: 0, expense_charges: 0,
-        billed: 0, amount_due: 0, paid: 0,
-      });
-      const s = secMap.get(key);
-      s.budgeted         += r.budgeted;
-      s.remaining_budget += r.remaining_budget;
-      s.committed        += r.committed;
-      s.co_value         += r.co_value;
-      s.total_commitment += r.total_commitment;
-      s.fixed_charges    += r.fixed_charges;
-      s.tm_charges       += r.tm_charges;
-      s.expense_charges  += r.expense_charges;
-      s.billed           += r.billed;
-      s.amount_due       += r.amount_due;
-      s.paid             += r.paid;
+    function cl(n) {  // column number → Excel letter (1=A, 2=B, …)
+      let s = '';
+      while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); }
+      return s;
     }
-
     function perSF(n) { return glaSF && glaSF > 0 && n > 0 ? `$${(n / glaSF).toFixed(2)}` : '—'; }
     function perAC(n) { return glaAC && glaAC > 0 && n > 0 ? `$${Math.round(n / glaAC).toLocaleString()}` : '—'; }
 
-    let currentParent = null;
-    let alt = false;
-
+    // Group leaf rows into sections (by parent GL, preserving order)
+    const leafRows = rows.filter(r => r.task_name || r.budgeted > 0 || r.total_commitment > 0 || r.billed > 0);
+    const sections = [];
     for (const r of leafRows) {
-      const parentKey = r.qb_parent_number || r.qb_account_number || '—';
-
-      // Section header row when parent group changes
-      if (parentKey !== currentParent) {
-        currentParent = parentKey;
-        alt = false;
-        const s = secMap.get(parentKey);
-        const secRow = ws.addRow([
-          parentKey, s.label.toUpperCase(), v(s.budgeted),
-          v(s.remaining_budget), pctVal(s.billed, s.budgeted),
-          v(s.committed), v(s.co_value), v(s.total_commitment), pctVal(s.billed, s.total_commitment),
-          v(s.fixed_charges), v(s.tm_charges), v(s.expense_charges), v(s.billed),
-          v(s.amount_due), v(s.paid),
-          perSF(s.billed), perAC(s.billed),
-          '', '', '', '',
-        ]);
-        secRow.height = 17;
-        secRow.eachCell({ includeEmpty: true }, (cell, col) => {
-          cell.font      = font(true, C.white, 9);
-          cell.fill      = fill(C.darkBg);
-          cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
-          cell.border    = border();
-          styleDataCell(cell, col);
-          cell.font = font(true, C.white, 9); // re-apply after styleDataCell
-        });
+      const key   = r.qb_parent_number || r.qb_account_number || '—';
+      const label = (r.qb_parent_full_name || r.qb_full_name || '').split(':').slice(1).join('').trim()
+                 || r.qb_parent_full_name || r.qb_full_name || '';
+      if (!sections.length || sections[sections.length - 1].key !== key) {
+        sections.push({ key, label, rows: [] });
       }
-
-      // Leaf row
-      const rowBg = alt ? C.leafAlt : C.white;
-      const dataRow = ws.addRow([
-        r.qb_account_number || '—',
-        r.task_name || '',
-        v(r.budgeted),
-        v(r.remaining_budget), pctVal(r.billed, r.budgeted),
-        v(r.committed), v(r.co_value), v(r.total_commitment), pctVal(r.billed, r.total_commitment),
-        v(r.fixed_charges), v(r.tm_charges), v(r.expense_charges), v(r.billed),
-        v(r.amount_due), v(r.paid),
-        perSF(r.billed), perAC(r.billed),
-        r.qb_codes_used || '', r.calculation_method || '', r.consultant || '', r.notes || '',
-      ]);
-      dataRow.height = 15;
-      dataRow.eachCell({ includeEmpty: true }, (cell, col) => {
-        cell.font = font(false, C.black, 9);
-        cell.fill = fill(rowBg);
-        cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 2 : 0, wrapText: col === 2 };
-        styleDataCell(cell, col);
-      });
-      alt = !alt;
+      sections[sections.length - 1].rows.push(r);
     }
 
-    // ── Grand total row ───────────────────────────────────────────────────────
-    const totRemBudget = rows.reduce((s,r) => s+r.remaining_budget, 0);
-    const totFixed     = rows.reduce((s,r) => s+r.fixed_charges, 0);
-    const totTM        = rows.reduce((s,r) => s+r.tm_charges, 0);
-    const totExp       = rows.reduce((s,r) => s+r.expense_charges, 0);
-    const totAmtDue    = totBilled - totPaid;
-    const totCommitted = rows.reduce((s,r) => s+r.committed, 0);
-    const totCO        = rows.reduce((s,r) => s+r.co_value, 0);
+    const secSubtotalRowNums = [];  // row numbers of each section subtotal (for grand total SUM)
+    let alt = false;
 
-    const totRow = ws.addRow([
-      '', 'TOTAL',
-      v(totBudget), v(totRemBudget), pctVal(totBilled, totBudget),
-      v(totCommitted), v(totCO), v(totCommit), pctVal(totBilled, totCommit),
-      v(totFixed), v(totTM), v(totExp), v(totBilled),
-      v(totAmtDue), v(totPaid),
-      perSF(totBilled), perAC(totBilled),
-      '', '', '', '',
-    ]);
+    for (const sec of sections) {
+      // Section label row — no numbers
+      const secRow = ws.addRow([
+        sec.key, sec.label.toUpperCase(),
+        ...Array(NCOLS - 2).fill(null),
+      ]);
+      secRow.height = 17;
+      secRow.eachCell({ includeEmpty: true }, (cell, col) => {
+        cell.font      = font(true, C.white, 9);
+        cell.fill      = fill(C.darkBg);
+        cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
+      });
+
+      const dataStartRow = ws.rowCount + 1;
+
+      // Data rows
+      for (const r of sec.rows) {
+        const rowBg  = alt ? C.leafAlt : C.white;
+        const dataRow = ws.addRow([
+          r.qb_account_number || '—',
+          r.task_name || '',
+          v(r.budgeted),
+          v(r.remaining_budget), pctVal(r.billed, r.budgeted),
+          v(r.committed), v(r.co_value), v(r.total_commitment), pctVal(r.billed, r.total_commitment),
+          v(r.fixed_charges), v(r.tm_charges), v(r.expense_charges), v(r.billed),
+          v(r.amount_due), v(r.paid),
+          perSF(r.billed), perAC(r.billed),
+          r.qb_codes_used || '', r.calculation_method || '', r.consultant || '', r.notes || '',
+        ]);
+        dataRow.height = 15;
+        dataRow.eachCell({ includeEmpty: true }, (cell, col) => {
+          cell.font      = font(false, C.black, 9);
+          cell.fill      = fill(rowBg);
+          cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 2 : 0, wrapText: col === 2 };
+          styleDataCell(cell, col);
+        });
+        alt = !alt;
+      }
+
+      const dataEndRow = ws.rowCount;
+
+      // Section subtotal row with live SUM formulas (thin accounting border)
+      const subRowVals = [];
+      for (let col = 1; col <= NCOLS; col++) {
+        if      (col === 1) subRowVals.push(null);
+        else if (col === 2) subRowVals.push(`${sec.key} — Total`);
+        else if (MONEY_COLS.includes(col))
+          subRowVals.push({ formula: `SUM(${cl(col)}${dataStartRow}:${cl(col)}${dataEndRow})` });
+        else    subRowVals.push(null);
+      }
+      const subRow = ws.addRow(subRowVals);
+      subRow.height = 16;
+      const subRowNum = ws.rowCount;
+      secSubtotalRowNums.push(subRowNum);
+      subRow.eachCell({ includeEmpty: true }, (cell, col) => {
+        cell.font      = font(true, C.black, 9);
+        cell.fill      = fill(C.leafAlt);
+        cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
+        styleDataCell(cell, col);
+        cell.font   = font(true, C.black, 9);   // re-apply after styleDataCell resets it
+        cell.border = { ...border(), top: { style: 'thin', color: { argb: 'FF000000' } } };
+      });
+    }
+
+    // ── Grand total — SUM of all section subtotals, double top border ─────────
+    const grandRowVals = [];
+    for (let col = 1; col <= NCOLS; col++) {
+      if      (col === 1) grandRowVals.push(null);
+      else if (col === 2) grandRowVals.push('TOTAL');
+      else if (MONEY_COLS.includes(col)) {
+        const refs = secSubtotalRowNums.map(rn => `${cl(col)}${rn}`).join(',');
+        grandRowVals.push({ formula: `SUM(${refs})` });
+      }
+      else grandRowVals.push(null);
+    }
+    const totRow = ws.addRow(grandRowVals);
     totRow.height = 20;
     totRow.eachCell({ includeEmpty: true }, (cell, col) => {
       cell.font      = font(true, C.white, 10);
       cell.fill      = fill(C.darkBg);
       cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
-      cell.border    = { top: { style: 'double', color: { argb: 'FF' + C.white } }, bottom: { style: 'medium', color: { argb: 'FF' + C.white } } };
-      if (MONEY_COLS.includes(col)) { cell.numFmt = USD0; if (cell.value === 0) cell.value = null; }
-      if (PCT_COLS.includes(col))   { cell.numFmt = PCT;  if (cell.value === 0) cell.value = null; }
+      styleDataCell(cell, col);
+      cell.font   = font(true, C.white, 10);
+      cell.border = { top: { style: 'double', color: { argb: 'FF' + C.white } }, bottom: { style: 'medium', color: { argb: 'FF' + C.white } } };
     });
 
     // ── Column widths ─────────────────────────────────────────────────────────

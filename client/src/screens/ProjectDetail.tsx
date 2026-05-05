@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../store/appStore';
@@ -15,6 +15,11 @@ export default function ProjectDetail() {
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState({ name: '', notes: '' });
   const [err, setErr] = useState('');
+
+  // Inline rename state
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   const { data: project, isLoading: loadingProject } = useQuery({
     queryKey: ['project', id],
@@ -37,6 +42,39 @@ export default function ProjectDetail() {
     },
     onError: (e: any) => setErr(e.message),
   });
+
+  const rename = useMutation({
+    mutationFn: ({ phaseId, name }: { phaseId: number; name: string }) =>
+      api.updatePhase(phaseId, { name }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['phases', id] });
+      setEditingId(null);
+    },
+  });
+
+  const del = useMutation({
+    mutationFn: (phaseId: number) => api.deletePhase(phaseId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['phases', id] }),
+  });
+
+  function startRename(ph: any, e: React.MouseEvent) {
+    e.stopPropagation();
+    setEditingId(ph.id);
+    setEditingName(ph.name);
+    setTimeout(() => renameInputRef.current?.select(), 0);
+  }
+
+  function commitRename(phaseId: number) {
+    const trimmed = editingName.trim();
+    if (!trimmed) { setEditingId(null); return; }
+    rename.mutate({ phaseId, name: trimmed });
+  }
+
+  function deletePhase(ph: any, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!window.confirm(`Delete "${ph.name}"? This cannot be undone.`)) return;
+    del.mutate(ph.id);
+  }
 
   function openPhase(phaseId: number) {
     setActivePhase(phaseId);
@@ -82,14 +120,15 @@ export default function ProjectDetail() {
               <th className={styles.th}>Budgeted</th>
               <th className={styles.th}>Invoiced</th>
               <th className={styles.th}>% Used</th>
+              <th className={styles.th} />
             </tr>
           </thead>
           <tbody>
             {(loadingPhases) && (
-              <tr><td colSpan={8} className={styles.empty}>Loading…</td></tr>
+              <tr><td colSpan={9} className={styles.empty}>Loading…</td></tr>
             )}
             {!loadingPhases && (phases as any[]).length === 0 && (
-              <tr><td colSpan={8} className={styles.empty}>
+              <tr><td colSpan={9} className={styles.empty}>
                 No phases yet. <button className={styles.inlineBtn} onClick={() => setShowNew(true)}>Add Phase 1 →</button>
               </td></tr>
             )}
@@ -97,11 +136,31 @@ export default function ProjectDetail() {
               const pct = ph.budgeted_total > 0
                 ? Math.round((ph.invoiced_total || 0) / ph.budgeted_total * 100)
                 : null;
+              const isEditing = editingId === ph.id;
               return (
-                <tr key={ph.id} className={styles.row} onClick={() => openPhase(ph.id)}>
+                <tr
+                  key={ph.id}
+                  className={styles.row}
+                  onClick={() => !isEditing && openPhase(ph.id)}
+                >
                   <td className={`${styles.td} ${styles.num} ${styles.muted}`}>{ph.phase_number ?? '—'}</td>
-                  <td className={styles.td}>
-                    <span className={styles.phaseName}>{ph.name}</span>
+                  <td className={styles.td} onClick={e => !isEditing && startRename(ph, e)}>
+                    {isEditing ? (
+                      <input
+                        ref={renameInputRef}
+                        className={styles.renameInput}
+                        value={editingName}
+                        onChange={e => setEditingName(e.target.value)}
+                        onBlur={() => commitRename(ph.id)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); commitRename(ph.id); }
+                          if (e.key === 'Escape') setEditingId(null);
+                        }}
+                        onClick={e => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span className={styles.phaseName} title="Click to rename">{ph.name}</span>
+                    )}
                   </td>
                   <td className={styles.td}>
                     <span className={`${styles.statusDot} ${styles[`dot_${ph.status}`]}`} />
@@ -117,6 +176,15 @@ export default function ProjectDetail() {
                   </td>
                   <td className={`${styles.td} ${styles.num} ${styles.right} ${pct !== null && pct >= 100 ? styles.over : pct !== null && pct >= 75 ? styles.warn : ''}`}>
                     {pct !== null ? `${pct}%` : '—'}
+                  </td>
+                  <td className={`${styles.td} ${styles.actionsTd}`}>
+                    <button
+                      className={styles.deleteBtn}
+                      onClick={e => deletePhase(ph, e)}
+                      title="Delete phase"
+                    >
+                      ✕
+                    </button>
                   </td>
                 </tr>
               );

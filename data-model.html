@@ -13,17 +13,16 @@
     line-height: 1.55;
     padding: 40px 24px 80px;
   }
-  .page { max-width: 980px; margin: 0 auto; }
+  .page { max-width: 1020px; margin: 0 auto; }
 
   h1 { font-size: 28px; font-weight: 800; color: #1a1410; letter-spacing: -0.02em; }
-  h2 { font-size: 17px; font-weight: 700; color: #1a1410; margin-bottom: 12px; letter-spacing: -0.01em; }
-  h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #8a7a72; margin-bottom: 8px; }
-  p  { font-size: 14px; color: #5a4e48; }
+  h2 { font-size: 17px; font-weight: 700; color: #1a1410; margin-bottom: 14px; letter-spacing: -0.01em; }
+  h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #8a7a72; margin-bottom: 10px; }
+  p  { font-size: 14px; color: #5a4e48; line-height: 1.6; }
 
   .subtitle { font-size: 15px; color: #7a6e68; margin-top: 6px; margin-bottom: 40px; }
-
-  /* ── Section ── */
-  .section { margin-bottom: 48px; }
+  .section { margin-bottom: 52px; }
+  .divider { height: 1px; background: #e0d8d0; margin: 40px 0; }
 
   /* ── Hierarchy tree ── */
   .tree {
@@ -32,36 +31,119 @@
     border-radius: 12px;
     padding: 32px 28px;
   }
-  .tree-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 0;
-    margin-bottom: 0;
-  }
   .tree-node {
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 16px;
+    padding: 9px 16px;
     border-radius: 8px;
     font-size: 14px;
     font-weight: 600;
   }
   .node-project  { background: #1a1410; color: #fff; font-size: 15px; font-weight: 800; }
+  .node-phase    { background: #2a5298; color: #fff; }
+  .node-pbl      { background: #f0f5ff; color: #2a5298; border: 1.5px solid #b8ccf0; }
   .node-contract { background: #c4522a; color: #fff; }
   .node-co       { background: #e8921a; color: #fff; }
-  .node-charge   { background: #fff7f0; color: #c4522a; border: 1.5px solid #f0cdb8; }
   .node-invoice  { background: #fffbf5; color: #1a1410; border: 1.5px solid #e0d8d0; }
-  .node-budget   { background: #f0f7ff; color: #1e4a8a; border: 1.5px solid #c0d8f8; }
+  .node-qb       { background: #f0fff4; color: #1a6a3a; border: 1.5px solid #a0d8b0; }
 
-  .tree-indent { padding-left: 28px; border-left: 2px solid #e0d8d0; margin-left: 20px; margin-top: 0; }
-  .tree-branch { padding: 6px 0; }
-  .connector { color: #c0b4ac; font-size: 13px; font-weight: 400; margin-left: 6px; }
+  .tree-indent { padding-left: 28px; border-left: 2px solid #e0d8d0; margin-left: 20px; }
+  .tree-branch { padding: 7px 0; }
+  .connector { color: #a09088; font-size: 13px; margin-left: 8px; }
+
+  /* ── Budget data flow table ── */
+  .flow-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border: 1px solid #e0d8d0;
+    border-radius: 12px;
+    overflow: hidden;
+    font-size: 13px;
+  }
+  .flow-table th {
+    background: #1a1410;
+    color: #fff;
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    white-space: nowrap;
+  }
+  .flow-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #f0e8e0;
+    vertical-align: top;
+  }
+  .flow-table tr:last-child td { border-bottom: none; }
+  .flow-table tr:nth-child(even) td { background: #faf7f4; }
+  .col-label {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #c4522a;
+    white-space: nowrap;
+  }
+  .scope-badge {
+    display: inline-block;
+    font-size: 10px; font-weight: 700;
+    padding: 1px 7px; border-radius: 10px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+  .scope-id    { background: #f0faf0; color: #2a7a3a; border: 1px solid #a0d8b0; }
+  .scope-phase { background: #f0f5ff; color: #2a5298; border: 1px solid #b8ccf0; }
+  .scope-gl    { background: #fff8e0; color: #9a6a00; border: 1px solid #f0d888; }
+
+  /* ── Allocation cascade ── */
+  .cascade {
+    background: #fff;
+    border: 1px solid #e0d8d0;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .cascade-header {
+    background: #f5f0ec;
+    padding: 14px 20px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #2a2320;
+    border-bottom: 1px solid #e0d8d0;
+  }
+  .cascade-row {
+    display: grid;
+    grid-template-columns: 56px 1fr 200px;
+    gap: 0;
+    border-bottom: 1px solid #f0e8e0;
+    align-items: stretch;
+  }
+  .cascade-row:last-child { border-bottom: none; }
+  .cascade-path {
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 800;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .path-1 { background: #2a5298; }
+  .path-2 { background: #c4522a; }
+  .path-3 { background: #7a6a62; }
+  .path-4 { background: #a09088; }
+  .cascade-body { padding: 12px 16px; border-left: 1px solid #f0e8e0; border-right: 1px solid #f0e8e0; }
+  .cascade-title { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+  .cascade-desc  { font-size: 12px; color: #5a4e48; }
+  .cascade-code  { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; background: #f5f0ec; padding: 2px 6px; border-radius: 4px; color: #2a2320; margin-top: 4px; display: inline-block; }
+  .cascade-note  { padding: 12px 14px; font-size: 12px; color: #7a6e68; display: flex; align-items: center; }
 
   /* ── Entity cards ── */
   .entity-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
     gap: 16px;
   }
   .entity-card {
@@ -85,7 +167,7 @@
   }
   .entity-name { font-size: 14px; font-weight: 700; }
   .entity-desc { font-size: 12px; color: #7a6e68; margin-top: 1px; }
-  .entity-body { padding: 12px 16px; }
+  .entity-body { padding: 10px 16px; }
   .field-row {
     display: flex;
     gap: 8px;
@@ -95,8 +177,8 @@
     align-items: baseline;
   }
   .field-row:last-child { border-bottom: none; }
-  .field-name { font-weight: 600; color: #2a2320; flex: 0 0 130px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11.5px; }
-  .field-desc { color: #5a4e48; flex: 1; }
+  .field-name { font-weight: 600; color: #2a2320; flex: 0 0 155px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; }
+  .field-desc { color: #5a4e48; flex: 1; font-size: 12.5px; }
   .tag {
     display: inline-block;
     font-size: 10px; font-weight: 700;
@@ -104,19 +186,29 @@
     text-transform: uppercase; letter-spacing: 0.06em;
     flex-shrink: 0;
   }
-  .tag-key    { background: #fff0ea; color: #c4522a; }
-  .tag-link   { background: #f0f0ff; color: #5050c0; }
-  .tag-auto   { background: #f0faf0; color: #2a7a3a; }
+  .tag-pk   { background: #fff0ea; color: #c4522a; }
+  .tag-fk   { background: #f0f0ff; color: #5050c0; }
+  .tag-auto { background: #f0faf0; color: #2a7a3a; }
+
+  /* ── Isolation callout ── */
+  .callout {
+    background: #f0f5ff;
+    border: 1.5px solid #b8ccf0;
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+  }
+  .callout-title { font-size: 13px; font-weight: 800; color: #2a5298; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .callout p { color: #2a3a5a; font-size: 13.5px; }
 
   /* ── Approval flow ── */
   .flow {
     display: flex;
     align-items: center;
-    gap: 0;
     background: #fff;
     border: 1px solid #e0d8d0;
     border-radius: 12px;
-    padding: 28px 32px;
+    padding: 24px 28px;
     flex-wrap: wrap;
     gap: 4px;
   }
@@ -124,21 +216,21 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
-    padding: 14px 20px;
+    gap: 5px;
+    padding: 12px 18px;
     border-radius: 8px;
-    min-width: 130px;
+    min-width: 110px;
     text-align: center;
   }
-  .flow-step-pending   { background: #f5f0ec; border: 1.5px solid #e0d8d0; }
-  .flow-step-pm        { background: #fffbf0; border: 1.5px solid #f0d888; }
-  .flow-step-partner   { background: #fff7ee; border: 1.5px solid #f0c888; }
-  .flow-step-approved  { background: #f0faf2; border: 1.5px solid #a0e0b0; }
-  .flow-step-paid      { background: #f0f7ff; border: 1.5px solid #a0c8f8; }
-  .flow-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #7a6e68; }
-  .flow-name  { font-size: 14px; font-weight: 700; }
-  .flow-role  { font-size: 12px; color: #7a6e68; }
-  .flow-arrow { font-size: 20px; color: #c0b4ac; padding: 0 4px; flex-shrink: 0; }
+  .flow-step-pending  { background: #f5f0ec; border: 1.5px solid #e0d8d0; }
+  .flow-step-pm       { background: #fffbf0; border: 1.5px solid #f0d888; }
+  .flow-step-partner  { background: #fff7ee; border: 1.5px solid #f0c888; }
+  .flow-step-approved { background: #f0faf2; border: 1.5px solid #a0e0b0; }
+  .flow-step-paid     { background: #f0f7ff; border: 1.5px solid #a0c8f8; }
+  .flow-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #7a6e68; }
+  .flow-name  { font-size: 13px; font-weight: 700; }
+  .flow-role  { font-size: 11px; color: #7a6e68; }
+  .flow-arrow { font-size: 20px; color: #c0b4ac; padding: 0 2px; flex-shrink: 0; }
 
   /* ── Invoice types ── */
   .type-grid {
@@ -162,505 +254,520 @@
   .type-badge-fixed   { background: #fff0ea; color: #c4522a; border: 1px solid #f0cdb8; }
   .type-badge-tm      { background: #fff8e0; color: #9a6a00; border: 1px solid #f0d888; }
   .type-badge-expense { background: #f0f7ff; color: #1e5aaa; border: 1px solid #c0d8f8; }
-  .type-title { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+  .type-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
   .type-desc  { font-size: 13px; color: #5a4e48; line-height: 1.5; }
   .type-rule  { margin-top: 10px; padding: 8px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
   .type-rule-fixed   { background: #fff0ea; color: #c4522a; }
   .type-rule-tm      { background: #fff8e0; color: #9a6a00; }
   .type-rule-expense { background: #f0f7ff; color: #1e5aaa; }
 
-  /* ── Math table ── */
-  .math-table {
-    background: #fff;
-    border: 1px solid #e0d8d0;
-    border-radius: 12px;
-    overflow: hidden;
-    width: 100%;
+  /* ── Print ── */
+  @media print {
+    body { background: #fff; padding: 0; font-size: 12px; }
+    .page { max-width: 100%; }
+    .section { break-inside: avoid; page-break-inside: avoid; }
+    .tree, .flow-table, .cascade, .entity-card, .callout { break-inside: avoid; }
+    h1 { font-size: 22px; }
+    h2 { font-size: 15px; }
+    .entity-grid { grid-template-columns: repeat(2, 1fr); }
+    .type-grid   { grid-template-columns: repeat(3, 1fr); }
   }
-  .math-table table { width: 100%; border-collapse: collapse; }
-  .math-table th {
-    background: #2a2320; color: #fff;
-    padding: 10px 18px; text-align: left;
-    font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
-  }
-  .math-table td {
-    padding: 11px 18px;
-    font-size: 13.5px;
-    border-bottom: 1px solid #f0e8e0;
-    vertical-align: top;
-  }
-  .math-table tr:last-child td { border-bottom: none; }
-  .math-table tr:nth-child(even) td { background: #faf7f4; }
-  .math-label { font-weight: 700; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: #c4522a; }
-  .math-formula { color: #2a2320; }
-  .math-note  { color: #7a6e68; font-size: 12px; margin-top: 3px; }
-
-  /* ── Roles table ── */
-  .roles-table {
-    background: #fff;
-    border: 1px solid #e0d8d0;
-    border-radius: 12px;
-    overflow: hidden;
-    width: 100%;
-  }
-  .roles-table table { width: 100%; border-collapse: collapse; }
-  .roles-table th {
-    background: #f5f0ec; color: #5a4e48;
-    padding: 9px 18px; text-align: left;
-    font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
-  }
-  .roles-table td {
-    padding: 11px 18px;
-    font-size: 13.5px;
-    border-bottom: 1px solid #f0e8e0;
-  }
-  .roles-table tr:last-child td { border-bottom: none; }
-  .role-tag {
-    display: inline-block; font-size: 11px; font-weight: 700;
-    padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.06em;
-  }
-  .role-pm      { background: #f0f7ff; color: #1e5aaa; border: 1px solid #c0d8f8; }
-  .role-partner { background: #fff8e0; color: #9a6a00; border: 1px solid #f0d888; }
-  .role-admin   { background: #fff0ea; color: #c4522a; border: 1px solid #f0cdb8; }
-
-  .divider { height: 1px; background: #e0d8d0; margin: 36px 0; }
 
   @media (max-width: 640px) {
-    .type-grid { grid-template-columns: 1fr; }
+    .type-grid  { grid-template-columns: 1fr; }
     .entity-grid { grid-template-columns: 1fr; }
     .flow { flex-direction: column; align-items: flex-start; }
-    .flow-arrow { transform: rotate(90deg); }
+    .cascade-row { grid-template-columns: 42px 1fr; }
+    .cascade-note { display: none; }
   }
 </style>
 </head>
 <body>
 <div class="page">
 
-  <h1>ActiveAcq — Data Model</h1>
-  <p class="subtitle">How projects, contracts, and charges are structured in the system</p>
+  <h1>ActiveAcq — Budget Data Model</h1>
+  <p class="subtitle">How projects, phases, and financial data are structured — and exactly what feeds into each budget column</p>
 
-  <!-- ── HIERARCHY ────────────────────────────────────────────────────────── -->
+  <!-- ── 1. CORE HIERARCHY ── -->
   <div class="section">
-    <h2>How everything fits together</h2>
-    <p style="margin-bottom:16px">Everything flows down from a <strong>Project</strong>. Each project has one or more <strong>Contracts</strong> with vendors. Each contract can have change orders, T&amp;M charges, expenses, and invoices.</p>
+    <h2>1 · Core hierarchy</h2>
+    <p style="margin-bottom:18px">Every dollar in the system traces back through this chain. A <strong>Phase</strong> is the atomic unit of budget tracking — it is completely isolated from every other phase in the database.</p>
     <div class="tree">
 
-      <div style="margin-bottom:16px">
+      <div style="margin-bottom:14px">
         <span class="tree-node node-project">🏗 Project</span>
-        <span class="connector">— e.g. "Oaktrail and Main Estates"</span>
+        <span class="connector">e.g. "Madison Marquette"</span>
       </div>
 
       <div class="tree-indent">
 
         <div class="tree-branch">
-          <span class="tree-node node-budget">📊 Budget Lines</span>
-          <span class="connector">— internal budget by QuickBooks category (set once per project)</span>
+          <span class="tree-node node-phase">📁 Phase</span>
+          <span class="connector">e.g. "Phase 1 — Entitlement" · each phase has its own silo of budget rows, contracts, and invoices</span>
         </div>
 
-        <div class="tree-branch" style="margin-top:10px">
-          <span class="tree-node node-contract">📋 Contract</span>
-          <span class="connector">— one per vendor, e.g. "Bright View Engineering — $6,300 fixed"</span>
-        </div>
-
-        <div class="tree-indent" style="margin-top:0">
+        <div class="tree-indent">
 
           <div class="tree-branch">
-            <span class="tree-node node-co">🔄 Change Orders</span>
-            <span class="connector">— formal scope/cost changes; each adds to the commitment</span>
+            <span class="tree-node node-pbl">📊 Phase Budget Lines</span>
+            <span class="connector">one row per task, each linked to a QB GL account · the rows of the budget grid</span>
           </div>
 
-          <div class="tree-branch">
-            <span class="tree-node node-charge">⏱ T&amp;M Charges</span>
-            <span class="connector">— individual time entries (hours × rate); tracks open-ended exposure</span>
+          <div class="tree-branch" style="margin-top:6px">
+            <span class="tree-node node-contract">📋 Contracts</span>
+            <span class="connector">one per vendor agreement · assigned to one or more budget lines</span>
           </div>
 
-          <div class="tree-branch">
-            <span class="tree-node node-charge">🧾 Expenses</span>
-            <span class="connector">— reimbursables: travel, tolls, hotels, copies, etc.</span>
-          </div>
-
-          <div class="tree-branch">
-            <span class="tree-node node-invoice">💵 Invoices</span>
-            <span class="connector">— actual billing documents from the vendor (3 types — see below)</span>
-          </div>
-
-          <div class="tree-indent" style="margin-top:0">
-            <div class="tree-branch" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-              <span style="font-size:12px;font-weight:700;background:#fff0ea;color:#c4522a;padding:4px 10px;border-radius:6px;border:1px solid #f0cdb8">Fixed Scope</span>
-              <span style="font-size:12px;font-weight:700;background:#fff8e0;color:#9a6a00;padding:4px 10px;border-radius:6px;border:1px solid #f0d888">T&amp;M</span>
-              <span style="font-size:12px;font-weight:700;background:#f0f7ff;color:#1e5aaa;padding:4px 10px;border-radius:6px;border:1px solid #c0d8f8">Expense</span>
-              <span class="connector" style="margin-left:0">— only Fixed invoices count against the contract value</span>
+          <div class="tree-indent">
+            <div class="tree-branch">
+              <span class="tree-node node-co">🔄 Change Orders</span>
+              <span class="connector">formal scope/cost changes · with per-line GL + task assignment</span>
+            </div>
+            <div class="tree-branch">
+              <span class="tree-node node-invoice">💵 Invoices</span>
+              <span class="connector">billing documents · Fixed / T&amp;M / Expense · with per-line GL + task assignment</span>
             </div>
           </div>
 
         </div>
 
+        <div class="tree-branch" style="margin-top:8px">
+          <span class="tree-node node-qb">🏷 QB Accounts (Chart of Accounts)</span>
+          <span class="connector">shared GL code hierarchy · parent accounts group budget lines across all phases</span>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2. PHASE ISOLATION ── -->
+  <div class="section">
+    <h2>2 · Phase isolation — the golden rule</h2>
+    <div class="callout">
+      <div class="callout-title">Each phase is its own project</div>
+      <p>No invoice, contract, or change order from one phase can appear in another phase's budget — ever. Every query that aggregates financial data is scoped by <code style="font-size:12px;background:#dce8ff;padding:1px 5px;border-radius:3px">phase_id</code> or by <code style="font-size:12px;background:#dce8ff;padding:1px 5px;border-radius:3px">phase_budget_line_id</code> (which is globally unique and inherently phase-specific). GL-code-driven paths carry an explicit <code style="font-size:12px;background:#dce8ff;padding:1px 5px;border-radius:3px">inv.phase_id = pbl.phase_id</code> guard so that matching by account number never bleeds across phases.</p>
+    </div>
+    <p style="font-size:13px; color:#7a6e68">There are three ways a record is scoped to a phase:<br>
+    <strong>① By pbl.id</strong> — <code style="font-size:11px;background:#f5f0ec;padding:1px 5px;border-radius:3px">phase_budget_line_id = pbl.id</code> · pbl.id is a globally unique integer; it can only belong to one phase.<br>
+    <strong>② By phase_id directly</strong> — <code style="font-size:11px;background:#f5f0ec;padding:1px 5px;border-radius:3px">invoices.phase_id = phases.id</code> · set when the invoice is uploaded.<br>
+    <strong>③ Via contract chain</strong> — <code style="font-size:11px;background:#f5f0ec;padding:1px 5px;border-radius:3px">contracts.phase_id = phases.id</code> · change orders inherit this via their parent contract.</p>
+  </div>
+
+  <!-- ── 3. BUDGET GRID COLUMNS ── -->
+  <div class="section">
+    <h2>3 · Budget grid — where each column's number comes from</h2>
+    <table class="flow-table">
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>What it represents</th>
+          <th>Source table(s)</th>
+          <th>Scoping mechanism</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><div class="col-label">BUDGETED</div></td>
+          <td>The planned spend for this task line</td>
+          <td><code>phase_budget_lines.budgeted_amount</code></td>
+          <td><span class="scope-badge scope-id">pbl row itself</span></td>
+        </tr>
+        <tr>
+          <td><div class="col-label">CONTRACTED</div></td>
+          <td>Sum of active contract line items assigned here (or full contract value if no line items)</td>
+          <td><code>contracts</code> + <code>contract_line_items</code></td>
+          <td><span class="scope-badge scope-id">phase_budget_line_id = pbl.id</span></td>
+        </tr>
+        <tr>
+          <td><div class="col-label">COS</div></td>
+          <td>Change order value added to this line (approved COs only)</td>
+          <td><code>change_orders</code> + <code>change_order_line_items</code></td>
+          <td><span class="scope-badge scope-id">pbl.id</span> or <span class="scope-badge scope-phase">phase via contract</span> — see cascade below</td>
+        </tr>
+        <tr>
+          <td><div class="col-label">TOTAL COMMIT</div></td>
+          <td>Contracted + COS</td>
+          <td>Computed from the two columns above</td>
+          <td>Inherits both</td>
+        </tr>
+        <tr>
+          <td><div class="col-label">REM. BUDGET</div></td>
+          <td>How much budget headroom is left</td>
+          <td>Budgeted − Total Commitment</td>
+          <td>Computed</td>
+        </tr>
+        <tr>
+          <td><div class="col-label">FIXED</div></td>
+          <td>Fixed-scope invoice charges billed to this line</td>
+          <td><code>invoice_line_items</code> (billing_type = 'fixed')</td>
+          <td><span class="scope-badge scope-id">pbl.id</span> or <span class="scope-badge scope-phase">phase_id + GL code</span> — see cascade</td>
+        </tr>
+        <tr>
+          <td><div class="col-label">T&amp;M</div></td>
+          <td>Time &amp; Materials invoice charges billed here</td>
+          <td><code>invoice_line_items</code> (billing_type = 'tm')</td>
+          <td>Same cascade as FIXED</td>
+        </tr>
+        <tr>
+          <td><div class="col-label">EXPENSE</div></td>
+          <td>Reimbursable expense charges billed here</td>
+          <td><code>invoice_line_items</code> (billing_type = 'expense')</td>
+          <td>Same cascade as FIXED</td>
+        </tr>
+        <tr>
+          <td><div class="col-label">BILLED</div></td>
+          <td>Total invoiced to date (all types combined)</td>
+          <td><code>invoice_line_items</code> (all billing types)</td>
+          <td>Same cascade</td>
+        </tr>
+        <tr>
+          <td><div class="col-label">AMT DUE</div></td>
+          <td>Billed but not yet paid</td>
+          <td>Billed − Paid</td>
+          <td>Computed</td>
+        </tr>
+        <tr>
+          <td><div class="col-label">PAID</div></td>
+          <td>Cash actually sent (invoices in Paid status only)</td>
+          <td><code>invoices</code> (status = 'paid')</td>
+          <td>Same cascade, status = 'paid'</td>
+        </tr>
+        <tr>
+          <td><div class="col-label">$/SF · $/AC</div></td>
+          <td>Unit cost metrics</td>
+          <td>BILLED ÷ project area from project settings</td>
+          <td>Computed</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="margin-top:10px; font-size:12px; color:#7a6e68">The <strong>QB Source</strong> tab replaces FIXED/T&amp;M/EXPENSE/BILLED/PAID with numbers from <code>qb_transactions</code> (imported from QuickBooks), scoped to the phase by <code>qb_transactions.phase_id = $1</code>. The <strong>Compare</strong> tab shows both side by side.</p>
+  </div>
+
+  <!-- ── 4. INVOICE ALLOCATION CASCADE ── -->
+  <div class="section">
+    <h2>4 · Invoice allocation cascade — how an invoice line item finds its budget row</h2>
+    <p style="margin-bottom:16px">When an invoice is saved, each line item is matched to a budget row using the following priority order. The first path that matches wins. The cascade applies identically to Fixed, T&amp;M, Expense, Billed, and Paid columns.</p>
+    <div class="cascade">
+      <div class="cascade-header">Invoice Line Item → Phase Budget Line matching (runs for every invoice_line_items row)</div>
+
+      <div class="cascade-row">
+        <div class="cascade-path path-1">P1</div>
+        <div class="cascade-body">
+          <div class="cascade-title">Explicit task assignment</div>
+          <div class="cascade-desc">The line item has been directly assigned to a specific budget row by Richard or the PM via the Edit modal.</div>
+          <div class="cascade-code">ili.phase_budget_line_id = pbl.id</div>
+        </div>
+        <div class="cascade-note"><span class="scope-badge scope-id">Scoped by pbl.id</span></div>
+      </div>
+
+      <div class="cascade-row">
+        <div class="cascade-path path-2">P2</div>
+        <div class="cascade-body">
+          <div class="cascade-title">GL code match (unique GL)</div>
+          <div class="cascade-desc">The line item has a QB GL account assigned but no explicit budget row. It lands on the one budget row in this phase that uses the same GL code — only when that GL code is unique in this phase.</div>
+          <div class="cascade-code">ili.qb_account_id = pbl.qb_account_id AND inv.phase_id = pbl.phase_id AND no other pbl in this phase shares the same GL code</div>
+        </div>
+        <div class="cascade-note"><span class="scope-badge scope-phase">Scoped by phase_id + GL</span></div>
+      </div>
+
+      <div class="cascade-row">
+        <div class="cascade-path path-3">P3</div>
+        <div class="cascade-body">
+          <div class="cascade-title">Legacy: invoice-level assignment (no line item GL)</div>
+          <div class="cascade-desc">Line items that predate the current model — they have neither a pbl assignment nor a GL code. The system falls back to the parent invoice's own phase_budget_line_id.</div>
+          <div class="cascade-code">ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL AND inv.phase_budget_line_id = pbl.id</div>
+        </div>
+        <div class="cascade-note"><span class="scope-badge scope-id">Scoped by pbl.id</span><br><span style="font-size:10px;color:#9a8a82;margin-top:4px;display:block">Transitional — disappears as invoices are re-saved</span></div>
+      </div>
+
+      <div class="cascade-row">
+        <div class="cascade-path path-4">P4</div>
+        <div class="cascade-body">
+          <div class="cascade-title">Legacy: invoices with no line items at all</div>
+          <div class="cascade-desc">Old invoices imported before the line-item model existed. The whole invoice amount lands on the budget row that the invoice itself points to.</div>
+          <div class="cascade-code">inv.phase_budget_line_id = pbl.id AND no invoice_line_items rows exist for this invoice</div>
+        </div>
+        <div class="cascade-note"><span class="scope-badge scope-id">Scoped by pbl.id</span><br><span style="font-size:10px;color:#9a8a82;margin-top:4px;display:block">Transitional — disappears as invoices are re-saved</span></div>
+      </div>
+
+    </div>
+    <p style="margin-top:12px; font-size:13px; color:#5a4e48">
+      <strong>Shared-GL "General — Unassigned" rows:</strong> When the same GL code is used by 2+ budget rows in a phase (e.g. 1720.01 has both "Concept Plans" and "Site Plans"), Path 2 does not apply. Instead, unassigned line items for that GL code appear as a synthetic <em>General — Unassigned</em> row. As Richard edits each item and assigns it to a specific task (Path 1), the General row burns down toward zero.
+    </p>
+  </div>
+
+  <!-- ── 5. CHANGE ORDER CASCADE ── -->
+  <div class="section">
+    <h2>5 · Change order allocation cascade</h2>
+    <div class="cascade">
+      <div class="cascade-header">Change Order Line Item → Phase Budget Line matching</div>
+
+      <div class="cascade-row">
+        <div class="cascade-path path-1">P1</div>
+        <div class="cascade-body">
+          <div class="cascade-title">Explicit task assignment</div>
+          <div class="cascade-desc">CO line item explicitly assigned to a specific budget row in the edit modal.</div>
+          <div class="cascade-code">col.phase_budget_line_id = pbl.id</div>
+        </div>
+        <div class="cascade-note"><span class="scope-badge scope-id">Scoped by pbl.id</span></div>
+      </div>
+
+      <div class="cascade-row">
+        <div class="cascade-path path-2">P2</div>
+        <div class="cascade-body">
+          <div class="cascade-title">GL code match (unique GL)</div>
+          <div class="cascade-desc">CO line item has a GL code but no pbl assignment. Matches to the unique budget row for that GL code in this phase. Scoped via the parent contract's phase_id.</div>
+          <div class="cascade-code">col.qb_account_id = pbl.qb_account_id AND contracts.phase_id = pbl.phase_id AND GL is unique in phase</div>
+        </div>
+        <div class="cascade-note"><span class="scope-badge scope-phase">Scoped via contract → phase_id</span></div>
+      </div>
+
+      <div class="cascade-row">
+        <div class="cascade-path path-3">P3</div>
+        <div class="cascade-body">
+          <div class="cascade-title">Legacy: CO with no line items</div>
+          <div class="cascade-desc">Old change orders that were saved as a single amount with no line items. Fall back to the parent contract's budget row assignment.</div>
+          <div class="cascade-code">c.phase_budget_line_id = pbl.id AND no change_order_line_items exist</div>
+        </div>
+        <div class="cascade-note"><span class="scope-badge scope-id">Scoped by pbl.id</span></div>
       </div>
 
     </div>
   </div>
 
-  <!-- ── INVOICE TYPES ──────────────────────────────────────────────────── -->
+  <!-- ── 6. INVOICE TYPES ── -->
   <div class="section">
-    <h2>Invoice types — what counts against what</h2>
+    <h2>6 · Invoice types — what counts against what</h2>
     <div class="type-grid">
-
       <div class="type-card">
         <div class="type-badge type-badge-fixed">Fixed Scope</div>
         <div class="type-title">Lump-sum billing</div>
-        <div class="type-desc">The vendor is invoicing for work that was defined and priced in the original contract (or a change order). This is work you agreed to pay a set amount for.</div>
-        <div class="type-rule type-rule-fixed">✓ Counts against the contract's committed value.<br>Triggers an overspend warning if it would exceed the remaining balance.</div>
+        <div class="type-desc">Vendor invoicing for work scoped in the original contract or a change order. You agreed to pay a set amount for a defined deliverable.</div>
+        <div class="type-rule type-rule-fixed">Counts against contract committed value. Triggers overspend warning if it exceeds the remaining balance.</div>
       </div>
-
       <div class="type-card">
         <div class="type-badge type-badge-tm">T&amp;M</div>
         <div class="type-title">Time &amp; Materials billing</div>
-        <div class="type-desc">The vendor is invoicing for hours worked at an agreed rate — typically for open-ended tasks like engineering meetings, coordination, or inspection time.</div>
-        <div class="type-rule type-rule-tm">✓ Does NOT erode the fixed contract value.<br>Shows as additional project cost beyond the committed scope.</div>
+        <div class="type-desc">Vendor invoicing hours at an agreed rate — for open-ended tasks like engineering meetings, coordination, or inspection time.</div>
+        <div class="type-rule type-rule-tm">Does NOT erode the fixed contract value. Shows as additional project cost beyond committed scope.</div>
       </div>
-
       <div class="type-card">
         <div class="type-badge type-badge-expense">Expense</div>
         <div class="type-title">Reimbursable expenses</div>
-        <div class="type-desc">The vendor is billing back costs they incurred on your behalf — mileage, tolls, hotel, printing, etc. These are pass-through costs, not contracted work.</div>
-        <div class="type-rule type-rule-expense">✓ Does NOT erode the fixed contract value.<br>Shows as additional project cost alongside T&amp;M.</div>
+        <div class="type-desc">Vendor billing back pass-through costs: mileage, tolls, hotels, printing, etc.</div>
+        <div class="type-rule type-rule-expense">Does NOT erode the fixed contract value. Shows as additional project cost alongside T&amp;M.</div>
       </div>
-
     </div>
   </div>
 
-  <!-- ── APPROVAL FLOW ─────────────────────────────────────────────────── -->
+  <!-- ── 7. APPROVAL FLOW ── -->
   <div class="section">
-    <h2>Approval chain — applies to Invoices, Change Orders, T&amp;M Charges, and Expenses</h2>
+    <h2>7 · Approval chain — applies to Invoices, Contracts, Change Orders</h2>
     <div class="flow">
-
       <div class="flow-step flow-step-pending">
         <div class="flow-label">Step 1</div>
         <div class="flow-name">Pending</div>
-        <div class="flow-role">Just submitted</div>
+        <div class="flow-role">Submitted</div>
       </div>
-
       <div class="flow-arrow">→</div>
-
       <div class="flow-step flow-step-pm">
         <div class="flow-label">Step 2</div>
         <div class="flow-name">PM Approved</div>
         <div class="flow-role">Project Manager</div>
       </div>
-
       <div class="flow-arrow">→</div>
-
       <div class="flow-step flow-step-partner">
         <div class="flow-label">Step 3</div>
         <div class="flow-name">Partner Approved</div>
         <div class="flow-role">Partner-level</div>
       </div>
-
       <div class="flow-arrow">→</div>
-
       <div class="flow-step flow-step-approved">
         <div class="flow-label">Step 4</div>
         <div class="flow-name">Approved</div>
         <div class="flow-role">Admin (Seth) — final</div>
       </div>
-
       <div class="flow-arrow">→</div>
-
       <div class="flow-step flow-step-paid">
         <div class="flow-label">Step 5</div>
         <div class="flow-name">Paid</div>
         <div class="flow-role">Check / ACH sent</div>
       </div>
-
     </div>
-    <p style="margin-top:12px; font-size:13px; color:#7a6e68">Any step can be rejected (with a required note). An item can also be placed "on hold" at the pending stage. Reverting resets the entire chain back to Pending and clears all approval stamps.</p>
+    <p style="margin-top:12px; font-size:13px; color:#7a6e68">Invoices have an extra <strong>Pushed</strong> status between Approved and Paid (exported to QuickBooks but not yet confirmed paid). Any step can be rejected with a required note. Rejecting resets the entire chain to Pending. Items are only counted in budget columns when status is <strong>approved, pushed,</strong> or <strong>paid</strong>.</p>
   </div>
 
-  <!-- ── FINANCIAL MATH ────────────────────────────────────────────────── -->
+  <!-- ── 8. ENTITIES ── -->
   <div class="section">
-    <h2>How the financial numbers are calculated</h2>
-    <div class="math-table">
-      <table>
-        <thead>
-          <tr><th>Number</th><th>Where it appears</th><th>Formula</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><div class="math-label">Commitment</div></td>
-            <td>Contract detail KPI</td>
-            <td>
-              <div class="math-formula">Original contract value + all <em>approved</em> change orders</div>
-              <div class="math-note">This is the legal/contractual obligation — what you've signed for.</div>
-            </td>
-          </tr>
-          <tr>
-            <td><div class="math-label">Total Exposure</div></td>
-            <td>Contract detail KPI, project health</td>
-            <td>
-              <div class="math-formula">Commitment + approved T&amp;M charges + approved expenses</div>
-              <div class="math-note">Your best estimate of total spend including open-ended work.</div>
-            </td>
-          </tr>
-          <tr>
-            <td><div class="math-label">Invoiced to Date</div></td>
-            <td>Contract detail KPI</td>
-            <td>
-              <div class="math-formula">Sum of all <strong>Fixed-scope</strong> invoices in Approved / Pushed / Paid status</div>
-              <div class="math-note">Shows % of commitment consumed. T&amp;M and Expense invoices are shown separately alongside this number.</div>
-            </td>
-          </tr>
-          <tr>
-            <td><div class="math-label">Remaining (contract)</div></td>
-            <td>Contract remaining balance</td>
-            <td>
-              <div class="math-formula">Contract total_value − Fixed-scope invoices billed</div>
-              <div class="math-note">T&amp;M invoices do not reduce this number — they are additional.</div>
-            </td>
-          </tr>
-          <tr>
-            <td><div class="math-label">T&amp;M Billed</div></td>
-            <td>Contract detail KPI (sub-label)</td>
-            <td>
-              <div class="math-formula">Sum of T&amp;M + Expense invoices in Approved / Pushed / Paid status</div>
-              <div class="math-note">Additional project cost beyond the fixed commitment. Does not trigger an overspend warning.</div>
-            </td>
-          </tr>
-          <tr>
-            <td><div class="math-label">Paid</div></td>
-            <td>Contract detail KPI</td>
-            <td>
-              <div class="math-formula">Sum of all invoices (any type) in <strong>Paid</strong> status</div>
-              <div class="math-note">Cash actually out the door.</div>
-            </td>
-          </tr>
-          <tr>
-            <td><div class="math-label">Internal Budget</div></td>
-            <td>Contract detail KPI</td>
-            <td>
-              <div class="math-formula">earmarked_amount — set manually per contract</div>
-              <div class="math-note">Your internal estimate including T&amp;M exposure. Should always be ≥ contract value. If Total Exposure exceeds this, a "cost creep" flag appears.</div>
-            </td>
-          </tr>
-          <tr>
-            <td><div class="math-label">Overspend alert</div></td>
-            <td>Invoice creation form</td>
-            <td>
-              <div class="math-formula">Triggered when: new Fixed invoice amount > remaining contract balance</div>
-              <div class="math-note">T&amp;M and Expense invoices never trigger this check.</div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- ── ENTITY TABLES ────────────────────────────────────────────────── -->
-  <div class="section">
-    <h2>Data entities — what each record stores</h2>
+    <h2>8 · Database entities</h2>
     <div class="entity-grid">
 
       <div class="entity-card">
         <div class="entity-header">
           <div class="entity-icon" style="background:#f0e8e0">🏗</div>
-          <div>
-            <div class="entity-name">Project</div>
-            <div class="entity-desc">Top-level job or development</div>
-          </div>
+          <div><div class="entity-name">projects</div><div class="entity-desc">Top-level development job</div></div>
         </div>
         <div class="entity-body">
-          <div class="field-row"><span class="field-name">name</span><span class="field-desc">Project name (e.g. "Oaktrail and Main Estates")</span></div>
-          <div class="field-row"><span class="field-name">description</span><span class="field-desc">Free-text description</span></div>
+          <div class="field-row"><span class="field-name">id</span><span class="field-desc">Primary key</span><span class="tag tag-pk">PK</span></div>
+          <div class="field-row"><span class="field-name">name</span><span class="field-desc">Project name</span></div>
+          <div class="field-row"><span class="field-name">project_type</span><span class="field-desc">industrial / residential</span></div>
           <div class="field-row"><span class="field-name">status</span><span class="field-desc">active / closed</span></div>
-          <div class="field-row"><span class="field-name">created_by</span><span class="field-desc">Which user created it</span><span class="tag tag-link">→ User</span></div>
+          <div class="field-row"><span class="field-name">address</span><span class="field-desc">Site address</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#dce8ff">📁</div>
+          <div><div class="entity-name">phases</div><div class="entity-desc">Budget &amp; cost tracking silo within a project</div></div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">id</span><span class="field-desc">Primary key</span><span class="tag tag-pk">PK</span></div>
+          <div class="field-row"><span class="field-name">project_id</span><span class="field-desc">Parent project</span><span class="tag tag-fk">→ projects</span></div>
+          <div class="field-row"><span class="field-name">name</span><span class="field-desc">Phase name, e.g. "Phase 1 — Entitlement"</span></div>
+          <div class="field-row"><span class="field-name">phase_number</span><span class="field-desc">Display sequence number</span></div>
+          <div class="field-row"><span class="field-name">status</span><span class="field-desc">planning / active / complete</span></div>
+          <div class="field-row"><span class="field-name">start_date / end_date</span><span class="field-desc">Scheduled dates</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#e8f0ff">📊</div>
+          <div><div class="entity-name">phase_budget_lines</div><div class="entity-desc">One row per task in the budget grid</div></div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">id</span><span class="field-desc">Primary key — globally unique</span><span class="tag tag-pk">PK</span></div>
+          <div class="field-row"><span class="field-name">phase_id</span><span class="field-desc">Phase this row belongs to</span><span class="tag tag-fk">→ phases</span></div>
+          <div class="field-row"><span class="field-name">qb_account_id</span><span class="field-desc">GL code account (links to QB COA)</span><span class="tag tag-fk">→ qb_accounts</span></div>
+          <div class="field-row"><span class="field-name">task_name</span><span class="field-desc">Row label, e.g. "Civil &amp; Landscape Engineering"</span></div>
+          <div class="field-row"><span class="field-name">discipline</span><span class="field-desc">Grouping, e.g. "Engineering"</span></div>
+          <div class="field-row"><span class="field-name">budgeted_amount</span><span class="field-desc">Planned spend for this task</span></div>
+          <div class="field-row"><span class="field-name">source</span><span class="field-desc">template / user — whether amount was auto-filled or manually set</span></div>
+          <div class="field-row"><span class="field-name">sort_order</span><span class="field-desc">Display order within the grid</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#e8fff0">🏷</div>
+          <div><div class="entity-name">qb_accounts</div><div class="entity-desc">QuickBooks Chart of Accounts</div></div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">id</span><span class="field-desc">Primary key</span><span class="tag tag-pk">PK</span></div>
+          <div class="field-row"><span class="field-name">account_number</span><span class="field-desc">GL code, e.g. "1720.01"</span></div>
+          <div class="field-row"><span class="field-name">short_name</span><span class="field-desc">Display name, e.g. "Civil &amp; Landscape Engineering"</span></div>
+          <div class="field-row"><span class="field-name">parent_id</span><span class="field-desc">Parent account (for grouping rows)</span><span class="tag tag-fk">→ qb_accounts</span></div>
+          <div class="field-row"><span class="field-name">is_leaf</span><span class="field-desc">True if this is a postable account (no children)</span></div>
+          <div class="field-row"><span class="field-name">category</span><span class="field-desc">Expense category for reporting</span></div>
+          <div class="field-row"><span class="field-name">sort_order</span><span class="field-desc">Controls display order in the grid</span></div>
         </div>
       </div>
 
       <div class="entity-card">
         <div class="entity-header">
           <div class="entity-icon" style="background:#fce8e0">📋</div>
-          <div>
-            <div class="entity-name">Contract</div>
-            <div class="entity-desc">Vendor agreement under a project</div>
-          </div>
+          <div><div class="entity-name">contracts</div><div class="entity-desc">Vendor agreement under a phase</div></div>
         </div>
         <div class="entity-body">
+          <div class="field-row"><span class="field-name">id</span><span class="field-desc">Primary key</span><span class="tag tag-pk">PK</span></div>
+          <div class="field-row"><span class="field-name">phase_id</span><span class="field-desc">Phase this contract belongs to</span><span class="tag tag-fk">→ phases</span></div>
+          <div class="field-row"><span class="field-name">phase_budget_line_id</span><span class="field-desc">Primary budget row (used when no line items)</span><span class="tag tag-fk">→ pbl</span></div>
           <div class="field-row"><span class="field-name">vendor_name</span><span class="field-desc">Who you're contracting with</span></div>
-          <div class="field-row"><span class="field-name">total_value</span><span class="field-desc">Fixed lump-sum contract amount</span></div>
-          <div class="field-row"><span class="field-name">earmarked_amount</span><span class="field-desc">Your internal budget estimate (optional) — should cover T&amp;M too</span></div>
-          <div class="field-row"><span class="field-name">contract_date</span><span class="field-desc">Date the contract was signed</span></div>
-          <div class="field-row"><span class="field-name">reference_number</span><span class="field-desc">Your internal ref # or PO number</span></div>
-          <div class="field-row"><span class="field-name">status</span><span class="field-desc">draft / active / closed</span></div>
-          <div class="field-row"><span class="field-name">file_reference</span><span class="field-desc">Attached PDF (stored in database)</span></div>
-          <div class="field-row"><span class="field-name">project_id</span><span class="field-desc">Which project this belongs to</span><span class="tag tag-link">→ Project</span></div>
+          <div class="field-row"><span class="field-name">total_value</span><span class="field-desc">Fixed contract amount</span></div>
+          <div class="field-row"><span class="field-name">status</span><span class="field-desc">draft / active / complete / voided</span></div>
+          <div class="field-row"><span class="field-name">reference_number</span><span class="field-desc">Internal ref # or PO number</span></div>
+        </div>
+      </div>
+
+      <div class="entity-card">
+        <div class="entity-header">
+          <div class="entity-icon" style="background:#fce8e0">≡</div>
+          <div><div class="entity-name">contract_line_items</div><div class="entity-desc">Per-line breakdown of a contract</div></div>
+        </div>
+        <div class="entity-body">
+          <div class="field-row"><span class="field-name">id</span><span class="field-desc">Primary key</span><span class="tag tag-pk">PK</span></div>
+          <div class="field-row"><span class="field-name">contract_id</span><span class="field-desc">Parent contract</span><span class="tag tag-fk">→ contracts</span></div>
+          <div class="field-row"><span class="field-name">phase_budget_line_id</span><span class="field-desc">Budget row this line maps to</span><span class="tag tag-fk">→ pbl</span></div>
+          <div class="field-row"><span class="field-name">qb_account_id</span><span class="field-desc">GL code for this line</span><span class="tag tag-fk">→ qb_accounts</span></div>
+          <div class="field-row"><span class="field-name">description</span><span class="field-desc">Line item description</span></div>
+          <div class="field-row"><span class="field-name">budgeted_amount</span><span class="field-desc">Amount allocated to this line</span></div>
+          <div class="field-row"><span class="field-name">billing_type</span><span class="field-desc">fixed / tm / expense</span></div>
         </div>
       </div>
 
       <div class="entity-card">
         <div class="entity-header">
           <div class="entity-icon" style="background:#fff4e0">🔄</div>
-          <div>
-            <div class="entity-name">Change Order</div>
-            <div class="entity-desc">Formal modification to a contract</div>
-          </div>
+          <div><div class="entity-name">change_orders</div><div class="entity-desc">Formal modification to a contract</div></div>
         </div>
         <div class="entity-body">
-          <div class="field-row"><span class="field-name">co_number</span><span class="field-desc">Reference like "CO-001"</span></div>
+          <div class="field-row"><span class="field-name">id</span><span class="field-desc">Primary key</span><span class="tag tag-pk">PK</span></div>
+          <div class="field-row"><span class="field-name">contract_id</span><span class="field-desc">Contract being modified</span><span class="tag tag-fk">→ contracts</span></div>
+          <div class="field-row"><span class="field-name">co_number</span><span class="field-desc">Reference, e.g. "CO-001"</span></div>
+          <div class="field-row"><span class="field-name">amount</span><span class="field-desc">Dollar value of the change</span></div>
+          <div class="field-row"><span class="field-name">status</span><span class="field-desc">draft → pending → approved / rejected / voided</span></div>
           <div class="field-row"><span class="field-name">description</span><span class="field-desc">What changed and why</span></div>
-          <div class="field-row"><span class="field-name">amount</span><span class="field-desc">Dollar value of the change (+ or −)</span></div>
-          <div class="field-row"><span class="field-name">tm_authorized</span><span class="field-desc">Whether this CO authorizes T&amp;M work</span></div>
-          <div class="field-row"><span class="field-name">tm_not_to_exceed</span><span class="field-desc">Cap on T&amp;M spend if authorized</span></div>
-          <div class="field-row"><span class="field-name">status</span><span class="field-desc">pending → pm_approved → partner_approved → approved</span></div>
-          <div class="field-row"><span class="field-name">contract_id</span><span class="field-desc">Which contract this modifies</span><span class="tag tag-link">→ Contract</span></div>
         </div>
       </div>
 
       <div class="entity-card">
         <div class="entity-header">
-          <div class="entity-icon" style="background:#fff4e0">⏱</div>
-          <div>
-            <div class="entity-name">T&amp;M Charge</div>
-            <div class="entity-desc">Individual time entry for hourly work</div>
-          </div>
+          <div class="entity-icon" style="background:#fff4e0">≡</div>
+          <div><div class="entity-name">change_order_line_items</div><div class="entity-desc">Per-line breakdown of a change order</div></div>
         </div>
         <div class="entity-body">
-          <div class="field-row"><span class="field-name">description</span><span class="field-desc">What work was done</span></div>
-          <div class="field-row"><span class="field-name">hours</span><span class="field-desc">Hours worked (optional — or use amount directly)</span></div>
-          <div class="field-row"><span class="field-name">rate</span><span class="field-desc">Hourly rate in dollars</span></div>
-          <div class="field-row"><span class="field-name">amount</span><span class="field-desc">Total (hours × rate, or entered directly)</span></div>
-          <div class="field-row"><span class="field-name">charge_date</span><span class="field-desc">Date the work occurred</span></div>
-          <div class="field-row"><span class="field-name">status</span><span class="field-desc">pending → pm_approved → partner_approved → approved</span></div>
-          <div class="field-row"><span class="field-name">contract_id</span><span class="field-desc">Which contract this is under</span><span class="tag tag-link">→ Contract</span></div>
-          <div class="field-row"><span class="field-name">change_order_id</span><span class="field-desc">Optional — if this T&amp;M is tied to a specific CO</span><span class="tag tag-link">→ CO</span></div>
-        </div>
-      </div>
-
-      <div class="entity-card">
-        <div class="entity-header">
-          <div class="entity-icon" style="background:#f0f0ff">🧾</div>
-          <div>
-            <div class="entity-name">Expense</div>
-            <div class="entity-desc">Reimbursable cost (travel, tolls, etc.)</div>
-          </div>
-        </div>
-        <div class="entity-body">
-          <div class="field-row"><span class="field-name">category</span><span class="field-desc">travel / tolls / food / hotel / copies / other</span></div>
-          <div class="field-row"><span class="field-name">description</span><span class="field-desc">What the expense was for</span></div>
-          <div class="field-row"><span class="field-name">amount</span><span class="field-desc">Dollar amount</span></div>
-          <div class="field-row"><span class="field-name">expense_date</span><span class="field-desc">Date incurred</span></div>
-          <div class="field-row"><span class="field-name">status</span><span class="field-desc">pending → pm_approved → partner_approved → approved</span></div>
-          <div class="field-row"><span class="field-name">contract_id</span><span class="field-desc">Which contract this is under</span><span class="tag tag-link">→ Contract</span></div>
+          <div class="field-row"><span class="field-name">id</span><span class="field-desc">Primary key</span><span class="tag tag-pk">PK</span></div>
+          <div class="field-row"><span class="field-name">change_order_id</span><span class="field-desc">Parent change order</span><span class="tag tag-fk">→ change_orders</span></div>
+          <div class="field-row"><span class="field-name">phase_budget_line_id</span><span class="field-desc">Explicit budget row assignment</span><span class="tag tag-fk">→ pbl</span></div>
+          <div class="field-row"><span class="field-name">qb_account_id</span><span class="field-desc">GL code (used for Path 2 matching)</span><span class="tag tag-fk">→ qb_accounts</span></div>
+          <div class="field-row"><span class="field-name">budgeted_amount</span><span class="field-desc">Amount on this CO line</span></div>
+          <div class="field-row"><span class="field-name">billing_type</span><span class="field-desc">fixed / tm / expense</span></div>
+          <div class="field-row"><span class="field-name">description</span><span class="field-desc">Line description</span></div>
         </div>
       </div>
 
       <div class="entity-card">
         <div class="entity-header">
           <div class="entity-icon" style="background:#f0faf0">💵</div>
-          <div>
-            <div class="entity-name">Invoice</div>
-            <div class="entity-desc">Billing document from a vendor</div>
-          </div>
+          <div><div class="entity-name">invoices</div><div class="entity-desc">Billing document from a vendor</div></div>
         </div>
         <div class="entity-body">
-          <div class="field-row"><span class="field-name">invoice_number</span><span class="field-desc">Vendor's invoice number (e.g. "203010a-4")</span></div>
+          <div class="field-row"><span class="field-name">id</span><span class="field-desc">Primary key</span><span class="tag tag-pk">PK</span></div>
+          <div class="field-row"><span class="field-name">phase_id</span><span class="field-desc">Phase this invoice belongs to</span><span class="tag tag-fk">→ phases</span></div>
+          <div class="field-row"><span class="field-name">phase_budget_line_id</span><span class="field-desc">Legacy: invoice-level row assignment (Path 3/4)</span><span class="tag tag-fk">→ pbl</span></div>
+          <div class="field-row"><span class="field-name">contract_id</span><span class="field-desc">Contract this invoice is under</span><span class="tag tag-fk">→ contracts</span></div>
           <div class="field-row"><span class="field-name">vendor_name</span><span class="field-desc">Who submitted the invoice</span></div>
-          <div class="field-row"><span class="field-name">amount</span><span class="field-desc">Total dollar amount billed</span></div>
-          <div class="field-row"><span class="field-name">invoice_date</span><span class="field-desc">Date printed on the invoice</span></div>
-          <div class="field-row"><span class="field-name">invoice_type</span><span class="field-desc"><strong>fixed</strong> (lump sum) / <strong>tm</strong> (hourly) / <strong>expense</strong> (reimbursable)</span></div>
+          <div class="field-row"><span class="field-name">invoice_number</span><span class="field-desc">Vendor's invoice number</span></div>
+          <div class="field-row"><span class="field-name">amount</span><span class="field-desc">Total amount billed</span></div>
+          <div class="field-row"><span class="field-name">invoice_type</span><span class="field-desc">fixed / tm / expense</span></div>
           <div class="field-row"><span class="field-name">status</span><span class="field-desc">pending → pm_approved → partner_approved → approved → pushed → paid</span></div>
-          <div class="field-row"><span class="field-name">paid_date</span><span class="field-desc">When payment was sent</span></div>
-          <div class="field-row"><span class="field-name">qb_reference_id</span><span class="field-desc">QuickBooks ID after export</span></div>
-          <div class="field-row"><span class="field-name">file_reference</span><span class="field-desc">Attached PDF</span></div>
-          <div class="field-row"><span class="field-name">contract_id</span><span class="field-desc">Primary contract (or null for standalone)</span><span class="tag tag-link">→ Contract</span></div>
+          <div class="field-row"><span class="field-name">invoice_date</span><span class="field-desc">Date on the document</span></div>
         </div>
       </div>
 
       <div class="entity-card">
         <div class="entity-header">
-          <div class="entity-icon" style="background:#f0f7ff">👤</div>
-          <div>
-            <div class="entity-name">User</div>
-            <div class="entity-desc">Staff member with a login</div>
-          </div>
+          <div class="entity-icon" style="background:#f0faf0">≡</div>
+          <div><div class="entity-name">invoice_line_items</div><div class="entity-desc">Per-line breakdown of an invoice</div></div>
         </div>
         <div class="entity-body">
-          <div class="field-row"><span class="field-name">name</span><span class="field-desc">Full name</span></div>
-          <div class="field-row"><span class="field-name">email</span><span class="field-desc">Login email (unique)</span></div>
-          <div class="field-row"><span class="field-name">role</span><span class="field-desc"><strong>pm</strong> (project manager) / <strong>partner</strong> / <strong>admin</strong> (Seth)</span></div>
-        </div>
-      </div>
-
-      <div class="entity-card">
-        <div class="entity-header">
-          <div class="entity-icon" style="background:#f0fff4">📊</div>
-          <div>
-            <div class="entity-name">Budget Line</div>
-            <div class="entity-desc">Project-level budget by QB category</div>
-          </div>
-        </div>
-        <div class="entity-body">
-          <div class="field-row"><span class="field-name">qb_code_id</span><span class="field-desc">QuickBooks expense category</span><span class="tag tag-link">→ QB Code</span></div>
-          <div class="field-row"><span class="field-name">original_amount</span><span class="field-desc">Budget as originally set</span></div>
-          <div class="field-row"><span class="field-name">current_amount</span><span class="field-desc">Current budget (may be revised)</span></div>
-          <div class="field-row"><span class="field-name">project_id</span><span class="field-desc">Which project this budget line belongs to</span><span class="tag tag-link">→ Project</span></div>
-        </div>
-      </div>
-
-      <div class="entity-card">
-        <div class="entity-header">
-          <div class="entity-icon" style="background:#fff8e0">🏷</div>
-          <div>
-            <div class="entity-name">Vendor</div>
-            <div class="entity-desc">Known vendor / subcontractor</div>
-          </div>
-        </div>
-        <div class="entity-body">
-          <div class="field-row"><span class="field-name">name</span><span class="field-desc">Vendor's name — seeded from QuickBooks</span></div>
-          <div class="field-row"><span class="field-name">qb_id</span><span class="field-desc">QuickBooks vendor ID for future sync</span></div>
-          <div class="field-row" style="margin-top:8px"><span class="field-desc" style="color:#7a6e68;font-style:italic">Used for smart-search autocomplete in contract and invoice forms. Claude also learns each vendor's invoice format over time (via extraction examples) to improve auto-fill accuracy.</span></div>
+          <div class="field-row"><span class="field-name">id</span><span class="field-desc">Primary key</span><span class="tag tag-pk">PK</span></div>
+          <div class="field-row"><span class="field-name">invoice_id</span><span class="field-desc">Parent invoice</span><span class="tag tag-fk">→ invoices</span></div>
+          <div class="field-row"><span class="field-name">phase_budget_line_id</span><span class="field-desc">Explicit budget row (Path 1 — preferred)</span><span class="tag tag-fk">→ pbl</span></div>
+          <div class="field-row"><span class="field-name">qb_account_id</span><span class="field-desc">GL code (enables Path 2 matching)</span><span class="tag tag-fk">→ qb_accounts</span></div>
+          <div class="field-row"><span class="field-name">amount</span><span class="field-desc">Amount on this line</span></div>
+          <div class="field-row"><span class="field-name">billing_type</span><span class="field-desc">fixed / tm / expense</span></div>
+          <div class="field-row"><span class="field-name">description</span><span class="field-desc">Line description</span></div>
         </div>
       </div>
 
     </div>
   </div>
 
-  <!-- ── ROLES ────────────────────────────────────────────────────────── -->
-  <div class="section">
-    <h2>User roles and permissions</h2>
-    <div class="roles-table">
-      <table>
-        <thead>
-          <tr><th>Role</th><th>Who</th><th>What they can do</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><span class="role-tag role-pm">PM</span></td>
-            <td>Project Managers</td>
-            <td>Create projects, contracts, invoices, T&amp;M charges, expenses, change orders. Give first approval to anything.</td>
-          </tr>
-          <tr>
-            <td><span class="role-tag role-partner">Partner</span></td>
-            <td>Partners / senior staff</td>
-            <td>Everything a PM can do, plus give second (partner) approval.</td>
-          </tr>
-          <tr>
-            <td><span class="role-tag role-admin">Admin</span></td>
-            <td>Seth</td>
-            <td>Everything. Final (third) approval authority on all documents. Only admin can give final approval on invoices and change orders.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- ── AUDIT ─────────────────────────────────────────────────────────── -->
-  <div class="section">
-    <h2>Audit trail</h2>
-    <p>Every action on an invoice or contract is logged with <strong>who did it</strong>, <strong>when</strong>, and <strong>what changed</strong>. This includes approvals, rejections, edits, holds, and reverts. The history tab on any contract or invoice shows the full timeline.</p>
-    <p style="margin-top:10px">Claude's document extraction is also tracked — every time a PM confirms an AI-filled field, the system saves that as a training example so the same vendor's future documents auto-fill more accurately.</p>
-  </div>
-
-  <div style="margin-top:60px; padding-top:24px; border-top:1px solid #e0d8d0; font-size:12px; color:#a09088;">
-    Generated from the ActiveAcq production schema · 2026-04-22
+  <div style="margin-top:60px; padding-top:20px; border-top:1px solid #e0d8d0; font-size:12px; color:#a09088; display:flex; justify-content:space-between;">
+    <span>ActiveAcq — Budget Data Model</span>
+    <span>Updated 2026-05-05</span>
   </div>
 
 </div>

@@ -38,6 +38,7 @@ export const api = {
   listPhases:   (projectId: number)   => request<any[]>('GET',  `/api/projects/${projectId}/phases`),
   createPhase:  (projectId: number, data: any) => request<any>('POST', `/api/projects/${projectId}/phases`, data),
   updatePhase:  (id: number, data: any) => request<any>('PATCH', `/api/phases/${id}`, data),
+  deletePhase:  (id: number)            => request<any>('DELETE', `/api/phases/${id}`),
 
   // Budget
   getBudget:    (phaseId: number, source?: 'pm' | 'qb' | 'compare') =>
