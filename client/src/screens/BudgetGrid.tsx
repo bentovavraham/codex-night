@@ -125,8 +125,9 @@ function EditCell({ value, rowId, field, numeric, isActive, onActivate, onCommit
 type DrillCell = 'committed' | 'billed';
 interface DrillTarget { rowId: number; rowName: string; cell: DrillCell; }
 
-function DrillPanel({ phaseId, projectId, target, onClose }: {
+function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
   phaseId: number; projectId: number | string | undefined; target: DrillTarget; onClose: () => void;
+  onEditContract: (id: number) => void;
 }) {
   const navigate = useNavigate();
   const { data, isLoading } = useQuery({
@@ -138,6 +139,10 @@ function DrillPanel({ phaseId, projectId, target, onClose }: {
   function openEdit(invoiceId: number) {
     onClose();
     navigate(`/projects/${projectId}/phases/${phaseId}/invoices?edit=${invoiceId}`);
+  }
+  function openEditContract(contractId: number) {
+    onClose();
+    onEditContract(contractId);
   }
   const contracts: any[] = data?.contracts ?? [];
   const invoices:  any[] = data?.invoices  ?? [];
@@ -164,6 +169,7 @@ function DrillPanel({ phaseId, projectId, target, onClose }: {
                     <th>Vendor</th><th>Ref #</th><th>Status</th>
                     <th className={styles.drillAmt}>Allocated</th>
                     <th className={styles.drillAmt}>Contract Total</th>
+                    <th />
                   </tr></thead>
                   <tbody>
                     {contracts.map((c: any) => (
@@ -179,12 +185,19 @@ function DrillPanel({ phaseId, projectId, target, onClose }: {
                         </td>
                         <td className={`${styles.drillAmt} ${styles.drillAmtBold}`}>{usd.format(Number(c.allocated_amount))}</td>
                         <td className={`${styles.drillAmt} ${styles.drillAmtDim}`}>{usd.format(Number(c.total_value))}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <button className={styles.drillPdfBtn}
+                            onClick={() => openEditContract(c.id)}
+                            style={{ background: 'var(--accent-light)', color: 'var(--accent)', border: '1px solid var(--accent)', fontWeight: 700 }}>
+                            Edit
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot><tr className={styles.drillTotal}>
                     <td colSpan={3}>Total committed</td>
-                    <td className={styles.drillAmt}>{usd.format(contractTotal)}</td><td />
+                    <td className={styles.drillAmt}>{usd.format(contractTotal)}</td><td /><td />
                   </tr></tfoot>
                 </table>
             }
@@ -757,7 +770,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
   return (
     <div className={styles.wrapper}>
       {panelRow    && <LineItemPanel row={panelRow} onClose={() => setPanelRow(null)} source={source} />}
-      {drillTarget && <DrillPanel phaseId={phaseIdNum} projectId={projectId} target={drillTarget} onClose={() => setDrillTarget(null)} />}
+      {drillTarget && <DrillPanel phaseId={phaseIdNum} projectId={projectId} target={drillTarget} onClose={() => setDrillTarget(null)} onEditContract={id => { setDrillTarget(null); setEditContractId(id); }} />}
 
       {/* Full invoice / contract editors opened from unassigned tray */}
       {editInvoiceId !== null && (

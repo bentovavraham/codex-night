@@ -173,7 +173,8 @@ router.post('/contracts', requireAuth, async (req, res, next) => {
       for (let i = 0; i < lineItems.length; i++) {
         const li = lineItems[i];
         const qbAccountId = li.qb_account_id ? Number(li.qb_account_id) : null;
-        const pblId = await resolvePbl(client, phase_id ? Number(phase_id) : null, qbAccountId);
+        const explicitPbl = li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null;
+        const pblId = explicitPbl ?? await resolvePbl(client, phase_id ? Number(phase_id) : null, qbAccountId);
         await client.query(
           `INSERT INTO contract_line_items
              (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id, qb_account_id)
@@ -447,13 +448,15 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
        status ?? null,
        file_reference ?? null]);
 
-    // Replace line items when provided (full replace), resolving phase_budget_line_id from GL account
+    // Replace line items when provided (full replace).
+    // Honour explicit phase_budget_line_id from the client; fall back to GL-code lookup only when absent.
     if (Array.isArray(lineItems)) {
       await client.query('DELETE FROM contract_line_items WHERE contract_id = $1', [contractId]);
       for (let i = 0; i < lineItems.length; i++) {
         const li = lineItems[i];
         const qbAccountId = li.qb_account_id ? Number(li.qb_account_id) : null;
-        const pblId = await resolvePbl(client, phase_id ? Number(phase_id) : null, qbAccountId);
+        const explicitPbl = li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null;
+        const pblId = explicitPbl ?? await resolvePbl(client, phase_id ? Number(phase_id) : null, qbAccountId);
         await client.query(
           `INSERT INTO contract_line_items
              (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id, qb_account_id)

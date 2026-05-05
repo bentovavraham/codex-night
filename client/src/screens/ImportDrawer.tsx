@@ -575,6 +575,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
             hours: li.hours ? Number(li.hours) : null,
             rate: li.rate ? Number(li.rate) : null,
             qb_account_id: li.qb_account_id ?? null,
+            phase_budget_line_id: li.phase_budget_line_id ?? null,
           })),
         };
     confirmingRef.current = true;
