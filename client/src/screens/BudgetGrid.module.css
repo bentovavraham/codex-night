@@ -181,10 +181,10 @@
 /* ── Level 2: Sub-group rows (1710 Survey, 1720 Engineering…) ────────────── */
 
 .secRow {
-  background: #f1f3f4;
+  background: #1a1a1a;
   cursor: pointer;
 }
-.secRow:hover { background: #e8eaed; }
+.secRow:hover { background: #2c2c2c; }
 
 .secGutter {
   padding: 0 0 0 18px;
@@ -196,12 +196,13 @@
   height: 26px;
   font-size: 11px;
   font-weight: 600;
-  color: #202124;
+  color: #ffffff;
   white-space: nowrap;
   vertical-align: middle;
 }
 
-.secRow .chevron { color: #80868b; font-size: 9px; }
+.secRow .chevron { color: rgba(255,255,255,0.5); font-size: 9px; }
+.secRow .acctNum { color: rgba(255,255,255,0.45); }
 
 /* number cells for sub-group rows */
 .grpNum {
@@ -212,7 +213,7 @@
   font-variant-numeric: tabular-nums;
   font-size: 12px;
   font-weight: 600;
-  color: #202124;
+  color: rgba(255,255,255,0.85);
   white-space: nowrap;
 }
 
