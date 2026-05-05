@@ -944,6 +944,21 @@ router.post('/phases/:phaseId/budget/init', requireAuth, async (req, res, next) 
       return res.status(409).json({ error: 'Budget already initialized' });
     }
 
+    const { template = 'default' } = req.body;
+
+    // Blank mode: start with a single empty editable row so the PM can fill in
+    // their own line items. The splash won't reappear on refresh because there
+    // is at least one row in the table.
+    if (template === 'blank') {
+      await pool.query(
+        `INSERT INTO phase_budget_lines
+           (phase_id, task_name, budgeted_amount, sort_order, source)
+         VALUES ($1, 'New Line', 0, 1, 'user')`,
+        [phaseId]
+      );
+      return res.json({ ok: true, count: 1 });
+    }
+
     // Build account_number → qb_account_id lookup
     const { rows: accts } = await pool.query('SELECT id, account_number FROM qb_accounts');
     const numToId = {};

@@ -493,9 +493,24 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     qc.invalidateQueries({ queryKey: ['budget', phaseIdNum] });
   }
 
+  const [showAddRow, setShowAddRow] = useState(false);
+  const [newRowName, setNewRowName] = useState('');
+  const [newRowAmt,  setNewRowAmt]  = useState('');
+
   const initMutation = useMutation({
-    mutationFn: () => api.initBudget(phaseIdNum, 'default'),
+    mutationFn: (template: 'default' | 'blank') => api.initBudget(phaseIdNum, template),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['budget', phaseIdNum] }),
+  });
+
+  const addRowMutation = useMutation({
+    mutationFn: (data: { task_name: string; budgeted_amount: number }) =>
+      api.addBudgetLine(phaseIdNum, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['budget', phaseIdNum] });
+      setNewRowName('');
+      setNewRowAmt('');
+      setShowAddRow(false);
+    },
   });
 
   const updateMutation = useMutation({
@@ -530,6 +545,16 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
       ? rows.filter(r => r.committed > 0 || r.billed > 0 || r.source === 'user')
       : rows,
     [rows, hideUnused]
+  );
+
+  // Rows with no QB account (manually added, no GL link yet) — rendered in their own section
+  const freeRows = useMemo(
+    () => filteredRows.filter(r => r.qb_account_id == null && !(r as any).phantom_from_qb),
+    [filteredRows]
+  );
+  const freeTotals = useMemo(
+    () => freeRows.reduce((a, r) => addRow(a, r), zero()),
+    [freeRows]
   );
 
   // QB account tree structures
@@ -650,10 +675,26 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
   if (error)     return <div className={styles.splash}>Error loading budget.</div>;
   if (!rows.length) return (
     <div className={styles.splash}>
-      <p className={styles.splashMsg}>No budget lines yet.</p>
-      <button className={styles.initBtn} onClick={() => initMutation.mutate()} disabled={initMutation.isPending}>
-        {initMutation.isPending ? 'Initializing…' : 'Initialize from budget template'}
-      </button>
+      <p className={styles.splashMsg}>No budget lines yet. Choose how to start:</p>
+      <div className={styles.splashOptions}>
+        <div className={styles.splashCard}>
+          <div className={styles.splashCardTitle}>Full Template</div>
+          <div className={styles.splashCardDesc}>Load all standard line items from the master budget template. Best for a complete project setup.</div>
+          <button className={styles.initBtn} onClick={() => initMutation.mutate('default')}
+            disabled={initMutation.isPending}>
+            {initMutation.isPending ? 'Loading…' : 'Load Full Template'}
+          </button>
+        </div>
+        <div className={styles.splashCard}>
+          <div className={styles.splashCardTitle}>Start Blank</div>
+          <div className={styles.splashCardDesc}>Start with one empty row and add lines manually. Good for testing or a simplified budget.</div>
+          <button className={`${styles.initBtn} ${styles.initBtnOutline}`}
+            onClick={() => initMutation.mutate('blank')}
+            disabled={initMutation.isPending}>
+            {initMutation.isPending ? 'Creating…' : 'Start with One Blank Row'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 
@@ -901,6 +942,10 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
               {showDetails ? 'Hide Details' : 'Details'}
             </button>
           </>}
+          <button className={`${styles.tbBtn} ${styles.tbBtnAdd}`} onClick={() => setShowAddRow(v => !v)}
+            title="Add a custom budget line">
+            + Row
+          </button>
           <button className={styles.tbBtn} onClick={() => api.downloadBudgetExcel(phaseIdNum)}
             title="Download Excel — includes Variance Report + Budget Detail tabs">
             ↓ Excel
@@ -953,6 +998,36 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
             <span className={styles.vrLegNeg}>■ Negative variance (billed exceeds committed)</span>
           </div>
         </div>
+      )}
+
+      {/* ── Add Row inline form ── */}
+      {showAddRow && viewMode === 'budget' && (
+        <form className={styles.addRowForm}
+          onSubmit={e => {
+            e.preventDefault();
+            const name = newRowName.trim();
+            if (!name) return;
+            const amt = parseFloat(newRowAmt.replace(/[^0-9.-]/g, '')) || 0;
+            addRowMutation.mutate({ task_name: name, budgeted_amount: amt });
+          }}>
+          <input
+            autoFocus
+            className={styles.addRowInput}
+            placeholder="Task / description…"
+            value={newRowName}
+            onChange={e => setNewRowName(e.target.value)}
+          />
+          <input
+            className={`${styles.addRowInput} ${styles.addRowInputAmt}`}
+            placeholder="$0"
+            value={newRowAmt}
+            onChange={e => setNewRowAmt(e.target.value)}
+          />
+          <button className={styles.addRowSubmit} type="submit" disabled={addRowMutation.isPending}>
+            {addRowMutation.isPending ? 'Adding…' : 'Add'}
+          </button>
+          <button className={styles.addRowCancel} type="button" onClick={() => setShowAddRow(false)}>✕</button>
+        </form>
       )}
 
       {/* ── Reconcile strip ── always visible; turns amber when unallocated money exists */}
@@ -1025,6 +1100,19 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
             {/* Phantom QB rows: GL codes that exist in qb_transactions but not
                 in this phase's budget template. Surfaced so QB Source totals
                 match the Audit tab (no silent drops). */}
+            {/* Freeform rows: manually added rows with no GL account link */}
+            {freeRows.length > 0 && (
+              <>
+                <tr className={styles.catRow}>
+                  <td className={styles.catGutter} />
+                  <td className={styles.catLabel} colSpan={2}>
+                    Custom Lines ({freeRows.length}) — no GL account assigned
+                  </td>
+                  <SumCells t={freeTotals} variant="root" />
+                </tr>
+                {freeRows.map(renderRow)}
+              </>
+            )}
             {phantomRows.length > 0 && (
               <>
                 <tr className={styles.catRow}>
