@@ -514,6 +514,49 @@
 }
 .tbBtnWarn:hover { background: #fef3c7 !important; }
 
+/* ── Reconcile strip ─────────────────────────────────────────────────────── */
+
+.reconStrip {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
+  font-size: 11px;
+  border-bottom: 1px solid;
+  flex-wrap: wrap;
+}
+.reconOk   { background: #f0fdf4; border-color: #86efac; color: #166534; }
+.reconWarn { background: #fffbeb; border-color: #fbbf24; color: #92400e; }
+
+.reconStatus {
+  font-weight: 700;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.reconDivider {
+  width: 1px;
+  height: 14px;
+  background: currentColor;
+  opacity: .25;
+  flex-shrink: 0;
+}
+.reconStat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  white-space: nowrap;
+}
+.reconLabel {
+  font-size: 8.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  opacity: .65;
+}
+.reconOkNote   { font-size: 11px; opacity: .8; }
+.reconWarnNote { font-size: 11px; font-weight: 600; }
+
 /* ── Unassigned tray ─────────────────────────────────────────────────────── */
 
 .unassignedTray {

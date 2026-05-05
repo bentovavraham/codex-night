@@ -955,6 +955,32 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         </div>
       )}
 
+      {/* ── Reconcile strip ── always visible; turns amber when unallocated money exists */}
+      {viewMode === 'budget' && (() => {
+        const unallocContractAmt = unassignedContracts.reduce((s: number, c: any) => s + Number(c.total_value || 0), 0);
+        const unallocInvoiceAmt  = unassignedInvoices.reduce((s: number, i: any) => s + Number(i.amount || 0), 0);
+        const unallocTotal       = unallocContractAmt + unallocInvoiceAmt;
+        const ok                 = unallocTotal === 0;
+        return (
+          <div className={`${styles.reconStrip} ${ok ? styles.reconOk : styles.reconWarn}`}>
+            <span className={styles.reconStatus}>{ok ? '✓ Reconciled' : '⚠ Unallocated'}</span>
+            <span className={styles.reconDivider} />
+            <span className={styles.reconStat}><span className={styles.reconLabel}>Budgeted</span>{usd.format(grand.budgeted)}</span>
+            <span className={styles.reconStat}><span className={styles.reconLabel}>Committed</span>{usd.format(grand.total_commitment)}</span>
+            <span className={styles.reconStat}><span className={styles.reconLabel}>Billed</span>{usd.format(grand.billed)}</span>
+            <span className={styles.reconStat}><span className={styles.reconLabel}>Paid</span>{usd.format(grand.paid)}</span>
+            <span className={styles.reconDivider} />
+            {ok
+              ? <span className={styles.reconOkNote}>All contracts &amp; invoices assigned to budget lines</span>
+              : <span className={styles.reconWarnNote}>
+                  {usd.format(unallocTotal)} outside budget lines
+                  {unallocContractAmt > 0 && ` · ${unassignedContracts.length} contract${unassignedContracts.length !== 1 ? 's' : ''} ${usd.format(unallocContractAmt)}`}
+                  {unallocInvoiceAmt  > 0 && ` · ${unassignedInvoices.length} invoice${unassignedInvoices.length !== 1 ? 's' : ''} ${usd.format(unallocInvoiceAmt)}`}
+                </span>}
+          </div>
+        );
+      })()}
+
       <div className={styles.scrollArea} style={{ display: viewMode === 'variance' ? 'none' : undefined }}
         onClick={() => setActive({ rowId: -1, field: '' })}>
         <table className={styles.table} onClick={e => e.stopPropagation()}>

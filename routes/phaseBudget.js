@@ -1528,9 +1528,8 @@ router.get('/phases/:phaseId/budget/unassigned', requireAuth, async (req, res, n
 
     const contracts = (await pool.query(`
       SELECT c.id, c.reference_number, c.total_value, c.status, c.created_at,
-             v.name AS vendor_name
+             c.vendor_name
       FROM contracts c
-      LEFT JOIN vendors v ON v.id = c.vendor_id
       WHERE c.phase_id = $1
         AND c.status NOT IN ('voided')
         AND c.phase_budget_line_id IS NULL
@@ -1543,9 +1542,8 @@ router.get('/phases/:phaseId/budget/unassigned', requireAuth, async (req, res, n
 
     const invoices = (await pool.query(`
       SELECT i.id, i.invoice_number, i.invoice_type, i.amount, i.status,
-             i.invoice_date, i.created_at, v.name AS vendor_name
+             i.invoice_date, i.created_at, i.vendor_name
       FROM invoices i
-      LEFT JOIN vendors v ON v.id = i.vendor_id
       WHERE i.phase_id = $1
         AND i.status NOT IN ('voided')
         AND i.phase_budget_line_id IS NULL
