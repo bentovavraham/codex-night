@@ -718,3 +718,73 @@
 }
 .vrLegOver { color: #c0392b; }
 .vrLegNeg  { color: #c0392b; }
+
+/* ── Inline history in DrillPanel ─────────────────────────────────────────── */
+
+.drillHistoryBtn {
+  margin-left: 4px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #5f6368;
+  background: #f1f3f4;
+  border: 1px solid #dadce0;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.drillHistoryBtn:hover { background: #e8eaed; }
+
+.drillHistoryRow td {
+  background: #f8f9fa;
+  padding: 0 !important;
+}
+
+.historyList {
+  padding: 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.historyLoading,
+.historyEmpty {
+  padding: 10px 16px;
+  font-size: 12px;
+  color: #80868b;
+}
+
+.historyEntry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.historyDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #dadce0;
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+
+.historyContent {
+  font-size: 12px;
+  color: #5f6368;
+  line-height: 1.4;
+}
+
+.historyAction {
+  font-weight: 600;
+  color: #202124;
+  text-transform: capitalize;
+}
+
+.historyDetail {
+  color: #5f6368;
+}
+
+.historyMeta {
+  color: #9aa0a6;
+}

@@ -1462,6 +1462,83 @@ router.get('/phases/:phaseId/budget/unassigned', requireAuth, async (req, res, n
   } catch (err) { next(err); }
 });
 
+// GET /api/phases/:phaseId/history
+// Returns a merged chronological audit trail of all contracts, invoices, and
+// change orders that belong to this phase, with human-readable detail strings.
+router.get('/phases/:phaseId/history', requireAuth, async (req, res, next) => {
+  try {
+    const phaseId = Number(req.params.phaseId);
+    const limit  = Math.min(Number(req.query.limit  || 200), 500);
+    const offset = Number(req.query.offset || 0);
+
+    const result = await pool.query(`
+      -- Contract events
+      SELECT
+        l.id,
+        'contract'               AS source,
+        c.id                     AS subject_id,
+        COALESCE(v.name, c.reference_number, 'Contract #' || c.id) AS vendor_name,
+        c.reference_number       AS ref_number,
+        l.action,
+        l.detail,
+        c.total_value::float     AS amount,
+        u.name                   AS changed_by_name,
+        l.changed_at
+      FROM contract_logs l
+      JOIN contracts c ON c.id = l.contract_id
+      LEFT JOIN vendors  v ON v.id = c.vendor_id
+      JOIN users   u ON u.id = l.changed_by
+      WHERE c.phase_id = $1
+
+      UNION ALL
+
+      -- Invoice events (stand-alone; contract-linked invoices appear here too)
+      SELECT
+        l.id,
+        'invoice'                AS source,
+        i.id                     AS subject_id,
+        COALESCE(v.name, i.invoice_number, 'Invoice #' || i.id) AS vendor_name,
+        i.invoice_number         AS ref_number,
+        l.action,
+        l.detail,
+        i.amount::float          AS amount,
+        u.name                   AS changed_by_name,
+        l.changed_at
+      FROM invoice_logs l
+      JOIN invoices i ON i.id = l.invoice_id
+      LEFT JOIN vendors  v ON v.id = i.vendor_id
+      JOIN users   u ON u.id = l.changed_by
+      WHERE i.phase_id = $1
+
+      UNION ALL
+
+      -- Change order events
+      SELECT
+        l.id,
+        'change_order'           AS source,
+        co.id                    AS subject_id,
+        COALESCE(v.name, c.reference_number, 'Contract #' || c.id) AS vendor_name,
+        COALESCE('CO ' || co.co_number, 'CO#' || co.id) AS ref_number,
+        l.action,
+        l.detail,
+        co.amount::float         AS amount,
+        u.name                   AS changed_by_name,
+        l.changed_at
+      FROM change_order_logs l
+      JOIN change_orders co ON co.id = l.change_order_id
+      JOIN contracts     c  ON c.id  = co.contract_id
+      LEFT JOIN vendors  v  ON v.id  = c.vendor_id
+      JOIN users         u  ON u.id  = l.changed_by
+      WHERE c.phase_id = $1
+
+      ORDER BY changed_at DESC
+      LIMIT $2 OFFSET $3
+    `, [phaseId, limit, offset]);
+
+    res.json(result.rows);
+  } catch (err) { next(err); }
+});
+
 // GET /api/phases/:phaseId/budget/export-excel
 // Downloads a .xlsx file: Variance Report sheet + full Budget Detail sheet with all columns.
 router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res, next) => {

@@ -125,11 +125,47 @@ function EditCell({ value, rowId, field, numeric, isActive, onActivate, onCommit
 type DrillCell = 'committed' | 'billed';
 interface DrillTarget { rowId: number; rowName: string; cell: DrillCell; }
 
+// ─── Inline History ────────────────────────────────────────────────────────────
+
+function InlineHistory({ source, id }: { source: 'contract' | 'invoice'; id: number }) {
+  const { data = [], isLoading } = useQuery({
+    queryKey: ['itemHistory', source, id],
+    queryFn: () => source === 'contract' ? api.getContractHistory(id) : api.getInvoiceHistory(id),
+    staleTime: 60_000,
+  });
+
+  if (isLoading) return <div className={styles.historyLoading}>Loading…</div>;
+  if ((data as any[]).length === 0) return <div className={styles.historyEmpty}>No history yet.</div>;
+
+  return (
+    <div className={styles.historyList}>
+      {(data as any[]).map((e: any) => (
+        <div key={e.id} className={styles.historyEntry}>
+          <span className={styles.historyDot} />
+          <div className={styles.historyContent}>
+            <span className={styles.historyAction}>{e.action}</span>
+            {e.detail && <span className={styles.historyDetail}> — {e.detail}</span>}
+            <span className={styles.historyMeta}> · {e.changed_by_name} · {new Date(e.changed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
   phaseId: number; projectId: number | string | undefined; target: DrillTarget; onClose: () => void;
   onEditContract: (id: number) => void;
 }) {
   const navigate = useNavigate();
+  const [expandedHistory, setExpandedHistory] = useState<Set<string>>(new Set());
+  function toggleHistory(key: string) {
+    setExpandedHistory(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
   const { data, isLoading } = useQuery({
     queryKey: ['drill', phaseId, target.rowId],
     queryFn: () => api.drillBudgetLine(phaseId, target.rowId),
@@ -172,28 +208,42 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
                     <th />
                   </tr></thead>
                   <tbody>
-                    {contracts.map((c: any) => (
-                      <tr key={c.id} className={styles.drillRow}>
-                        <td className={styles.drillVendor}>{c.vendor_name}</td>
-                        <td className={styles.drillRef}>{c.reference_number || '—'}</td>
-                        <td>
-                          <span className={styles.drillBadge}
-                            style={{ background: (STATUS_COLOR[c.status] ?? '#888') + '22', color: STATUS_COLOR[c.status] ?? '#555' }}>
-                            {c.status}
-                          </span>
-                          {!c.is_primary && <span className={styles.drillPartial}>partial</span>}
-                        </td>
-                        <td className={`${styles.drillAmt} ${styles.drillAmtBold}`}>{usd.format(Number(c.allocated_amount))}</td>
-                        <td className={`${styles.drillAmt} ${styles.drillAmtDim}`}>{usd.format(Number(c.total_value))}</td>
-                        <td style={{ whiteSpace: 'nowrap' }}>
-                          <button className={styles.drillPdfBtn}
-                            onClick={() => openEditContract(c.id)}
-                            style={{ background: 'var(--accent-light)', color: 'var(--accent)', border: '1px solid var(--accent)', fontWeight: 700 }}>
-                            Edit
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {contracts.map((c: any) => {
+                      const hKey = `contract-${c.id}`;
+                      const hOpen = expandedHistory.has(hKey);
+                      return (
+                        <>
+                          <tr key={c.id} className={styles.drillRow}>
+                            <td className={styles.drillVendor}>{c.vendor_name}</td>
+                            <td className={styles.drillRef}>{c.reference_number || '—'}</td>
+                            <td>
+                              <span className={styles.drillBadge}
+                                style={{ background: (STATUS_COLOR[c.status] ?? '#888') + '22', color: STATUS_COLOR[c.status] ?? '#555' }}>
+                                {c.status}
+                              </span>
+                              {!c.is_primary && <span className={styles.drillPartial}>partial</span>}
+                            </td>
+                            <td className={`${styles.drillAmt} ${styles.drillAmtBold}`}>{usd.format(Number(c.allocated_amount))}</td>
+                            <td className={`${styles.drillAmt} ${styles.drillAmtDim}`}>{usd.format(Number(c.total_value))}</td>
+                            <td style={{ whiteSpace: 'nowrap' }}>
+                              <button className={styles.drillPdfBtn}
+                                onClick={() => openEditContract(c.id)}
+                                style={{ background: 'var(--accent-light)', color: 'var(--accent)', border: '1px solid var(--accent)', fontWeight: 700 }}>
+                                Edit
+                              </button>
+                              <button className={styles.drillHistoryBtn} onClick={() => toggleHistory(hKey)}>
+                                {hOpen ? '▲' : '▼'} History
+                              </button>
+                            </td>
+                          </tr>
+                          {hOpen && (
+                            <tr key={`${hKey}-history`} className={styles.drillHistoryRow}>
+                              <td colSpan={6}><InlineHistory source="contract" id={c.id} /></td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })}
                   </tbody>
                   <tfoot><tr className={styles.drillTotal}>
                     <td colSpan={3}>Total committed</td>
@@ -234,8 +284,11 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
                       const allocated = Number(inv.amount);
                       const total = Number(inv.total_amount);
                       const isPartial = Math.abs(allocated - total) > 0.01;
+                      const hKey = `invoice-${inv.id}`;
+                      const hOpen = expandedHistory.has(hKey);
                       return (
-                        <tr key={inv.id} className={styles.drillRow}>
+                        <>
+                          <tr key={inv.id} className={styles.drillRow}>
                           <td className={styles.drillRef}>{inv.invoice_number || '—'}</td>
                           <td className={styles.drillVendor}>{inv.vendor_name}</td>
                           <td className={styles.drillRef}>{inv.invoice_date ? String(inv.invoice_date).slice(0, 10) : '—'}</td>
@@ -274,8 +327,17 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
                                 PDF
                               </button>
                             )}
+                            <button className={styles.drillHistoryBtn} onClick={() => toggleHistory(hKey)}>
+                              {hOpen ? '▲' : '▼'} History
+                            </button>
                           </td>
                         </tr>
+                        {hOpen && (
+                          <tr key={`${hKey}-history`} className={styles.drillHistoryRow}>
+                            <td colSpan={9}><InlineHistory source="invoice" id={inv.id} /></td>
+                          </tr>
+                        )}
+                        </>
                       );
                     })}
                   </tbody>

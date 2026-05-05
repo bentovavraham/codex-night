@@ -149,6 +149,14 @@ export const api = {
   confirmBatchHighConfidence: (phaseId: number) => request<{ confirmed: number; failed: number; total: number }>('POST', `/api/phases/${phaseId}/import/confirm-batch-high`),
   rematchQb: (phaseId: number) => request<{ updated: number; total_items: number; qb_transactions_loaded: number }>('POST', `/api/phases/${phaseId}/import/rematch-qb`),
 
+  // History
+  getPhaseHistory: (phaseId: number, params?: { limit?: number; offset?: number }) => {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([,v]) => v != null) as any).toString() : '';
+    return request<any[]>('GET', `/api/phases/${phaseId}/history${qs}`);
+  },
+  getContractHistory: (contractId: number) => request<any[]>('GET', `/api/contracts/${contractId}/history`),
+  getInvoiceHistory: (invoiceId: number) => request<any[]>('GET', `/api/invoices/${invoiceId}/history`),
+
   // Audit
   getAudit: (phaseId: number) => request<any>('GET', `/api/phases/${phaseId}/audit`),
   getTransactionReport: (phaseId: number) => request<any>('GET', `/api/phases/${phaseId}/audit/transaction-report`),

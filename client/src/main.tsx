@@ -16,6 +16,7 @@ import PlaceholderTab from './screens/PlaceholderTab';
 import InvoicesTab from './screens/InvoicesTab';
 import ContractsTab from './screens/ContractsTab';
 import AuditTab from './screens/AuditTab';
+import HistoryTab from './screens/HistoryTab';
 import LoginScreen from './screens/LoginScreen';
 
 const qc = new QueryClient({
@@ -46,7 +47,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="change-orders" element={<PlaceholderTab label="Change Orders" />} />
               <Route path="audit"         element={<AuditTab />} />
               <Route path="alerts"        element={<PlaceholderTab label="Alerts" />} />
-              <Route path="history"       element={<PlaceholderTab label="History" />} />
+              <Route path="history"       element={<HistoryTab />} />
             </Route>
             <Route path="invoices"  element={<PlaceholderTab label="Global Invoices" />} />
             <Route path="by-trade"  element={<PlaceholderTab label="By Trade" />} />
