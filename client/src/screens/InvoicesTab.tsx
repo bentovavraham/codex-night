@@ -384,7 +384,7 @@ function InvoiceList({ invoices, phaseId, onEdit }: {
 
 // ─── Upload + review panel ────────────────────────────────────────────────────
 
-function UploadPanel({
+export function UploadPanel({
   contracts, budgetLines, qbAccounts, projectId, phaseIdNum, onClose, onSaved, editId,
 }: {
   contracts: any[];

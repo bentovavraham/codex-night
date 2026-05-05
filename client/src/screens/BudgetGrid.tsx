@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './BudgetGrid.module.css';
 import { LineItemPanel } from './LineItemPanel';
+import { UploadPanel as InvoicePanel } from './InvoicesTab';
+import { UploadPanel as ContractPanel } from './ContractsTab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -352,13 +354,16 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
   const gla_sf = (project as any)?.gla_sf ? Number((project as any).gla_sf) : null;
   const gla_ac = (project as any)?.gla_ac ? Number((project as any).gla_ac) : null;
 
-  const [collapsed,   setCollapsed]   = useState<Set<string>>(new Set(DEFAULT_COLLAPSED));
-  const [active,      setActive]      = useState<{ rowId: number; field: string }>({ rowId: -1, field: '' });
-  const [showDetails, setShowDetails] = useState(false);
-  const [hideUnused,  setHideUnused]  = useState(false);
-  const [panelRow,    setPanelRow]    = useState<BudgetRow | null>(null);
-  const [drillTarget, setDrillTarget] = useState<DrillTarget | null>(null);
-  const [viewMode,    setViewMode]    = useState<'budget' | 'variance'>('budget');
+  const [collapsed,        setCollapsed]        = useState<Set<string>>(new Set(DEFAULT_COLLAPSED));
+  const [active,           setActive]           = useState<{ rowId: number; field: string }>({ rowId: -1, field: '' });
+  const [showDetails,      setShowDetails]      = useState(false);
+  const [hideUnused,       setHideUnused]       = useState(false);
+  const [panelRow,         setPanelRow]         = useState<BudgetRow | null>(null);
+  const [drillTarget,      setDrillTarget]      = useState<DrillTarget | null>(null);
+  const [viewMode,         setViewMode]         = useState<'budget' | 'variance'>('budget');
+  const [trayOpen,         setTrayOpen]         = useState(true);
+  const [editInvoiceId,    setEditInvoiceId]    = useState<number | null>(null);
+  const [editContractId,   setEditContractId]   = useState<number | null>(null);
 
   const { data: rows = [], isLoading, error } = useQuery<BudgetRow[]>({
     queryKey: ['budget', phaseIdNum, source],
@@ -371,6 +376,28 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     queryFn: () => api.listQbAccounts(),
     staleTime: Infinity,
   });
+
+  const { data: contracts = [] } = useQuery<any[]>({
+    queryKey: ['contracts', phaseIdNum],
+    queryFn: () => api.listContracts(phaseIdNum),
+    enabled: !!phaseIdNum,
+  });
+
+  const { data: unassigned, refetch: refetchUnassigned } = useQuery<{ contracts: any[]; invoices: any[] }>({
+    queryKey: ['unassigned', phaseIdNum],
+    queryFn: () => api.getUnassigned(phaseIdNum),
+    enabled: !!phaseIdNum,
+  });
+  const unassignedContracts = unassigned?.contracts ?? [];
+  const unassignedInvoices  = unassigned?.invoices  ?? [];
+  const unassignedCount     = unassignedContracts.length + unassignedInvoices.length;
+
+  function handleUnassignedSaved() {
+    setEditInvoiceId(null);
+    setEditContractId(null);
+    refetchUnassigned();
+    qc.invalidateQueries({ queryKey: ['budget', phaseIdNum] });
+  }
 
   const initMutation = useMutation({
     mutationFn: () => api.initBudget(phaseIdNum, 'default'),
@@ -732,6 +759,30 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
       {panelRow    && <LineItemPanel row={panelRow} onClose={() => setPanelRow(null)} source={source} />}
       {drillTarget && <DrillPanel phaseId={phaseIdNum} projectId={projectId} target={drillTarget} onClose={() => setDrillTarget(null)} />}
 
+      {/* Full invoice / contract editors opened from unassigned tray */}
+      {editInvoiceId !== null && (
+        <InvoicePanel
+          contracts={contracts}
+          budgetLines={rows}
+          qbAccounts={qbAccounts}
+          projectId={Number(projectId)}
+          phaseIdNum={phaseIdNum}
+          editId={editInvoiceId}
+          onClose={() => setEditInvoiceId(null)}
+          onSaved={handleUnassignedSaved}
+        />
+      )}
+      {editContractId !== null && (
+        <ContractPanel
+          qbAccounts={qbAccounts}
+          projectId={Number(projectId)}
+          phaseId={phaseIdNum}
+          editId={editContractId}
+          onClose={() => setEditContractId(null)}
+          onSaved={handleUnassignedSaved}
+        />
+      )}
+
       <div className={styles.toolbar}>
         <span className={styles.toolLabel}>{viewMode === 'variance' ? 'Variance Report' : 'Budget'}</span>
         {drillTarget && viewMode === 'budget' && (
@@ -760,6 +811,15 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
             title="Download Excel — includes Variance Report + Budget Detail tabs">
             ↓ Excel
           </button>
+          {unassignedCount > 0 && (
+            <button
+              className={`${styles.tbBtn} ${styles.tbBtnWarn}`}
+              onClick={() => setTrayOpen(v => !v)}
+              title="Items with no task assignment — click to review"
+            >
+              ⚠ {unassignedCount} unassigned
+            </button>
+          )}
         </div>
       </div>
 
@@ -882,6 +942,50 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
           </tfoot>
         </table>
       </div>
+
+      {/* ── Unassigned tray ─────────────────────────────────────────── */}
+      {unassignedCount > 0 && trayOpen && (
+        <div className={styles.unassignedTray}>
+          <div className={styles.unassignedHeader}>
+            <span className={styles.unassignedTitle}>⚠ Unassigned — {unassignedCount} item{unassignedCount !== 1 ? 's' : ''} need task assignment</span>
+            <button className={styles.unassignedClose} onClick={() => setTrayOpen(false)}>✕</button>
+          </div>
+
+          {unassignedContracts.length > 0 && (
+            <div className={styles.unassignedSection}>
+              <div className={styles.unassignedSectionLabel}>Contracts ({unassignedContracts.length})</div>
+              {unassignedContracts.map((c: any) => (
+                <div key={c.id} className={styles.unassignedRow}>
+                  <span className={styles.unassignedVendor}>{c.vendor_name || '—'}</span>
+                  <span className={styles.unassignedRef}>{c.reference_number || 'No ref'}</span>
+                  <span className={styles.unassignedAmt}>{usd.format(Number(c.total_value))}</span>
+                  <span className={`${styles.unassignedStatus} ${styles[`status_${c.status}`] ?? ''}`}>{c.status}</span>
+                  <button className={styles.unassignedAssignBtn} onClick={() => setEditContractId(c.id)}>
+                    Assign →
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {unassignedInvoices.length > 0 && (
+            <div className={styles.unassignedSection}>
+              <div className={styles.unassignedSectionLabel}>Invoices ({unassignedInvoices.length})</div>
+              {unassignedInvoices.map((inv: any) => (
+                <div key={inv.id} className={styles.unassignedRow}>
+                  <span className={styles.unassignedVendor}>{inv.vendor_name || '—'}</span>
+                  <span className={styles.unassignedRef}>#{inv.invoice_number || '—'}</span>
+                  <span className={styles.unassignedAmt}>{usd.format(Number(inv.amount))}</span>
+                  <span className={styles.unassignedType}>{inv.invoice_type}</span>
+                  <button className={styles.unassignedAssignBtn} onClick={() => setEditInvoiceId(inv.id)}>
+                    Assign →
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

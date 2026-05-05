@@ -1422,6 +1422,46 @@ router.put('/invoice-qb-lines/:invoiceId', requireAuth, async (req, res, next) =
   } catch (err) { next(err); }
 });
 
+// GET /api/phases/:phaseId/budget/unassigned
+// Returns contracts and invoices in this phase with no task assignment anywhere.
+router.get('/phases/:phaseId/budget/unassigned', requireAuth, async (req, res, next) => {
+  try {
+    const phaseId = Number(req.params.phaseId);
+
+    const contracts = (await pool.query(`
+      SELECT c.id, c.reference_number, c.total_value, c.status, c.created_at,
+             v.name AS vendor_name
+      FROM contracts c
+      LEFT JOIN vendors v ON v.id = c.vendor_id
+      WHERE c.phase_id = $1
+        AND c.status NOT IN ('voided')
+        AND c.phase_budget_line_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM contract_line_items cli
+          WHERE cli.contract_id = c.id AND cli.phase_budget_line_id IS NOT NULL
+        )
+      ORDER BY c.created_at DESC
+    `, [phaseId])).rows;
+
+    const invoices = (await pool.query(`
+      SELECT i.id, i.invoice_number, i.invoice_type, i.amount, i.status,
+             i.invoice_date, i.created_at, v.name AS vendor_name
+      FROM invoices i
+      LEFT JOIN vendors v ON v.id = i.vendor_id
+      WHERE i.phase_id = $1
+        AND i.status NOT IN ('voided')
+        AND i.phase_budget_line_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM invoice_line_items ili
+          WHERE ili.invoice_id = i.id AND ili.phase_budget_line_id IS NOT NULL
+        )
+      ORDER BY i.created_at DESC
+    `, [phaseId])).rows;
+
+    res.json({ contracts, invoices });
+  } catch (err) { next(err); }
+});
+
 // GET /api/phases/:phaseId/budget/export-excel
 // Downloads a .xlsx file: Variance Report sheet + full Budget Detail sheet with all columns.
 router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res, next) => {

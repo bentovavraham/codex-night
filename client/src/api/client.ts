@@ -67,7 +67,8 @@ export const api = {
     primary_reason?: string;
   }>('POST', `/api/phases/${phaseId}/suggest-line-tasks`, body),
   drillBudgetLine: (phaseId: number, lineId: number) => request<any>('GET', `/api/phases/${phaseId}/budget-lines/${lineId}/drill`),
-  initBudget:   (phaseId: number, template: string) => request<any>('POST', `/api/phases/${phaseId}/budget/init`, { template }),
+  initBudget:      (phaseId: number, template: string) => request<any>('POST', `/api/phases/${phaseId}/budget/init`, { template }),
+  getUnassigned:   (phaseId: number) => request<{ contracts: any[]; invoices: any[] }>('GET', `/api/phases/${phaseId}/budget/unassigned`),
 
   // Contracts
   listContracts:   (phaseId: number)  => request<any[]>('GET',  `/api/phases/${phaseId}/contracts`),
