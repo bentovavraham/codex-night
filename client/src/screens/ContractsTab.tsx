@@ -33,7 +33,7 @@ interface ContractForm {
 
 const EMPTY_FORM: ContractForm = {
   vendor_name: '', reference_number: '', contract_date: '',
-  description: '', status: 'draft',
+  description: '', status: 'pending',
   line_items: [], reviewed: false,
 };
 

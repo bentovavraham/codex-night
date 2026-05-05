@@ -902,9 +902,31 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
       ORDER BY i.invoice_date DESC NULLS LAST, i.id
     `, [lineId]);
 
+    // Attach per-contract line items so the UI can show task-level split
+    let contracts = contractsQ.rows;
+    if (contracts.length > 0) {
+      const contractIds = contracts.map(c => c.id);
+      const lineItemsQ = await pool.query(`
+        SELECT cli.contract_id, cli.billing_type, cli.description,
+               cli.budgeted_amount::float AS budgeted_amount,
+               cli.phase_budget_line_id,
+               pbl.task_name AS budget_line_name
+          FROM contract_line_items cli
+          LEFT JOIN phase_budget_lines pbl ON pbl.id = cli.phase_budget_line_id
+         WHERE cli.contract_id = ANY($1)
+         ORDER BY cli.id
+      `, [contractIds]);
+      const itemsByContract = new Map();
+      for (const row of lineItemsQ.rows) {
+        if (!itemsByContract.has(row.contract_id)) itemsByContract.set(row.contract_id, []);
+        itemsByContract.get(row.contract_id).push(row);
+      }
+      contracts = contracts.map(c => ({ ...c, line_items: itemsByContract.get(c.id) ?? [] }));
+    }
+
     res.json({
-      contracts: contractsQ.rows,
-      invoices:  invoicesQ.rows,
+      contracts,
+      invoices: invoicesQ.rows,
     });
   } catch (err) { next(err); }
 });

@@ -391,6 +391,7 @@ interface InvLineItem {
   hours: string;
   rate: string;
   qb_account_id: number | null;
+  phase_budget_line_id: number | null;
   is_ai_suggested: boolean;
   suggestion_confidence: string | null;
   suggestion_reason: string | null;
@@ -486,6 +487,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
         hours: li.hours != null ? String(li.hours) : '',
         rate: li.rate != null ? String(li.rate) : '',
         qb_account_id: li.qb_account_id ?? aiId,
+        phase_budget_line_id: li.suggested_budget_line_id ?? null,
         is_ai_suggested: hasAi && (li.qb_account_id == null),
         suggestion_confidence: li.qb_suggestion_confidence ?? null,
         suggestion_reason: li.qb_suggestion_reason ?? null,
@@ -844,11 +846,11 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                   onChange={e => setDescription(e.target.value)} rows={3} placeholder="What is this invoice for?" />
               </div>
 
-              {/* Invoice line items — editable with GL code */}
+              {/* Invoice line items — editable with GL code + budget task */}
               {invoiceLines.length > 0 ? (
                 <div className={styles.rSection}>
                   <div className={styles.rSectionTitle}>
-                    Line Items — assign GL codes
+                    Line Items — assign GL code &amp; budget task
                     {invoiceLines.some(l => l.is_ai_suggested) && (
                       <span className={styles.aiLegend}>✦ AI suggestion — hover for reason, click to override</span>
                     )}
@@ -858,6 +860,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                       <tr className={styles.rThead}>
                         <th className={styles.rColType}>TYPE</th>
                         <th className={styles.rColGl}>GL CODE</th>
+                        <th className={styles.rColBudgetLine}>BUDGET TASK</th>
                         <th className={styles.rColDesc}>DESCRIPTION</th>
                         <th className={`${styles.rColAmt} ${styles.right}`}>AMOUNT</th>
                       </tr>
@@ -880,6 +883,17 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                               onChange={id => setInvoiceLines(lines => {
                                 const n = [...lines];
                                 n[i] = { ...n[i], qb_account_id: id, is_ai_suggested: false };
+                                return n;
+                              })}
+                            />
+                          </td>
+                          <td className={styles.rColBudgetLine}>
+                            <InlineBudgetLinePicker
+                              lines={budgetLines}
+                              value={li.phase_budget_line_id}
+                              onChange={id => setInvoiceLines(lines => {
+                                const n = [...lines];
+                                n[i] = { ...n[i], phase_budget_line_id: id };
                                 return n;
                               })}
                             />

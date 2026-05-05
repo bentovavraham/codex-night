@@ -211,6 +211,8 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
                     {contracts.map((c: any) => {
                       const hKey = `contract-${c.id}`;
                       const hOpen = expandedHistory.has(hKey);
+                      const tasks: any[] = c.line_items ?? [];
+                      const isMultiTask = tasks.length > 1;
                       return (
                         <>
                           <tr key={c.id} className={styles.drillRow}>
@@ -221,7 +223,7 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
                                 style={{ background: (STATUS_COLOR[c.status] ?? '#888') + '22', color: STATUS_COLOR[c.status] ?? '#555' }}>
                                 {c.status}
                               </span>
-                              {!c.is_primary && <span className={styles.drillPartial}>partial</span>}
+                              {isMultiTask && <span className={styles.drillPartial}>split</span>}
                             </td>
                             <td className={`${styles.drillAmt} ${styles.drillAmtBold}`}>{usd.format(Number(c.allocated_amount))}</td>
                             <td className={`${styles.drillAmt} ${styles.drillAmtDim}`}>{usd.format(Number(c.total_value))}</td>
@@ -236,6 +238,23 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
                               </button>
                             </td>
                           </tr>
+                          {/* Task breakdown for multi-task contracts */}
+                          {isMultiTask && tasks.map((task: any, ti: number) => (
+                            <tr key={`${c.id}-task-${ti}`} className={styles.drillTaskRow}>
+                              <td />
+                              <td colSpan={2} className={styles.drillTaskName}>
+                                {task.budget_line_name || task.description || '—'}
+                                {task.billing_type === 'tm' && <span className={styles.drillPartial}>T&M</span>}
+                              </td>
+                              <td className={`${styles.drillAmt} ${styles.drillAmtDim}`}>
+                                {task.billing_type === 'tm' ? <span className={styles.drillPartial}>T&M</span> : usd.format(Number(task.budgeted_amount))}
+                              </td>
+                              <td className={styles.drillAmtDim} style={{ fontSize: 11, color: '#9aa0a6' }}>
+                                {task.phase_budget_line_id ? '→ ' + (task.budget_line_name || 'line') : <span className={styles.drillPartial}>unassigned</span>}
+                              </td>
+                              <td />
+                            </tr>
+                          ))}
                           {hOpen && (
                             <tr key={`${hKey}-history`} className={styles.drillHistoryRow}>
                               <td colSpan={6}><InlineHistory source="contract" id={c.id} /></td>
