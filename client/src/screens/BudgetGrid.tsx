@@ -973,21 +973,21 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
               <th className={styles.th} />
               <th className={`${styles.th} ${styles.thLeft}`}>Acct #</th>
               <th className={`${styles.th} ${styles.thLeft}`}>Task / Description</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Budgeted</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Contracted ↓</th>
-              <th className={`${styles.th} ${styles.thRight}`}>COs</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Total Commit</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Fixed</th>
-              <th className={`${styles.th} ${styles.thRight}`}>T&amp;M</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Expense</th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Billed ↓</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Amt Due</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Paid</th>
-              <th className={`${styles.th} ${styles.thRight}`}>$/SF</th>
-              <th className={`${styles.th} ${styles.thRight}`}>$/AC</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Budgeted<div className={styles.thFormula}>PM input</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget<div className={styles.thFormula}>Budgeted − Billed</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. %<div className={styles.thFormula}>Rem ÷ Budgeted</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Contracted ↓<div className={styles.thFormula}>Σ contract line items</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>COs<div className={styles.thFormula}>Σ change orders</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Total Commit<div className={styles.thFormula}>Contracted + COs</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. %<div className={styles.thFormula}>Rem ÷ Total Commit</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Fixed<div className={styles.thFormula}>Σ fixed invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>T&amp;M<div className={styles.thFormula}>Σ T&amp;M invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Expense<div className={styles.thFormula}>Σ expense invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Billed ↓<div className={styles.thFormula}>Fixed + T&amp;M + Expense</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Amt Due<div className={styles.thFormula}>Billed − Paid</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Paid<div className={styles.thFormula}>Σ paid invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>$/SF<div className={styles.thFormula}>Billed ÷ GLA sf</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>$/AC<div className={styles.thFormula}>Billed ÷ GLA ac</div></th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>QB Codes Used</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Calc Method</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Consultant</th>

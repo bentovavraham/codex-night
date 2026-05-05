@@ -110,8 +110,7 @@
 }
 
 .th {
-  padding: 0 8px;
-  height: 26px;
+  padding: 4px 8px 5px;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -121,9 +120,20 @@
   white-space: nowrap;
   user-select: none;
   background: #fff;
+  vertical-align: bottom;
 }
 .thLeft  { text-align: left; }
 .thRight { text-align: right; }
+
+.thFormula {
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #9aa0a6;
+  margin-top: 2px;
+  white-space: nowrap;
+}
 
 /* ── Level 1: Root account rows (1600 Land, 1700 Entitlement…) ──────────── */
 
