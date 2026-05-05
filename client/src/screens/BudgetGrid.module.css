@@ -181,10 +181,10 @@
 /* ── Level 2: Sub-group rows (1710 Survey, 1720 Engineering…) ────────────── */
 
 .secRow {
-  background: #fff;
+  background: #f1f3f4;
   cursor: pointer;
 }
-.secRow:hover { background: #f8f9fa; }
+.secRow:hover { background: #e8eaed; }
 
 .secGutter {
   padding: 0 0 0 18px;
