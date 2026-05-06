@@ -1838,7 +1838,7 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
             JOIN change_orders co ON co.id = col.change_order_id
             WHERE co.status NOT IN ('voided','rejected') AND col.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT col.budgeted_amount
+            SELECT col.budgeted_amount AS contribution
             FROM change_order_line_items col
             JOIN change_orders co ON co.id = col.change_order_id
             JOIN contracts c2 ON c2.id = co.contract_id
@@ -1850,7 +1850,7 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
               AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o
                               WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
             UNION ALL
-            SELECT co.amount
+            SELECT co.amount AS contribution
             FROM change_orders co JOIN contracts c ON c.id = co.contract_id
             WHERE co.status NOT IN ('voided','rejected')
               AND c.phase_budget_line_id = pbl.id
@@ -1861,20 +1861,20 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         -- T&M charges (4-path)
         COALESCE((
           SELECT SUM(contribution) FROM (
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'tm' AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'tm'
               AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id AND inv.phase_id = pbl.phase_id
               AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
             UNION ALL
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'tm'
               AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL AND inv.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT inv.amount FROM invoices inv
+            SELECT inv.amount AS contribution FROM invoices inv
             WHERE inv.invoice_type = 'tm' AND inv.status NOT IN ('voided','rejected')
               AND inv.phase_budget_line_id = pbl.id
               AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
@@ -1884,20 +1884,20 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         -- Expense charges (4-path)
         COALESCE((
           SELECT SUM(contribution) FROM (
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'expense' AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'expense'
               AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id AND inv.phase_id = pbl.phase_id
               AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
             UNION ALL
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'expense'
               AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL AND inv.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT inv.amount FROM invoices inv
+            SELECT inv.amount AS contribution FROM invoices inv
             WHERE inv.invoice_type = 'expense' AND inv.status NOT IN ('voided','rejected')
               AND inv.phase_budget_line_id = pbl.id
               AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
@@ -1907,20 +1907,20 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         -- Fixed charges (4-path)
         COALESCE((
           SELECT SUM(contribution) FROM (
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'fixed' AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'fixed'
               AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id AND inv.phase_id = pbl.phase_id
               AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
             UNION ALL
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'fixed'
               AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL AND inv.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT inv.amount FROM invoices inv
+            SELECT inv.amount AS contribution FROM invoices inv
             WHERE inv.invoice_type = 'fixed' AND inv.status NOT IN ('voided','rejected')
               AND inv.phase_budget_line_id = pbl.id
               AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
@@ -1930,20 +1930,20 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         -- Billed total (4-path)
         COALESCE((
           SELECT SUM(contribution) FROM (
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected') AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected')
               AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id AND inv.phase_id = pbl.phase_id
               AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
             UNION ALL
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected')
               AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL AND inv.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT inv.amount FROM invoices inv
+            SELECT inv.amount AS contribution FROM invoices inv
             WHERE inv.status NOT IN ('voided','rejected')
               AND inv.phase_budget_line_id = pbl.id
               AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
@@ -1953,20 +1953,20 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         -- Paid (4-path, status = paid)
         COALESCE((
           SELECT SUM(contribution) FROM (
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status = 'paid' AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status = 'paid'
               AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NOT NULL
               AND ili.qb_account_id = pbl.qb_account_id AND inv.phase_id = pbl.phase_id
               AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
             UNION ALL
-            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount AS contribution FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status = 'paid'
               AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL AND inv.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT inv.amount FROM invoices inv
+            SELECT inv.amount AS contribution FROM invoices inv
             WHERE inv.status = 'paid'
               AND inv.phase_budget_line_id = pbl.id
               AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
