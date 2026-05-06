@@ -171,70 +171,6 @@ function QbPicker({
   );
 }
 
-// ─── Budget line autocomplete picker ─────────────────────────────────────────
-
-function BudgetLinePicker({ lines, value, onChange }: {
-  lines: any[];
-  value: number | null;
-  onChange: (id: number | null) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const ref = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const selected = lines.find(l => l.id === value) ?? null;
-
-  const filtered = useMemo(() => {
-    if (!query.trim()) return lines;
-    const q = query.toLowerCase();
-    return lines.filter(l =>
-      l.task_name.toLowerCase().includes(q) ||
-      (l.discipline && l.discipline.toLowerCase().includes(q))
-    );
-  }, [lines, query]);
-
-  useEffect(() => {
-    function onOut(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
-    if (open) document.addEventListener('mousedown', onOut);
-    return () => document.removeEventListener('mousedown', onOut);
-  }, [open]);
-
-  function openDropdown() { setQuery(''); setOpen(true); setTimeout(() => inputRef.current?.focus(), 30); }
-  function pick(l: any) { onChange(l.id); setOpen(false); setQuery(''); }
-  function clear(e: React.MouseEvent) { e.stopPropagation(); onChange(null); }
-
-  const label = selected ? `${selected.task_name}${selected.discipline ? ` · ${selected.discipline}` : ''}` : null;
-
-  return (
-    <div className={styles.qbPicker} ref={ref}>
-      <div className={`${styles.qbDisplay} ${!selected ? styles.qbEmpty : ''}`} onClick={openDropdown}>
-        {selected ? (
-          <>
-            <span className={styles.qbName}>{label}</span>
-            <button className={styles.qbClear} onClick={clear} title="Clear">✕</button>
-          </>
-        ) : <span className={styles.qbPlaceholder}>Search tasks…</span>}
-      </div>
-      {open && (
-        <div className={styles.qbDropdown}>
-          <input ref={inputRef} className={styles.qbSearch} value={query}
-            onChange={e => setQuery(e.target.value)} placeholder="Type task name or discipline…" />
-          <div className={styles.qbList}>
-            {filtered.map(l => (
-              <div key={l.id}
-                className={`${styles.qbOption} ${l.id === value ? styles.qbOptionSelected : ''}`}
-                onMouseDown={() => pick(l)}>
-                <span className={styles.qbOptName}>{l.task_name}{l.discipline ? ` · ${l.discipline}` : ''}</span>
-              </div>
-            ))}
-            {filtered.length === 0 && <div className={styles.qbNoMatch}>No match</div>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Invoice list ─────────────────────────────────────────────────────────────
 
@@ -921,7 +857,6 @@ export function UploadPanel({
                       ? budgetLines.filter((b: any) => b.qb_account_id === li.qb_account_id)
                       : [];
                     const allTasks: any[] = budgetLines as any[];
-                    const isShared = matchingTasks.length > 1;
                     const showPicker = true; // always — high-fidelity bulk review surface
                     return (
                     <tr key={i} className={styles.catRow}>
