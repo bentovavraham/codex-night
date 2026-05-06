@@ -33,7 +33,7 @@ interface ContractForm {
 
 const EMPTY_FORM: ContractForm = {
   vendor_name: '', reference_number: '', contract_date: '',
-  description: '', status: 'pending',
+  description: '', status: 'active',
   line_items: [], reviewed: false,
 };
 
@@ -848,15 +848,6 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
                   <label className={styles.hfLabel}>Contract # <ConfDot level={conf.reference_number} /></label>
                   <input className={styles.hfInput} value={form.reference_number}
                     onChange={e => setF('reference_number', e.target.value)} placeholder="e.g. 203010-2024Sat" />
-                </div>
-                <div className={styles.hfGroup}>
-                  <label className={styles.hfLabel}>Status</label>
-                  <select className={styles.hfSelect} value={form.status}
-                    onChange={e => setF('status', e.target.value)}>
-                    <option value="draft">Draft</option>
-                    <option value="pending">Pending</option>
-                    <option value="active">Active</option>
-                  </select>
                 </div>
               </div>
 

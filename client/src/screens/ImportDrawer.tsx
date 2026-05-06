@@ -458,7 +458,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   const [totalValue, setTotalValue] = useState(ext.total_value ? String(ext.total_value) : '');
   const [contractDate, setContractDate] = useState(ext.contract_date || '');
   const [referenceNumber, setReferenceNumber] = useState(ext.reference_number || '');
-  const [contractStatus, setContractStatus] = useState('active');
+  const contractStatus = 'active';
   const [lineItems, setLineItems] = useState<LineItem[]>(() =>
     (ext.line_items || []).map((li: any) => ({
       billing_type: (['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed') as LineItem['billing_type'],
@@ -474,7 +474,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   const [amount, setAmount] = useState(ext.amount ? String(ext.amount) : '');
   const [invoiceDate, setInvoiceDate] = useState(ext.invoice_date || '');
   const [invoiceType, setInvoiceType] = useState('fixed');
-  const [invoiceStatus, setInvoiceStatus] = useState('pending');
+  const invoiceStatus = 'pending';
   const [invoiceLines, setInvoiceLines] = useState<InvLineItem[]>(() =>
     (ext.line_items || []).map((li: any) => {
       const aiId = li.suggested_qb_account_id ?? null;
@@ -719,15 +719,6 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                   <input className={styles.rInput} value={referenceNumber}
                     onChange={e => setReferenceNumber(e.target.value)} placeholder="e.g. 24117" />
                 </div>
-                <div className={styles.rGroup}>
-                  <label className={styles.rLabel}>Status</label>
-                  <select className={styles.rSelect} value={contractStatus} onChange={e => setContractStatus(e.target.value)}>
-                    <option value="draft">Draft</option>
-                    <option value="pending">Pending</option>
-                    <option value="active">Active</option>
-                    <option value="completed">Completed</option>
-                  </select>
-                </div>
               </div>
 
               <div className={styles.rGroup}>
@@ -827,15 +818,6 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                     <option value="fixed">Fixed</option>
                     <option value="tm">T&amp;M</option>
                     <option value="expense">Expense</option>
-                  </select>
-                </div>
-                <div className={styles.rGroup}>
-                  <label className={styles.rLabel}>Status</label>
-                  <select className={styles.rSelect} value={invoiceStatus} onChange={e => setInvoiceStatus(e.target.value)}>
-                    <option value="pending">Pending</option>
-                    <option value="pm_approved">PM Approved</option>
-                    <option value="approved">Approved</option>
-                    <option value="paid">Paid</option>
                   </select>
                 </div>
               </div>

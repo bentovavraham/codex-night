@@ -388,7 +388,7 @@ function ReviewForm({ item, budgetLines, contracts, qbAccounts, onConfirm, onDis
   const [totalValue, setTotalValue] = useState(ext.total_value ? String(ext.total_value) : '');
   const [contractDate, setContractDate] = useState(ext.contract_date || '');
   const [referenceNumber, setReferenceNumber] = useState(ext.reference_number || '');
-  const [contractStatus, setContractStatus] = useState('active');
+  const contractStatus = 'active';
   const [lineItems, setLineItems] = useState<LineItem[]>(() =>
     (ext.line_items || []).map((li: any) => ({
       billing_type: (['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed') as LineItem['billing_type'],
@@ -402,7 +402,7 @@ function ReviewForm({ item, budgetLines, contracts, qbAccounts, onConfirm, onDis
   const [invoiceNumber, setInvoiceNumber] = useState(ext.invoice_number || '');
   const [amount, setAmount] = useState(ext.amount ? String(ext.amount) : '');
   const [invoiceDate, setInvoiceDate] = useState(ext.invoice_date || '');
-  const [invoiceStatus, setInvoiceStatus] = useState('pending');
+  const invoiceStatus = 'pending';
   const [contractId, setContractId] = useState<number | null>(ext.suggested_contract_id ?? null);
   const [invoiceLineItems, setInvoiceLineItems] = useState<InvoiceLineItem[]>(() =>
     (ext.line_items || []).map((li: any) => ({
@@ -540,15 +540,6 @@ function ReviewForm({ item, budgetLines, contracts, qbAccounts, onConfirm, onDis
                 <label className={styles.fLabel}>Ref / Contract #</label>
                 <input className={styles.fInput} value={referenceNumber} onChange={e => setReferenceNumber(e.target.value)} placeholder="e.g. 24117" />
               </div>
-              <div className={styles.fGroup}>
-                <label className={styles.fLabel}>Status</label>
-                <select className={styles.fSelect} value={contractStatus} onChange={e => setContractStatus(e.target.value)}>
-                  <option value="draft">Draft</option>
-                  <option value="pending">Pending</option>
-                  <option value="active">Active</option>
-                  <option value="completed">Completed</option>
-                </select>
-              </div>
             </div>
 
             <div className={styles.fGroup}>
@@ -649,15 +640,6 @@ function ReviewForm({ item, budgetLines, contracts, qbAccounts, onConfirm, onDis
               <div className={styles.fGroup}>
                 <label className={styles.fLabel}>Invoice Date</label>
                 <input className={styles.fInput} value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} type="date" />
-              </div>
-              <div className={styles.fGroup}>
-                <label className={styles.fLabel}>Status</label>
-                <select className={styles.fSelect} value={invoiceStatus} onChange={e => setInvoiceStatus(e.target.value)}>
-                  <option value="pending">Pending</option>
-                  <option value="pm_approved">PM Approved</option>
-                  <option value="approved">Approved</option>
-                  <option value="paid">Paid</option>
-                </select>
               </div>
             </div>
 
