@@ -463,6 +463,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     queryKey: ['budget', phaseIdNum, source],
     queryFn: () => api.getBudget(phaseIdNum, source),
     enabled: !!phaseIdNum,
+    refetchOnWindowFocus: true,
   });
 
   const { data: qbAccounts = [] } = useQuery<QbAccount[]>({
