@@ -302,7 +302,10 @@ function ContractList({ contracts, phaseId, onEdit, onEditCo }: {
 
   const patchMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: any }) => api.updateContract(id, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['phaseContracts', phaseId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['phaseContracts', phaseId] });
+      qc.invalidateQueries({ queryKey: ['budget',         phaseId] });
+    },
   });
 
   return (
