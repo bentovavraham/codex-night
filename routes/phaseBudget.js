@@ -1651,10 +1651,10 @@ router.get('/phases/:phaseId/history', requireAuth, async (req, res, next) => {
 });
 
 // GET /api/phases/:phaseId/budget/export-excel
-// Downloads a .xlsx file: Variance Report sheet + full Budget Detail sheet with all columns.
+// Exact replica of the budget grid: all rows, all columns, 3-level GL hierarchy,
+// same 4-path allocation math as the screen.
 router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res, next) => {
   try {
-    const XLSX = require('xlsx');
     const phaseId = Number(req.params.phaseId);
 
     // ── Fetch phase + project name + site dimensions for the filename ──
@@ -1665,7 +1665,7 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         WHERE ph.id = $1`, [phaseId]
     )).rows[0] || { phase_name: 'Phase', project_name: 'Project', gla_sf: null, gla_ac: null };
 
-    // ── Full budget query (same as GET /budget endpoint) ──
+    // ── Full budget query — identical 4-path allocation as GET /budget ──
     const rawRows = (await pool.query(`
       SELECT
         pbl.id,
@@ -1679,16 +1679,16 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         pbl.notes,
         pbl.sort_order,
         pbl.qb_account_id,
+        pbl.source,
 
-        qa.account_number                       AS qb_account_number,
-        qa.short_name                           AS qb_short_name,
-        qa.full_name                            AS qb_full_name,
-        qp.account_number                       AS qb_parent_number,
-        qp.short_name                           AS qb_parent_name,
-        qp.full_name                            AS qb_parent_full_name,
-        qpp.account_number                      AS qb_grandparent_number,
-        qpp.short_name                          AS qb_grandparent_name,
+        qa.account_number  AS qb_account_number,
+        qa.short_name      AS qb_short_name,
+        qp.account_number  AS qb_parent_number,
+        qp.short_name      AS qb_parent_name,
+        qpp.account_number AS qb_grandparent_number,
+        qpp.short_name     AS qb_grandparent_name,
 
+        -- Committed (same logic as main budget endpoint)
         COALESCE((
           SELECT SUM(contribution) FROM (
             SELECT cli.budgeted_amount AS contribution
@@ -1705,121 +1705,146 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
           ) sub
         ), 0) AS committed,
 
-        COALESCE((
-          SELECT SUM(co.amount)
-          FROM change_orders co
-          JOIN contracts c ON c.id = co.contract_id
-          WHERE c.phase_budget_line_id = pbl.id AND co.status = 'approved'
-        ), 0) AS co_value,
-
+        -- COs: full 3-path cascade matching main budget endpoint
         COALESCE((
           SELECT SUM(contribution) FROM (
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.phase_budget_line_id = pbl.id AND ili.billing_type = 'tm'
+            SELECT col.budgeted_amount AS contribution
+            FROM change_order_line_items col
+            JOIN change_orders co ON co.id = col.change_order_id
+            WHERE co.status NOT IN ('voided','rejected') AND col.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'tm' AND ili.phase_budget_line_id IS NULL
+            SELECT col.budgeted_amount
+            FROM change_order_line_items col
+            JOIN change_orders co ON co.id = col.change_order_id
+            JOIN contracts c2 ON c2.id = co.contract_id
+            WHERE co.status NOT IN ('voided','rejected')
+              AND c2.phase_id = pbl.phase_id
+              AND col.phase_budget_line_id IS NULL
+              AND col.qb_account_id IS NOT NULL
+              AND col.qb_account_id = pbl.qb_account_id
+              AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o
+                              WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
+            UNION ALL
+            SELECT co.amount
+            FROM change_orders co JOIN contracts c ON c.id = co.contract_id
+            WHERE co.status NOT IN ('voided','rejected')
+              AND c.phase_budget_line_id = pbl.id
+              AND NOT EXISTS (SELECT 1 FROM change_order_line_items x WHERE x.change_order_id = co.id)
+          ) sub
+        ), 0) AS co_value,
+
+        -- T&M charges (4-path)
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'tm' AND ili.phase_budget_line_id = pbl.id
+            UNION ALL
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'tm'
+              AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NOT NULL
+              AND ili.qb_account_id = pbl.qb_account_id AND inv.phase_id = pbl.phase_id
+              AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
+            UNION ALL
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'tm'
+              AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL AND inv.phase_budget_line_id = pbl.id
+            UNION ALL
+            SELECT inv.amount FROM invoices inv
+            WHERE inv.invoice_type = 'tm' AND inv.status NOT IN ('voided','rejected')
               AND inv.phase_budget_line_id = pbl.id
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
-            UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
-            WHERE inv.invoice_type = 'tm'
-              AND inv.status NOT IN ('voided','rejected')
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.billing_type IS NOT NULL)
-              AND (inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
           ) sub
         ), 0) AS tm_charges,
 
+        -- Expense charges (4-path)
         COALESCE((
           SELECT SUM(contribution) FROM (
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.phase_budget_line_id = pbl.id AND ili.billing_type = 'expense'
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'expense' AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'expense' AND ili.phase_budget_line_id IS NULL
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'expense'
+              AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NOT NULL
+              AND ili.qb_account_id = pbl.qb_account_id AND inv.phase_id = pbl.phase_id
+              AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
+            UNION ALL
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'expense'
+              AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL AND inv.phase_budget_line_id = pbl.id
+            UNION ALL
+            SELECT inv.amount FROM invoices inv
+            WHERE inv.invoice_type = 'expense' AND inv.status NOT IN ('voided','rejected')
               AND inv.phase_budget_line_id = pbl.id
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
-            UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
-            WHERE inv.invoice_type = 'expense'
-              AND inv.status NOT IN ('voided','rejected')
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.billing_type IS NOT NULL)
-              AND (inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
           ) sub
         ), 0) AS expense_charges,
 
+        -- Fixed charges (4-path)
         COALESCE((
           SELECT SUM(contribution) FROM (
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.phase_budget_line_id = pbl.id AND ili.billing_type = 'fixed'
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'fixed' AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'fixed' AND ili.phase_budget_line_id IS NULL
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'fixed'
+              AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NOT NULL
+              AND ili.qb_account_id = pbl.qb_account_id AND inv.phase_id = pbl.phase_id
+              AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
+            UNION ALL
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','rejected') AND ili.billing_type = 'fixed'
+              AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL AND inv.phase_budget_line_id = pbl.id
+            UNION ALL
+            SELECT inv.amount FROM invoices inv
+            WHERE inv.invoice_type = 'fixed' AND inv.status NOT IN ('voided','rejected')
               AND inv.phase_budget_line_id = pbl.id
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
-            UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
-            WHERE inv.invoice_type = 'fixed'
-              AND inv.status NOT IN ('voided','rejected')
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.billing_type IS NOT NULL)
-              AND (inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
           ) sub
         ), 0) AS fixed_charges,
 
+        -- Billed total (4-path)
         COALESCE((
           SELECT SUM(contribution) FROM (
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.phase_budget_line_id = pbl.id
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','rejected') AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status NOT IN ('voided','rejected')
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
-              AND (inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
+              AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NOT NULL
+              AND ili.qb_account_id = pbl.qb_account_id AND inv.phase_id = pbl.phase_id
+              AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
+            UNION ALL
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status NOT IN ('voided','rejected')
+              AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL AND inv.phase_budget_line_id = pbl.id
+            UNION ALL
+            SELECT inv.amount FROM invoices inv
+            WHERE inv.status NOT IN ('voided','rejected')
+              AND inv.phase_budget_line_id = pbl.id
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
           ) sub
         ), 0) AS billed,
 
+        -- Paid (4-path, status = paid)
         COALESCE((
           SELECT SUM(contribution) FROM (
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status = 'paid' AND ili.phase_budget_line_id = pbl.id
             UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
             WHERE inv.status = 'paid'
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id AND x.phase_budget_line_id IS NOT NULL)
-              AND (inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided'))))
+              AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NOT NULL
+              AND ili.qb_account_id = pbl.qb_account_id AND inv.phase_id = pbl.phase_id
+              AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o WHERE o.phase_id = pbl.phase_id AND o.qb_account_id = pbl.qb_account_id AND o.id <> pbl.id)
+            UNION ALL
+            SELECT ili.amount FROM invoice_line_items ili JOIN invoices inv ON inv.id = ili.invoice_id
+            WHERE inv.status = 'paid'
+              AND ili.phase_budget_line_id IS NULL AND ili.qb_account_id IS NULL AND inv.phase_budget_line_id = pbl.id
+            UNION ALL
+            SELECT inv.amount FROM invoices inv
+            WHERE inv.status = 'paid'
+              AND inv.phase_budget_line_id = pbl.id
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
           ) sub
         ), 0) AS paid,
 
@@ -1829,14 +1854,9 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
           JOIN invoices inv ON inv.id = ili.invoice_id
           JOIN qb_accounts qa2 ON qa2.id = ili.qb_account_id
           WHERE inv.status NOT IN ('voided','rejected')
-            AND qa2.account_number IS NOT NULL
-            AND (
-              ili.phase_budget_line_id = pbl.id
-              OR (ili.phase_budget_line_id IS NULL AND (
-                inv.phase_budget_line_id = pbl.id
-                OR (inv.phase_budget_line_id IS NULL AND inv.contract_id IN (SELECT id FROM contracts WHERE phase_budget_line_id = pbl.id AND status NOT IN ('voided')))
-              ))
-            )
+            AND qa2.account_number IS NOT NULL AND inv.phase_id = pbl.phase_id
+            AND (ili.phase_budget_line_id = pbl.id
+                 OR (ili.phase_budget_line_id IS NULL AND ili.qb_account_id = pbl.qb_account_id))
         ), '') AS qb_codes_used
 
       FROM phase_budget_lines pbl
@@ -1848,84 +1868,146 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         COALESCE(qpp.sort_order, qp.sort_order, qa.sort_order, 9999),
         COALESCE(qp.sort_order, qa.sort_order, 9999),
         COALESCE(qa.sort_order, 9999),
-        pbl.sort_order,
-        pbl.id
+        pbl.sort_order, pbl.id
     `, [phaseId])).rows;
 
-    // Apply same computed fields as the GET /budget endpoint
+    // Compute derived fields — identical to GET /budget endpoint
     const rows = rawRows.map(r => {
-      const budgeted         = parseFloat(r.budgeted_amount)  || 0;
-      const committed        = parseFloat(r.committed)        || 0;
-      const co_value         = parseFloat(r.co_value)         || 0;
+      const budgeted         = parseFloat(r.budgeted_amount) || 0;
+      const committed        = parseFloat(r.committed)       || 0;
+      const co_value         = parseFloat(r.co_value)        || 0;
       const total_commitment = committed + co_value;
-      const fixed_charges    = parseFloat(r.fixed_charges)    || 0;
-      const tm_charges       = parseFloat(r.tm_charges)       || 0;
-      const expense_charges  = parseFloat(r.expense_charges)  || 0;
-      const billed           = parseFloat(r.billed)           || 0;
-      const paid             = parseFloat(r.paid)             || 0;
+      const fixed_charges    = parseFloat(r.fixed_charges)   || 0;
+      const tm_charges       = parseFloat(r.tm_charges)      || 0;
+      const expense_charges  = parseFloat(r.expense_charges) || 0;
+      const billed           = parseFloat(r.billed)          || 0;
+      const paid             = parseFloat(r.paid)            || 0;
       const amount_due       = billed - paid;
       const remaining_budget = budgeted - billed;
       const remaining_commit = budgeted - total_commitment;
-      const pct_billed       = budgeted > 0 ? billed / budgeted : null;
-      const rem_pct          = budgeted > 0 ? remaining_commit / budgeted : null;
-      return { ...r, budgeted, committed, co_value, total_commitment, fixed_charges, tm_charges, expense_charges, billed, paid, amount_due, remaining_budget, remaining_commit, pct_billed, rem_pct };
+      // Rem. % columns = REMAINING fraction (not spent fraction)
+      const rem_budget_pct   = budgeted > 0 ? (budgeted - billed) / budgeted : null;
+      const rem_commit_pct   = total_commitment > 0 ? (total_commitment - billed) / total_commitment : null;
+      return { ...r, budgeted, committed, co_value, total_commitment,
+               fixed_charges, tm_charges, expense_charges, billed, paid,
+               amount_due, remaining_budget, remaining_commit,
+               rem_budget_pct, rem_commit_pct };
     });
 
     const ExcelJS = require('exceljs');
 
-    // ── Palette (black & white only) ─────────────────────────────────────────
     const C = {
-      darkBg:  '1F2D3D',  // section headers, title, total row
-      midBg:   '3D5166',  // group band headers
-      leafAlt: 'F2F2F2',  // alternating data row tint
+      rootBg:  '1F2D3D',  // root bands, title, grand total
+      grpBg:   '3D5166',  // GL group rows
+      leafAlt: 'F2F2F2',  // alternating task row tint
+      freeBg:  '2E4057',  // "Custom Lines" section (freeform, no GL)
       white:   'FFFFFF',
       black:   '000000',
     };
 
-    const USD0 = '"$"#,##0;("$"#,##0)';   // no red — parens for negatives
+    const USD0 = '"$"#,##0;("$"#,##0)';
     const PCT  = '0%';
 
-    function pctVal(num, den) { return (den && den > 0) ? num / den : null; }
-    function v(n) { return (!n || n === 0) ? null : n; }  // null out zeros for cleaner cells
+    // Col map (1-based): 1=Acct# 2=Task 3=Budgeted 4=RemBudget 5=Rem%
+    //  6=Contracted 7=COs 8=TotalCommit 9=Rem% 10=Fixed 11=T&M 12=Expense
+    //  13=Billed 14=AmtDue 15=Paid 16=$/SF 17=$/AC
+    //  18=QBCodes 19=CalcMethod 20=Consultant 21=Notes
+    const NCOLS      = 21;
+    const MONEY_COLS = [3,4,6,7,8,10,11,12,13,14,15];
+    const PCT_COLS   = [5,9];
 
-    function font(bold = false, color = C.black, sz = 10) {
-      return { name: 'Calibri', size: sz, bold, color: { argb: 'FF' + color } };
-    }
-    function fill(hex) {
-      return { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + hex } };
-    }
-    function border() {
-      const t = { style: 'thin', color: { argb: 'FFD0D0D0' } };
-      return { top: t, left: t, bottom: t, right: t };
-    }
-
-    // Columns matching the budget grid exactly (left-to-right)
-    // Col indices (1-based):
-    //  1  Acct #          2  Task / Description  3  Budgeted
-    //  4  Rem. Budget      5  Rem. %              [REMAINING]
-    //  6  Contracted       7  COs                 8  Total Commit   9  Rem. %   [CONTRACT COMMITMENT]
-    // 10  Fixed           11  T&M                12  Expense        13 Billed   [INVOICED]
-    // 14  Amt Due         15  Paid               [PAYMENTS]
-    // 16  $/SF            17  $/AC               [UNIT COST]
-    // 18  QB Codes Used   19  Calc Method        20  Consultant     21  Notes
-
-    const NCOLS   = 21;
     const glaSF   = phaseRow.gla_sf ? Number(phaseRow.gla_sf) : null;
     const glaAC   = phaseRow.gla_ac ? Number(phaseRow.gla_ac) : null;
     const genDate = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
 
-    const MONEY_COLS = [3,4,6,7,8,10,11,12,13,14,15];
-    const PCT_COLS   = [5,9];
+    function cl(n) {
+      let s = ''; while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); } return s;
+    }
+    function font(bold = false, color = C.black, sz = 9) {
+      return { name: 'Calibri', size: sz, bold, color: { argb: 'FF' + color } };
+    }
+    function fill(hex) { return { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + hex } }; }
+    function thinBorder(topColor) {
+      const t = (c) => ({ style: 'thin', color: { argb: 'FF' + c } });
+      return { top: t(topColor || 'D0D0D0'), left: t('D0D0D0'), bottom: t('D0D0D0'), right: t('D0D0D0') };
+    }
+    function v(n) { return (n == null || n === 0) ? null : n; }
+    function perSF(n) { return glaSF && glaSF > 0 && n > 0 ? `$${(n / glaSF).toFixed(2)}` : ''; }
+    function perAC(n) { return glaAC && glaAC > 0 && n > 0 ? `$${Math.round(n / glaAC).toLocaleString()}` : ''; }
 
-    function styleDataCell(cell, col) {
-      cell.border    = border();
-      cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', wrapText: col === 2 };
-      if (MONEY_COLS.includes(col)) { cell.numFmt = USD0; if (cell.value === 0) cell.value = null; }
-      if (PCT_COLS.includes(col))   { cell.numFmt = PCT;  if (cell.value === 0) cell.value = null; }
-      // $/SF and $/AC are pre-formatted strings, no numFmt needed
+    function applyDataStyle(cell, col, bg) {
+      cell.font      = font(false, C.black);
+      cell.fill      = fill(bg);
+      cell.border    = thinBorder();
+      cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle',
+                         wrapText: col === 2, indent: col <= 2 ? 2 : 0 };
+      if (MONEY_COLS.includes(col)) { cell.numFmt = USD0; if (!cell.value) cell.value = null; }
+      if (PCT_COLS.includes(col))   { cell.numFmt = PCT;  if (!cell.value) cell.value = null; }
     }
 
-    // ── Build workbook ───────────────────────────────────────────────────────
+    function addSectionHeader(label, acctNum, bgColor) {
+      const r = ws.addRow([acctNum || '', label, ...Array(NCOLS - 2).fill(null)]);
+      r.height = 17;
+      r.eachCell({ includeEmpty: true }, (cell, col) => {
+        cell.font      = font(true, C.white);
+        cell.fill      = fill(bgColor);
+        cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
+      });
+    }
+
+    function addDataRow(r, alt) {
+      const bg = alt ? C.leafAlt : C.white;
+      const row = ws.addRow([
+        r.qb_account_number || '',
+        r.task_name || '',
+        v(r.budgeted),
+        v(r.remaining_budget),
+        r.rem_budget_pct,
+        v(r.committed),
+        v(r.co_value),
+        v(r.total_commitment),
+        r.rem_commit_pct,
+        v(r.fixed_charges),
+        v(r.tm_charges),
+        v(r.expense_charges),
+        v(r.billed),
+        v(r.amount_due),
+        v(r.paid),
+        perSF(r.billed),
+        perAC(r.billed),
+        r.qb_codes_used || '',
+        r.calculation_method || '',
+        r.consultant || '',
+        r.notes || '',
+      ]);
+      row.height = 15;
+      row.eachCell({ includeEmpty: true }, (cell, col) => applyDataStyle(cell, col, bg));
+      return row;
+    }
+
+    function addSubtotalRow(label, dataStart, dataEnd, bgColor, topBorderColor) {
+      const vals = [];
+      for (let col = 1; col <= NCOLS; col++) {
+        if      (col === 1) vals.push(null);
+        else if (col === 2) vals.push(label);
+        else if (MONEY_COLS.includes(col))
+          vals.push({ formula: `SUM(${cl(col)}${dataStart}:${cl(col)}${dataEnd})` });
+        else    vals.push(null);
+      }
+      const row = ws.addRow(vals);
+      row.height = 16;
+      row.eachCell({ includeEmpty: true }, (cell, col) => {
+        cell.font      = font(true, C.black);
+        cell.fill      = fill(bgColor || C.leafAlt);
+        cell.border    = thinBorder(topBorderColor || '000000');
+        cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
+        if (MONEY_COLS.includes(col)) { cell.numFmt = USD0; }
+        if (PCT_COLS.includes(col))   { cell.numFmt = PCT; }
+      });
+      return ws.rowCount;
+    }
+
+    // ── Build workbook ────────────────────────────────────────────────────────
     const wb = new ExcelJS.Workbook();
     wb.creator = 'ActiveAcq';
     wb.created = new Date();
@@ -1942,216 +2024,167 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
     };
     ws.pageSetup.printTitlesRow = '1:4';
 
-    // ── Row 1: Title ─────────────────────────────────────────────────────────
+    // Row 1: Title
     ws.mergeCells(1, 1, 1, NCOLS);
-    const titleCell = ws.getCell('A1');
-    titleCell.value     = `${phaseRow.project_name}  ·  ${phaseRow.phase_name}`;
-    titleCell.font      = font(true, C.white, 14);
-    titleCell.fill      = fill(C.darkBg);
-    titleCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    Object.assign(ws.getCell('A1'), {
+      value:     `${phaseRow.project_name}  ·  ${phaseRow.phase_name}`,
+      font:      font(true, C.white, 14),
+      fill:      fill(C.rootBg),
+      alignment: { horizontal: 'left', vertical: 'middle', indent: 1 },
+    });
     ws.getRow(1).height = 30;
 
-    // ── Row 2: Subtitle ──────────────────────────────────────────────────────
+    // Row 2: Subtitle
     ws.mergeCells(2, 1, 2, NCOLS);
-    const subCell = ws.getCell('A2');
-    subCell.value     = `Project Budget  ·  ${genDate}`;
-    subCell.font      = font(false, C.white, 9);
-    subCell.fill      = fill(C.midBg);
-    subCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    Object.assign(ws.getCell('A2'), {
+      value:     `Project Budget  ·  ${genDate}`,
+      font:      font(false, C.white, 9),
+      fill:      fill(C.grpBg),
+      alignment: { horizontal: 'left', vertical: 'middle', indent: 1 },
+    });
     ws.getRow(2).height = 14;
 
-    // ── Row 3: Group header bands (matching the grid exactly) ────────────────
-    // Cols 1-3: blank  |  4-5: REMAINING  |  6-9: CONTRACT COMMITMENT
-    //          10-13: INVOICED  |  14-15: PAYMENTS  |  16-17: UNIT COST
-    //          18-21: (blank detail)
+    // Row 3: Group bands
     const bands = [
-      [1, 3, ''],
-      [4, 5, 'REMAINING'],
-      [6, 9, 'CONTRACT COMMITMENT'],
-      [10, 13, 'INVOICED'],
-      [14, 15, 'PAYMENTS'],
-      [16, 17, 'UNIT COST'],
-      [18, 21, ''],
+      [1,3,''], [4,5,'REMAINING'], [6,9,'CONTRACT COMMITMENT'],
+      [10,13,'INVOICED'], [14,15,'PAYMENTS'], [16,17,'UNIT COST'], [18,21,''],
     ];
     bands.forEach(([c1, c2, label], i) => {
       if (c1 < c2) ws.mergeCells(3, c1, 3, c2);
-      const cell     = ws.getCell(3, c1);
-      cell.value     = label;
-      cell.font      = font(true, C.white, 9);
-      cell.fill      = fill(i % 2 === 0 ? C.darkBg : C.midBg);
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      // Fill remaining cells in merged range
-      for (let c = c1; c <= c2; c++) {
-        const bc = ws.getCell(3, c);
-        bc.fill = fill(i % 2 === 0 ? C.darkBg : C.midBg);
-      }
+      for (let c = c1; c <= c2; c++) ws.getCell(3, c).fill = fill(i % 2 === 0 ? C.rootBg : C.grpBg);
+      Object.assign(ws.getCell(3, c1), {
+        value: label, font: font(true, C.white), alignment: { horizontal: 'center', vertical: 'middle' },
+      });
     });
     ws.getRow(3).height = 13;
 
-    // ── Row 4: Column headers ─────────────────────────────────────────────────
-    const HDR = [
-      'Acct #', 'Task / Description', 'Budgeted',
-      'Rem. Budget', 'Rem. %',
+    // Row 4: Column headers
+    const hdrRow = ws.addRow([
+      'Acct #', 'Task / Description', 'Budgeted', 'Rem. Budget', 'Rem. %',
       'Contracted', 'COs', 'Total Commit', 'Rem. %',
-      'Fixed', 'T&M', 'Expense', 'Billed',
-      'Amt Due', 'Paid',
-      '$/SF', '$/AC',
-      'QB Codes Used', 'Calc Method', 'Consultant', 'Notes',
-    ];
-    const hdrRow = ws.addRow(HDR);  // row 4
+      'Fixed', 'T&M', 'Expense', 'Billed', 'Amt Due', 'Paid',
+      '$/SF', '$/AC', 'QB Codes Used', 'Calc Method', 'Consultant', 'Notes',
+    ]);
     hdrRow.height = 28;
     hdrRow.eachCell({ includeEmpty: true }, (cell, col) => {
-      cell.font      = font(true, C.white, 9);
-      cell.fill      = fill(C.darkBg);
+      cell.font      = font(true, C.white);
+      cell.fill      = fill(C.rootBg);
+      cell.border    = thinBorder();
       cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', wrapText: true };
-      cell.border    = border();
     });
 
-    ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 4 }];
+    ws.views = [{ state: 'frozen', xSplit: 2, ySplit: 4 }];
 
-    // ── Data rows: accounting structure ───────────────────────────────────────
-    // Section label (no numbers) → data rows → section subtotal (SUM formulas)
-    // Grand total uses SUM of section subtotals.
+    // ── Data: build 3-level hierarchy (root → group → tasks) ─────────────────
+    // Separate freeform rows (no GL account) — rendered in their own section.
+    const glRows   = rows.filter(r => r.qb_account_id != null);
+    const freeRows = rows.filter(r => r.qb_account_id == null);
 
-    function cl(n) {  // column number → Excel letter (1=A, 2=B, …)
-      let s = '';
-      while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); }
-      return s;
-    }
-    function perSF(n) { return glaSF && glaSF > 0 && n > 0 ? `$${(n / glaSF).toFixed(2)}` : '—'; }
-    function perAC(n) { return glaAC && glaAC > 0 && n > 0 ? `$${Math.round(n / glaAC).toLocaleString()}` : '—'; }
-
-    // Group leaf rows into sections (by parent GL, preserving order)
-    const leafRows = rows.filter(r => r.task_name || r.budgeted > 0 || r.total_commitment > 0 || r.billed > 0);
-    const sections = [];
-    for (const r of leafRows) {
-      const key   = r.qb_parent_number || r.qb_account_number || '—';
-      const label = (r.qb_parent_full_name || r.qb_full_name || '').split(':').slice(1).join('').trim()
-                 || r.qb_parent_full_name || r.qb_full_name || '';
-      if (!sections.length || sections[sections.length - 1].key !== key) {
-        sections.push({ key, label, rows: [] });
-      }
-      sections[sections.length - 1].rows.push(r);
+    // Build root → group → rows structure preserving DB sort order
+    const rootMap = new Map();  // rootKey → { key, label, groups: Map }
+    for (const r of glRows) {
+      const rootKey   = r.qb_grandparent_number || r.qb_parent_number || r.qb_account_number || '—';
+      const rootLabel = r.qb_grandparent_name   || r.qb_parent_name   || r.qb_short_name     || '';
+      const grpKey    = r.qb_parent_number  || r.qb_account_number || rootKey;
+      const grpLabel  = r.qb_parent_name    || r.qb_short_name     || '';
+      if (!rootMap.has(rootKey)) rootMap.set(rootKey, { key: rootKey, label: rootLabel, groups: new Map() });
+      const root = rootMap.get(rootKey);
+      if (!root.groups.has(grpKey)) root.groups.set(grpKey, { key: grpKey, label: grpLabel, rows: [] });
+      root.groups.get(grpKey).rows.push(r);
     }
 
-    const secSubtotalRowNums = [];  // row numbers of each section subtotal (for grand total SUM)
+    const grandSubtotalRowNums = [];
     let alt = false;
 
-    for (const sec of sections) {
-      // Section label row — no numbers
-      const secRow = ws.addRow([
-        sec.key, sec.label.toUpperCase(),
-        ...Array(NCOLS - 2).fill(null),
-      ]);
-      secRow.height = 17;
-      secRow.eachCell({ includeEmpty: true }, (cell, col) => {
-        cell.font      = font(true, C.white, 9);
-        cell.fill      = fill(C.darkBg);
-        cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
-      });
+    for (const root of rootMap.values()) {
+      // Root band row
+      addSectionHeader(root.label.toUpperCase(), root.key, C.rootBg);
 
-      const dataStartRow = ws.rowCount + 1;
+      const rootDataStart = ws.rowCount + 1;
+      const grpSubtotalRowNums = [];
 
-      // Data rows
-      for (const r of sec.rows) {
-        const rowBg  = alt ? C.leafAlt : C.white;
-        const dataRow = ws.addRow([
-          r.qb_account_number || '—',
-          r.task_name || '',
-          v(r.budgeted),
-          v(r.remaining_budget), pctVal(r.billed, r.budgeted),
-          v(r.committed), v(r.co_value), v(r.total_commitment), pctVal(r.billed, r.total_commitment),
-          v(r.fixed_charges), v(r.tm_charges), v(r.expense_charges), v(r.billed),
-          v(r.amount_due), v(r.paid),
-          perSF(r.billed), perAC(r.billed),
-          r.qb_codes_used || '', r.calculation_method || '', r.consultant || '', r.notes || '',
-        ]);
-        dataRow.height = 15;
-        dataRow.eachCell({ includeEmpty: true }, (cell, col) => {
-          cell.font      = font(false, C.black, 9);
-          cell.fill      = fill(rowBg);
-          cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 2 : 0, wrapText: col === 2 };
-          styleDataCell(cell, col);
-        });
-        alt = !alt;
+      for (const grp of root.groups.values()) {
+        // Group header row (GL sub-group: e.g. 1705 Architecture)
+        addSectionHeader(grp.label, grp.key, C.grpBg);
+
+        const grpDataStart = ws.rowCount + 1;
+        for (const r of grp.rows) { addDataRow(r, alt); alt = !alt; }
+        const grpDataEnd   = ws.rowCount;
+
+        // Group subtotal
+        const grpSubRow = addSubtotalRow(`${grp.key} — Total`, grpDataStart, grpDataEnd, C.leafAlt, '888888');
+        grpSubtotalRowNums.push(grpSubRow);
       }
 
-      const dataEndRow = ws.rowCount;
-
-      // Section subtotal row with live SUM formulas (thin accounting border)
-      const subRowVals = [];
+      // Root subtotal (SUM of group subtotals for this root)
+      const rootSubVals = [];
       for (let col = 1; col <= NCOLS; col++) {
-        if      (col === 1) subRowVals.push(null);
-        else if (col === 2) subRowVals.push(`${sec.key} — Total`);
-        else if (MONEY_COLS.includes(col))
-          subRowVals.push({ formula: `SUM(${cl(col)}${dataStartRow}:${cl(col)}${dataEndRow})` });
-        else    subRowVals.push(null);
+        if      (col === 1) rootSubVals.push(null);
+        else if (col === 2) rootSubVals.push(`${root.key} — Total`);
+        else if (MONEY_COLS.includes(col)) {
+          const refs = grpSubtotalRowNums.map(rn => `${cl(col)}${rn}`).join(',');
+          rootSubVals.push({ formula: `SUM(${refs})` });
+        }
+        else rootSubVals.push(null);
       }
-      const subRow = ws.addRow(subRowVals);
-      subRow.height = 16;
-      const subRowNum = ws.rowCount;
-      secSubtotalRowNums.push(subRowNum);
-      subRow.eachCell({ includeEmpty: true }, (cell, col) => {
-        cell.font      = font(true, C.black, 9);
-        cell.fill      = fill(C.leafAlt);
+      const rootSubRow = ws.addRow(rootSubVals);
+      rootSubRow.height = 17;
+      const rootSubRowNum = ws.rowCount;
+      grandSubtotalRowNums.push(rootSubRowNum);
+      rootSubRow.eachCell({ includeEmpty: true }, (cell, col) => {
+        cell.font      = font(true, C.white);
+        cell.fill      = fill(C.rootBg);
+        cell.border    = thinBorder('FFFFFF');
         cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
-        styleDataCell(cell, col);
-        cell.font   = font(true, C.black, 9);   // re-apply after styleDataCell resets it
-        cell.border = { ...border(), top: { style: 'thin', color: { argb: 'FF000000' } } };
+        if (MONEY_COLS.includes(col)) cell.numFmt = USD0;
+        if (PCT_COLS.includes(col))   cell.numFmt = PCT;
       });
     }
 
-    // ── Grand total — SUM of all section subtotals, double top border ─────────
-    const grandRowVals = [];
-    for (let col = 1; col <= NCOLS; col++) {
-      if      (col === 1) grandRowVals.push(null);
-      else if (col === 2) grandRowVals.push('TOTAL');
-      else if (MONEY_COLS.includes(col)) {
-        const refs = secSubtotalRowNums.map(rn => `${cl(col)}${rn}`).join(',');
-        grandRowVals.push({ formula: `SUM(${refs})` });
-      }
-      else grandRowVals.push(null);
+    // Freeform section (manually-added rows with no GL account)
+    if (freeRows.length > 0) {
+      addSectionHeader('CUSTOM LINES — NO GL ACCOUNT ASSIGNED', '', C.freeBg);
+      const freeStart = ws.rowCount + 1;
+      for (const r of freeRows) { addDataRow(r, alt); alt = !alt; }
+      const freeSubRow = addSubtotalRow('Custom Lines — Total', freeStart, ws.rowCount, C.leafAlt, '888888');
+      grandSubtotalRowNums.push(freeSubRow);
     }
-    const totRow = ws.addRow(grandRowVals);
-    totRow.height = 20;
+
+    // Grand total row
+    const grandVals = [];
+    for (let col = 1; col <= NCOLS; col++) {
+      if      (col === 1) grandVals.push(null);
+      else if (col === 2) grandVals.push('TOTAL');
+      else if (MONEY_COLS.includes(col)) {
+        const refs = grandSubtotalRowNums.map(rn => `${cl(col)}${rn}`).join(',');
+        grandVals.push({ formula: `SUM(${refs})` });
+      }
+      else grandVals.push(null);
+    }
+    const totRow = ws.addRow(grandVals);
+    totRow.height = 22;
     totRow.eachCell({ includeEmpty: true }, (cell, col) => {
       cell.font      = font(true, C.white, 10);
-      cell.fill      = fill(C.darkBg);
+      cell.fill      = fill(C.rootBg);
+      cell.border    = { top: { style: 'double', color: { argb: 'FFFFFFFF' } },
+                         bottom: { style: 'medium', color: { argb: 'FFFFFFFF' } } };
       cell.alignment = { horizontal: col <= 2 ? 'left' : 'right', vertical: 'middle', indent: col <= 2 ? 1 : 0 };
-      styleDataCell(cell, col);
-      cell.font   = font(true, C.white, 10);
-      cell.border = { top: { style: 'double', color: { argb: 'FF' + C.white } }, bottom: { style: 'medium', color: { argb: 'FF' + C.white } } };
+      if (MONEY_COLS.includes(col)) cell.numFmt = USD0;
+      if (PCT_COLS.includes(col))   cell.numFmt = PCT;
     });
 
-    // ── Column widths ─────────────────────────────────────────────────────────
+    // Column widths
     ws.columns = [
-      { width: 10 },  // Acct #
-      { width: 44 },  // Task / Description
-      { width: 13 },  // Budgeted
-      { width: 13 },  // Rem. Budget
-      { width: 8  },  // Rem. %
-      { width: 13 },  // Contracted
-      { width: 9  },  // COs
-      { width: 13 },  // Total Commit
-      { width: 8  },  // Rem. %
-      { width: 11 },  // Fixed
-      { width: 11 },  // T&M
-      { width: 11 },  // Expense
-      { width: 13 },  // Billed
-      { width: 11 },  // Amt Due
-      { width: 11 },  // Paid
-      { width: 9  },  // $/SF
-      { width: 9  },  // $/AC
-      { width: 22 },  // QB Codes Used
-      { width: 14 },  // Calc Method
-      { width: 18 },  // Consultant
-      { width: 30 },  // Notes
+      { width: 10 }, { width: 44 }, { width: 13 }, { width: 13 }, { width: 8 },
+      { width: 13 }, { width: 9  }, { width: 13 }, { width: 8  },
+      { width: 11 }, { width: 11 }, { width: 11 }, { width: 13 },
+      { width: 11 }, { width: 11 }, { width: 9  }, { width: 9  },
+      { width: 22 }, { width: 14 }, { width: 18 }, { width: 30 },
     ];
 
-    // ── Stream workbook to response ──────────────────────────────────────────
+    // Stream to response
     const filename = `${phaseRow.project_name} - ${phaseRow.phase_name} Budget.xlsx`
       .replace(/[/\\?%*:|"<>]/g, '-');
-
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     await wb.xlsx.write(res);
