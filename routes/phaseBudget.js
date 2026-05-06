@@ -1762,7 +1762,13 @@ router.get('/phases/:phaseId/budget/cross-check', requireAuth, async (req, res, 
           WHERE inv.phase_id = $1
             AND inv.status NOT IN ('voided','rejected')
             AND ili.billing_type = 'expense'
-        ), 0)::float AS raw_expense
+        ), 0)::float AS raw_expense,
+
+        -- BUDGETED: direct sum of phase_budget_lines.budgeted_amount for this phase.
+        -- Independent of any aggregation — just reads the stored PM inputs.
+        COALESCE((
+          SELECT SUM(budgeted_amount) FROM phase_budget_lines WHERE phase_id = $1
+        ), 0)::float AS raw_budgeted
     `, [phaseId]);
 
     res.json(result.rows[0]);

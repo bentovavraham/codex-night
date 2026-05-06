@@ -470,6 +470,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     raw_contracted: number; raw_co_value: number;
     raw_billed: number; raw_paid: number;
     raw_fixed: number; raw_tm: number; raw_expense: number;
+    raw_budgeted: number;
   }>({
     queryKey: ['budget-crosscheck', phaseIdNum],
     queryFn: () => api.crossCheckBudget(phaseIdNum),
@@ -1051,22 +1052,52 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
 
         // Cross-check: compare grid totals (sum of displayed rows) against independent
         // raw DB totals. Any mismatch means the aggregation logic has a bug.
-        const EPS = 0.02; // allow 2-cent rounding tolerance
+        const EPS = 0.02; // 2-cent rounding tolerance
         const cc = crossCheck;
-        const ccContracted = Math.abs((grand.committed)          - (cc?.raw_contracted ?? grand.committed))          > EPS;
-        const ccCoValue    = Math.abs((grand.co_value)           - (cc?.raw_co_value   ?? grand.co_value))           > EPS;
-        const ccBilled     = Math.abs((grand.billed)             - (cc?.raw_billed     ?? grand.billed))             > EPS;
-        const ccPaid       = Math.abs((grand.paid)               - (cc?.raw_paid       ?? grand.paid))               > EPS;
-        const ccFixed      = Math.abs((grand.fixed ?? 0)         - (cc?.raw_fixed      ?? (grand.fixed ?? 0)))       > EPS;
-        const ccTm         = Math.abs((grand.tm ?? 0)            - (cc?.raw_tm         ?? (grand.tm ?? 0)))          > EPS;
-        const ccExpense    = Math.abs((grand.expenses ?? 0)      - (cc?.raw_expense    ?? (grand.expenses ?? 0)))    > EPS;
-        const anyMismatch  = ccContracted || ccCoValue || ccBilled || ccPaid || ccFixed || ccTm || ccExpense;
 
-        const CcCell = ({ label, grid, raw, mismatch }: { label: string; grid: number; raw: number | undefined; mismatch: boolean }) => (
+        // --- Derived raw values ---
+        const rawBudgeted       = cc?.raw_budgeted      ?? grand.budgeted;
+        const rawContracted     = cc?.raw_contracted    ?? grand.committed;
+        const rawCoValue        = cc?.raw_co_value      ?? grand.co_value;
+        const rawTotalCommit    = rawContracted + rawCoValue;
+        const rawBilled         = cc?.raw_billed        ?? grand.billed;
+        const rawPaid           = cc?.raw_paid          ?? grand.paid;
+        const rawRemBudget      = rawBudgeted - rawBilled;
+        const rawRemBudgetPct   = rawBudgeted  > 0 ? rawRemBudget  / rawBudgeted  : 0;
+        const rawRemCommitPct   = rawTotalCommit > 0 ? (rawTotalCommit - rawBilled) / rawTotalCommit : 0;
+
+        // --- Grid derived values ---
+        const gridTotalCommit   = grand.committed + grand.co_value;
+        const gridRemBudget     = grand.budgeted - grand.billed;
+        const gridRemBudgetPct  = grand.budgeted  > 0 ? gridRemBudget  / grand.budgeted  : 0;
+        const gridRemCommitPct  = gridTotalCommit > 0 ? (gridTotalCommit - grand.billed) / gridTotalCommit : 0;
+
+        const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+        const pctEps = 0.001; // 0.1% tolerance for percentages
+
+        // --- Mismatch flags ---
+        const ccBudgeted       = Math.abs(grand.budgeted    - rawBudgeted)    > EPS;
+        const ccRemBudget      = Math.abs(gridRemBudget     - rawRemBudget)   > EPS;
+        const ccRemBudgetPct   = Math.abs(gridRemBudgetPct  - rawRemBudgetPct) > pctEps;
+        const ccContracted     = Math.abs(grand.committed   - rawContracted)  > EPS;
+        const ccCoValue        = Math.abs(grand.co_value    - rawCoValue)     > EPS;
+        const ccTotalCommit    = Math.abs(gridTotalCommit   - rawTotalCommit) > EPS;
+        const ccRemCommitPct   = Math.abs(gridRemCommitPct  - rawRemCommitPct) > pctEps;
+        const ccBilled         = Math.abs(grand.billed      - rawBilled)      > EPS;
+        const ccPaid           = Math.abs(grand.paid        - rawPaid)        > EPS;
+        const ccFixed          = Math.abs((grand.fixed    ?? 0) - (cc?.raw_fixed   ?? (grand.fixed    ?? 0))) > EPS;
+        const ccTm             = Math.abs((grand.tm       ?? 0) - (cc?.raw_tm      ?? (grand.tm       ?? 0))) > EPS;
+        const ccExpense        = Math.abs((grand.expenses ?? 0) - (cc?.raw_expense ?? (grand.expenses ?? 0))) > EPS;
+        const anyMismatch      = ccBudgeted || ccRemBudget || ccRemBudgetPct || ccContracted || ccCoValue ||
+                                 ccTotalCommit || ccRemCommitPct || ccBilled || ccPaid || ccFixed || ccTm || ccExpense;
+
+        const CcCell = ({ label, gridFmt, rawFmt, mismatch }: {
+          label: string; gridFmt: string; rawFmt: string; mismatch: boolean;
+        }) => (
           <span className={`${styles.reconStat} ${mismatch ? styles.reconMismatch : ''}`}>
             <span className={styles.reconLabel}>{label}</span>
-            {usd.format(grid)}
-            {cc && mismatch && <span className={styles.reconRaw}> ≠ DB:{usd.format(raw ?? 0)}</span>}
+            {gridFmt}
+            {cc && mismatch && <span className={styles.reconRaw}> ≠ {rawFmt}</span>}
           </span>
         );
 
@@ -1076,15 +1107,25 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
               {anyMismatch ? '✗ Mismatch' : allocOk ? '✓ Reconciled' : '⚠ Unallocated'}
             </span>
             <span className={styles.reconDivider} />
-            <CcCell label="Contracted" grid={grand.committed}     raw={cc?.raw_contracted} mismatch={ccContracted} />
-            <CcCell label="COS"        grid={grand.co_value}      raw={cc?.raw_co_value}   mismatch={ccCoValue} />
-            <CcCell label="Billed"     grid={grand.billed}        raw={cc?.raw_billed}     mismatch={ccBilled} />
-            <CcCell label="Paid"       grid={grand.paid}          raw={cc?.raw_paid}       mismatch={ccPaid} />
+            <CcCell label="Budgeted"     gridFmt={usd.format(grand.budgeted)}   rawFmt={usd.format(rawBudgeted)}    mismatch={ccBudgeted} />
+            <CcCell label="Rem. Budget"  gridFmt={usd.format(gridRemBudget)}    rawFmt={usd.format(rawRemBudget)}   mismatch={ccRemBudget} />
+            <CcCell label="Rem. %"       gridFmt={pct(gridRemBudgetPct)}        rawFmt={pct(rawRemBudgetPct)}       mismatch={ccRemBudgetPct} />
+            <span className={styles.reconDivider} />
+            <CcCell label="Contracted"   gridFmt={usd.format(grand.committed)}  rawFmt={usd.format(rawContracted)}  mismatch={ccContracted} />
+            <CcCell label="COS"          gridFmt={usd.format(grand.co_value)}   rawFmt={usd.format(rawCoValue)}     mismatch={ccCoValue} />
+            <CcCell label="Total Commit" gridFmt={usd.format(gridTotalCommit)}  rawFmt={usd.format(rawTotalCommit)} mismatch={ccTotalCommit} />
+            <CcCell label="Rem. % Commit" gridFmt={pct(gridRemCommitPct)}       rawFmt={pct(rawRemCommitPct)}       mismatch={ccRemCommitPct} />
+            <span className={styles.reconDivider} />
+            <CcCell label="Fixed"        gridFmt={usd.format(grand.fixed ?? 0)} rawFmt={usd.format(cc?.raw_fixed ?? 0)}   mismatch={ccFixed} />
+            <CcCell label="T&M"          gridFmt={usd.format(grand.tm ?? 0)}    rawFmt={usd.format(cc?.raw_tm ?? 0)}      mismatch={ccTm} />
+            <CcCell label="Expense"      gridFmt={usd.format(grand.expenses ?? 0)} rawFmt={usd.format(cc?.raw_expense ?? 0)} mismatch={ccExpense} />
+            <CcCell label="Billed"       gridFmt={usd.format(grand.billed)}     rawFmt={usd.format(rawBilled)}      mismatch={ccBilled} />
+            <CcCell label="Paid"         gridFmt={usd.format(grand.paid)}       rawFmt={usd.format(rawPaid)}        mismatch={ccPaid} />
             <span className={styles.reconDivider} />
             {anyMismatch
               ? <span className={styles.reconWarnNote}>Grid totals do not match raw DB — aggregation bug detected</span>
               : allocOk
-                ? <span className={styles.reconOkNote}>Grid totals match DB · All contracts &amp; invoices assigned to budget lines</span>
+                ? <span className={styles.reconOkNote}>All columns match DB</span>
                 : <span className={styles.reconWarnNote}>
                     {usd.format(unallocTotal)} outside budget lines
                     {unallocContractAmt > 0 && ` · ${unassignedContracts.length} contract${unassignedContracts.length !== 1 ? 's' : ''} ${usd.format(unallocContractAmt)}`}
