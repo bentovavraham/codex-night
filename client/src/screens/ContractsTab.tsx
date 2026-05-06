@@ -468,11 +468,11 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
     form.vendor_name &&
     c.vendor_name &&
     c.vendor_name.trim().toLowerCase() === form.vendor_name.trim().toLowerCase() &&
-    c.status !== 'voided' && c.status !== 'draft'
+    c.status !== 'voided'
   );
   const parentChoices = sameVendorParents.length > 0
     ? sameVendorParents
-    : (phaseContracts as any[]).filter(c => c.status !== 'voided' && c.status !== 'draft');
+    : (phaseContracts as any[]).filter(c => c.status !== 'voided');
 
   // PM tasks for the per-line task picker (Option C)
   const { data: budgetLines = [] } = useQuery<any[]>({
