@@ -1650,6 +1650,125 @@ router.get('/phases/:phaseId/history', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/phases/:phaseId/budget/cross-check
+// Independent verification: sums raw transaction tables directly (no phase_budget_lines
+// aggregation) so the frontend can compare against the grid totals row-by-row.
+router.get('/phases/:phaseId/budget/cross-check', requireAuth, async (req, res, next) => {
+  try {
+    const phaseId = Number(req.params.phaseId);
+    const phaseCheck = await pool.query('SELECT id FROM phases WHERE id = $1', [phaseId]);
+    if (!phaseCheck.rows.length) return res.status(404).json({ error: 'Phase not found' });
+
+    const result = await pool.query(`
+      SELECT
+
+        -- CONTRACTED: sum of contract line items (or total_value when no line items)
+        -- for all non-voided contracts belonging to this phase.
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT cli.budgeted_amount AS contribution
+            FROM contracts c
+            JOIN contract_line_items cli ON cli.contract_id = c.id
+            WHERE c.phase_id = $1
+              AND c.status NOT IN ('voided')
+            UNION ALL
+            SELECT c.total_value AS contribution
+            FROM contracts c
+            WHERE c.phase_id = $1
+              AND c.status NOT IN ('voided')
+              AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
+          ) sub
+        ), 0)::float AS raw_contracted,
+
+        -- CO VALUE: sum of change-order line items (or co.amount when no line items)
+        -- for all non-voided/non-rejected COs whose parent contract is in this phase.
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT col.budgeted_amount AS contribution
+            FROM change_orders co
+            JOIN change_order_line_items col ON col.change_order_id = co.id
+            JOIN contracts c ON c.id = co.contract_id
+            WHERE c.phase_id = $1
+              AND co.status NOT IN ('voided','rejected')
+            UNION ALL
+            SELECT co.amount AS contribution
+            FROM change_orders co
+            JOIN contracts c ON c.id = co.contract_id
+            WHERE c.phase_id = $1
+              AND co.status NOT IN ('voided','rejected')
+              AND NOT EXISTS (SELECT 1 FROM change_order_line_items x WHERE x.change_order_id = co.id)
+          ) sub
+        ), 0)::float AS raw_co_value,
+
+        -- BILLED: sum of all invoice amounts for this phase
+        -- invoices with line items: sum the line items
+        -- invoices without line items: use invoice.amount
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT ili.amount AS contribution
+            FROM invoices inv
+            JOIN invoice_line_items ili ON ili.invoice_id = inv.id
+            WHERE inv.phase_id = $1
+              AND inv.status NOT IN ('voided','rejected')
+            UNION ALL
+            SELECT inv.amount AS contribution
+            FROM invoices inv
+            WHERE inv.phase_id = $1
+              AND inv.status NOT IN ('voided','rejected')
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
+          ) sub
+        ), 0)::float AS raw_billed,
+
+        -- PAID: same as billed but only paid invoices
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT ili.amount AS contribution
+            FROM invoices inv
+            JOIN invoice_line_items ili ON ili.invoice_id = inv.id
+            WHERE inv.phase_id = $1
+              AND inv.status = 'paid'
+            UNION ALL
+            SELECT inv.amount AS contribution
+            FROM invoices inv
+            WHERE inv.phase_id = $1
+              AND inv.status = 'paid'
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
+          ) sub
+        ), 0)::float AS raw_paid,
+
+        -- FIXED / T&M / EXPENSE breakdowns
+        COALESCE((
+          SELECT SUM(ili.amount)
+          FROM invoices inv
+          JOIN invoice_line_items ili ON ili.invoice_id = inv.id
+          WHERE inv.phase_id = $1
+            AND inv.status NOT IN ('voided','rejected')
+            AND ili.billing_type = 'fixed'
+        ), 0)::float AS raw_fixed,
+
+        COALESCE((
+          SELECT SUM(ili.amount)
+          FROM invoices inv
+          JOIN invoice_line_items ili ON ili.invoice_id = inv.id
+          WHERE inv.phase_id = $1
+            AND inv.status NOT IN ('voided','rejected')
+            AND ili.billing_type = 'tm'
+        ), 0)::float AS raw_tm,
+
+        COALESCE((
+          SELECT SUM(ili.amount)
+          FROM invoices inv
+          JOIN invoice_line_items ili ON ili.invoice_id = inv.id
+          WHERE inv.phase_id = $1
+            AND inv.status NOT IN ('voided','rejected')
+            AND ili.billing_type = 'expense'
+        ), 0)::float AS raw_expense
+    `, [phaseId]);
+
+    res.json(result.rows[0]);
+  } catch (err) { next(err); }
+});
+
 // GET /api/phases/:phaseId/budget/export-excel
 // Exact replica of the budget grid: all rows, all columns, 3-level GL hierarchy,
 // same 4-path allocation math as the screen.

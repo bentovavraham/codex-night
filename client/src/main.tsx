@@ -22,7 +22,10 @@ import LoginScreen from './screens/LoginScreen';
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
   mutationCache: new MutationCache({
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['budget'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['budget'] });
+      qc.invalidateQueries({ queryKey: ['budget-crosscheck'] });
+    },
   }),
 });
 

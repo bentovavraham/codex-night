@@ -43,6 +43,11 @@ export const api = {
   // Budget
   getBudget:    (phaseId: number, source?: 'pm' | 'qb' | 'compare') =>
     request<any[]>('GET', `/api/phases/${phaseId}/budget${source && source !== 'pm' ? `?source=${source}` : ''}`),
+  crossCheckBudget: (phaseId: number) => request<{
+    raw_contracted: number; raw_co_value: number;
+    raw_billed: number; raw_paid: number;
+    raw_fixed: number; raw_tm: number; raw_expense: number;
+  }>('GET', `/api/phases/${phaseId}/budget/cross-check`),
   downloadBudgetExcel: (phaseId: number) => {
     window.location.href = `/api/phases/${phaseId}/budget/export-excel`;
   },
