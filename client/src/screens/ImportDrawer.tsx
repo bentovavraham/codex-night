@@ -122,8 +122,9 @@ function BudgetLinePicker({ lines, value, onChange }: {
 
 // ── Compact inline budget line picker (portal-based, for table rows) ─────────
 
-function InlineBudgetLinePicker({ lines, value, onChange }: {
+function InlineBudgetLinePicker({ lines, value, onChange, filterByGlId }: {
   lines: any[]; value: number | null; onChange: (id: number | null) => void;
+  filterByGlId?: number | null;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -133,12 +134,13 @@ function InlineBudgetLinePicker({ lines, value, onChange }: {
   const selected = lines.find(l => l.id === value) ?? null;
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return lines;
+    const pool = filterByGlId != null ? lines.filter(l => l.qb_account_id === filterByGlId) : lines;
+    if (!query.trim()) return pool;
     const q = query.toLowerCase();
-    return lines.filter(l =>
+    return pool.filter(l =>
       l.task_name.toLowerCase().includes(q) || (l.discipline || '').toLowerCase().includes(q)
     );
-  }, [lines, query]);
+  }, [lines, query, filterByGlId]);
 
   function openPicker() {
     if (!triggerRef.current) return;
@@ -520,10 +522,11 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   const isWrongProject = item.project_match === 'mismatch';
   const weakQbMatch = !isContract && (item.qb_match_confidence === 'low' || item.qb_match_confidence === 'none');
   const [qbOverrideAcked, setQbOverrideAcked] = useState(false);
+  const [wrongProjectAcked, setWrongProjectAcked] = useState(false);
 
   const dupBlocked = dupMatches.length > 0 && !dupAcked;
   const canConfirm = reviewed && !!vendor.trim() && !dupBlocked && !saving
-    && !isWrongProject
+    && (!isWrongProject || wrongProjectAcked)
     && (!weakQbMatch || qbOverrideAcked);
 
   function addLine() {
@@ -845,6 +848,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                         <th className={styles.rColBudgetLine}>BUDGET TASK</th>
                         <th className={styles.rColDesc}>DESCRIPTION</th>
                         <th className={`${styles.rColAmt} ${styles.right}`}>AMOUNT</th>
+                        <th style={{ width: 28 }}></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -864,7 +868,17 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                               suggestionConfidence={li.suggestion_confidence}
                               onChange={id => setInvoiceLines(lines => {
                                 const n = [...lines];
-                                n[i] = { ...n[i], qb_account_id: id, is_ai_suggested: false };
+                                const matches = id ? budgetLines.filter((bl: any) => bl.qb_account_id === id) : [];
+                                const currentTask = n[i].phase_budget_line_id;
+                                const taskStillValid = currentTask && matches.some((bl: any) => bl.id === currentTask);
+                                n[i] = {
+                                  ...n[i],
+                                  qb_account_id: id,
+                                  is_ai_suggested: false,
+                                  phase_budget_line_id: matches.length === 1
+                                    ? matches[0].id
+                                    : (taskStillValid ? currentTask : null),
+                                };
                                 return n;
                               })}
                             />
@@ -873,6 +887,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                             <InlineBudgetLinePicker
                               lines={budgetLines}
                               value={li.phase_budget_line_id}
+                              filterByGlId={li.qb_account_id}
                               onChange={id => setInvoiceLines(lines => {
                                 const n = [...lines];
                                 n[i] = { ...n[i], phase_budget_line_id: id };
@@ -887,8 +902,25 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                             </span>
                             {li.billing_type === 'tm' && Number(li.hours) > 0 && <span style={{ fontSize: 10.5, color: '#8a7f74', marginTop: 1, display: 'block' }}>{li.hours}h @ ${li.rate}/h</span>}
                           </td>
-                          <td className={`${styles.rColAmt} ${styles.right} ${styles.mono}`} style={{ fontSize: 11.5, color: '#1a1714', fontWeight: 600 }}>
-                            {usd2.format(Number(li.amount) || 0)}
+                          <td className={`${styles.rColAmt} ${styles.right}`}>
+                            <input
+                              type="number"
+                              className={styles.rAmtInput}
+                              value={li.amount}
+                              onChange={e => setInvoiceLines(lines => {
+                                const n = [...lines];
+                                n[i] = { ...n[i], amount: e.target.value };
+                                return n;
+                              })}
+                              style={{ textAlign: 'right', width: '100%' }}
+                            />
+                          </td>
+                          <td style={{ width: 28, textAlign: 'center' }}>
+                            <button
+                              className={styles.rDelBtn}
+                              onClick={() => setInvoiceLines(lines => lines.filter((_, j) => j !== i))}
+                              title="Remove line"
+                            >✕</button>
                           </td>
                         </tr>
                       ))}
@@ -909,12 +941,16 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
         {/* Sticky footer */}
         <div className={styles.reviewFormFooter}>
           {isWrongProject && (
-            <div className={styles.blockError}>
-              <strong>⛔ Wrong Project — Cannot Confirm</strong>
-              <span>This invoice's filename and/or content identifies it as belonging to a different project. You must discard it.</span>
+            <div className={styles.overrideWarn}>
+              <strong>⚠ Possible Wrong Project</strong>
+              <span>This invoice's filename and/or content suggests it may belong to a different project.</span>
+              <label className={styles.reviewCheck} style={{ marginTop: 6 }}>
+                <input type="checkbox" checked={wrongProjectAcked} onChange={e => setWrongProjectAcked(e.target.checked)} />
+                <span>I understand — this invoice belongs to this project, confirm anyway</span>
+              </label>
             </div>
           )}
-          {!isWrongProject && weakQbMatch && (
+          {weakQbMatch && (
             <div className={styles.overrideWarn}>
               <strong>⚠ No verified QB match</strong>
               <span>This invoice has no high-confidence QB transaction link. Confirming without one means the Audit table will show it as unmatched.</span>
@@ -924,20 +960,16 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
               </label>
             </div>
           )}
-          {!isWrongProject && (
-            <label className={styles.reviewCheck}>
-              <input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
-              <span>I have reviewed this document and confirm all details are correct</span>
-            </label>
-          )}
+          <label className={styles.reviewCheck}>
+            <input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
+            <span>I have reviewed this document and confirm all details are correct</span>
+          </label>
           {saveError && <div className={styles.reviewSaveError}>{saveError}</div>}
           <div className={styles.reviewActions}>
             <button className={styles.discardBtn} onClick={onDiscard} disabled={saving}>Discard</button>
-            {!isWrongProject && (
-              <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!canConfirm}>
-                {saving ? 'Saving…' : 'Confirm & Save'}
-              </button>
-            )}
+            <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!canConfirm}>
+              {saving ? 'Saving…' : 'Confirm & Save'}
+            </button>
           </div>
         </div>
       </div>

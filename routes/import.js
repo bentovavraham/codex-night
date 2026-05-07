@@ -200,11 +200,11 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
             extracted.contract_match_reason = contractMatch.reason;
           }
 
-          // 2. QB account suggestions per line item
+          // 2. QB account suggestions per line item (budget tasks are primary signal)
           if (extracted.line_items?.length && qbAccounts.length) {
             try {
               const codeSuggestions = await callWithRetry(() =>
-                suggestInvoiceLineCodes(buf, extracted.line_items, qbAccounts, extracted.vendor_name)
+                suggestInvoiceLineCodes(buf, extracted.line_items, qbAccounts, extracted.vendor_name, budgetLines)
               );
               const byIndex = {};
               for (const s of codeSuggestions) byIndex[s.line_index] = s;
@@ -212,13 +212,14 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
                 ...li,
                 suggested_qb_account_id:  byIndex[i]?.qb_account_id  ?? null,
                 qb_suggestion_confidence: byIndex[i]?.confidence      ?? null,
+                qb_suggestion_reason:     byIndex[i]?.reason          ?? null,
               }));
             } catch (qbErr) {
               console.warn('suggestInvoiceLineCodes failed:', qbErr.message);
             }
           }
 
-          // 3. Budget line suggestion (used as fallback if no contract, or for standalone invoices)
+          // 3. Budget line suggestion
           if (budgetLines.length) {
             const lineItems = extracted.line_items?.length
               ? extracted.line_items
@@ -233,11 +234,24 @@ router.post('/phases/:phaseId/import', requireAuth, upload.array('files', 50), a
                 if (extracted.line_items?.length) {
                   const byIndex = {};
                   for (const s of blSuggestions.lines) byIndex[s.line_index] = s;
-                  extracted.line_items = extracted.line_items.map((li, i) => ({
-                    ...li,
-                    suggested_budget_line_id: byIndex[i]?.budget_line_id ?? null,
-                    budget_line_confidence:   byIndex[i]?.confidence ?? null,
-                  }));
+                  // Build a lookup of budget line id → qb_account_id
+                  const blGlLookup = {};
+                  for (const bl of budgetLines) blGlLookup[bl.id] = bl.qb_account_id;
+
+                  extracted.line_items = extracted.line_items.map((li, i) => {
+                    const taskSuggestion = byIndex[i];
+                    const suggestedBudgetLineId = taskSuggestion?.budget_line_id ?? null;
+                    // If we have a task match, derive GL code from that task — overrides the vendor-based suggestion
+                    const derivedGlId = suggestedBudgetLineId ? (blGlLookup[suggestedBudgetLineId] ?? li.suggested_qb_account_id) : li.suggested_qb_account_id;
+                    const derivedConf = suggestedBudgetLineId ? (taskSuggestion.confidence ?? li.qb_suggestion_confidence) : li.qb_suggestion_confidence;
+                    return {
+                      ...li,
+                      suggested_budget_line_id: suggestedBudgetLineId,
+                      budget_line_confidence:   taskSuggestion?.confidence ?? null,
+                      suggested_qb_account_id:  derivedGlId,
+                      qb_suggestion_confidence: derivedConf,
+                    };
+                  });
                 }
               }
             } catch (blErr) {
@@ -495,9 +509,7 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
   try {
     const item = (await pool.query('SELECT * FROM import_queue WHERE id=$1', [Number(req.params.id)])).rows[0];
     if (!item) return res.status(404).json({ error: 'Not found' });
-    if (item.project_match === 'mismatch') {
-      return res.status(422).json({ error: 'Cannot confirm: this invoice is identified as belonging to a different project. Discard it.' });
-    }
+    // project_match === 'mismatch' is surfaced as a warning on the frontend; user can override and confirm anyway
     const { formData } = req.body;
     const lineId = formData.phase_budget_line_id || item.suggested_budget_line_id || null;
 
@@ -551,9 +563,19 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
       );
       invoiceId = r.rows[0].id;
       // Save invoice line items
+      // GL code is always derived from the selected budget task (phase_budget_line_id) when one is set —
+      // this ensures the two can never disagree regardless of what the form sent.
       const invLines = Array.isArray(formData.line_items) ? formData.line_items : [];
       for (let idx = 0; idx < invLines.length; idx++) {
         const li = invLines[idx];
+        let lineGlId = li.qb_account_id ? Number(li.qb_account_id) : null;
+        if (li.phase_budget_line_id) {
+          const blRow = await client.query(
+            'SELECT qb_account_id FROM phase_budget_lines WHERE id=$1',
+            [Number(li.phase_budget_line_id)]
+          );
+          if (blRow.rows[0]?.qb_account_id) lineGlId = blRow.rows[0].qb_account_id;
+        }
         await client.query(
           `INSERT INTO invoice_line_items
              (invoice_id, sort_order, billing_type, description, person, line_date, hours, rate, amount, qb_account_id, phase_budget_line_id)
@@ -563,7 +585,7 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
            li.hours != null ? Number(li.hours) : null,
            li.rate != null ? Number(li.rate) : null,
            Number(li.amount)||0,
-           li.qb_account_id ? Number(li.qb_account_id) : null,
+           lineGlId,
            li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null]
         );
       }
@@ -692,7 +714,7 @@ router.post('/import-queue/:id/retry', requireAuth, async (req, res, next) => {
           if (extracted.line_items?.length && qbAccountsRetry.length) {
             try {
               const codeSuggestions = await callWithRetry(() =>
-                suggestInvoiceLineCodes(buf, extracted.line_items, qbAccountsRetry, extracted.vendor_name)
+                suggestInvoiceLineCodes(buf, extracted.line_items, qbAccountsRetry, extracted.vendor_name, budgetLines)
               );
               const byIndex = {};
               for (const s of codeSuggestions) byIndex[s.line_index] = s;
@@ -700,6 +722,7 @@ router.post('/import-queue/:id/retry', requireAuth, async (req, res, next) => {
                 ...li,
                 suggested_qb_account_id:  byIndex[i]?.qb_account_id ?? null,
                 qb_suggestion_confidence: byIndex[i]?.confidence     ?? null,
+                qb_suggestion_reason:     byIndex[i]?.reason         ?? null,
               }));
             } catch (qbErr) { console.warn('suggestInvoiceLineCodes (retry) failed:', qbErr.message); }
           }
@@ -717,11 +740,20 @@ router.post('/import-queue/:id/retry', requireAuth, async (req, res, next) => {
                 if (extracted.line_items?.length) {
                   const byIndex = {};
                   for (const s of blSuggestions.lines) byIndex[s.line_index] = s;
-                  extracted.line_items = extracted.line_items.map((li, i) => ({
-                    ...li,
-                    suggested_budget_line_id: byIndex[i]?.budget_line_id ?? null,
-                    budget_line_confidence:   byIndex[i]?.confidence ?? null,
-                  }));
+                  const blGlLookup = {};
+                  for (const bl of budgetLines) blGlLookup[bl.id] = bl.qb_account_id;
+                  extracted.line_items = extracted.line_items.map((li, i) => {
+                    const taskSuggestion = byIndex[i];
+                    const suggestedBudgetLineId = taskSuggestion?.budget_line_id ?? null;
+                    const derivedGlId = suggestedBudgetLineId ? (blGlLookup[suggestedBudgetLineId] ?? li.suggested_qb_account_id) : li.suggested_qb_account_id;
+                    return {
+                      ...li,
+                      suggested_budget_line_id: suggestedBudgetLineId,
+                      budget_line_confidence:   taskSuggestion?.confidence ?? null,
+                      suggested_qb_account_id:  derivedGlId,
+                      qb_suggestion_confidence: suggestedBudgetLineId ? (taskSuggestion?.confidence ?? li.qb_suggestion_confidence) : li.qb_suggestion_confidence,
+                    };
+                  });
                 }
               }
             } catch (blErr) { console.warn('suggestLineBudgets (retry invoice) failed:', blErr.message); }
