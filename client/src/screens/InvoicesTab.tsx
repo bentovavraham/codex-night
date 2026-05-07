@@ -910,17 +910,23 @@ export function UploadPanel({
                                 }}
                               >
                                 <option value="">{placeholder}</option>
-                                {hasMatching ? (
-                                  matchingTasks.map((t: any) => (
-                                    <option key={t.id} value={t.id}>{t.task_name}{t.discipline ? ` · ${t.discipline}` : ''}</option>
-                                  ))
-                                ) : (
-                                  <optgroup label="— No tasks match this GL code — pick to override —">
-                                    {allTasks.map((t: any) => (
-                                      <option key={t.id} value={t.id}>{t.task_name}{t.discipline ? ` · ${t.discipline}` : ''}</option>
+                                {hasMatching && (
+                                  <optgroup label={`✓ Match this GL code`}>
+                                    {matchingTasks.map((t: any) => (
+                                      <option key={t.id} value={t.id}>{t.task_name}</option>
                                     ))}
                                   </optgroup>
                                 )}
+                                <optgroup label={hasMatching ? '— Other tasks in this phase —' : '— All tasks in this phase —'}>
+                                  {allTasks
+                                    .filter((t: any) => !matchingTasks.find((m: any) => m.id === t.id))
+                                    .map((t: any) => (
+                                      <option key={t.id} value={t.id}>
+                                        {t.task_name}
+                                        {t.discipline ? ` · ${t.discipline}` : ''}
+                                      </option>
+                                    ))}
+                                </optgroup>
                               </select>
                               {ai && isAiPick && (
                                 <div style={{

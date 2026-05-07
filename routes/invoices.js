@@ -558,16 +558,9 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
         const liAmt = Number(li.amount);
         if (!liAmt) continue;
         const liType = ['fixed', 'tm', 'expense'].includes(li.billing_type) ? li.billing_type : invoiceType;
-        // GL code is always derived from the selected task when one is set —
-        // task is the source of truth, GL follows. Prevents GL/task drift on edit.
-        let lineGlId = li.qb_account_id != null ? Number(li.qb_account_id) : null;
-        if (li.phase_budget_line_id != null) {
-          const blRow = await client.query(
-            'SELECT qb_account_id FROM phase_budget_lines WHERE id=$1',
-            [Number(li.phase_budget_line_id)]
-          );
-          if (blRow.rows[0]?.qb_account_id) lineGlId = blRow.rows[0].qb_account_id;
-        }
+        // CRITICAL: include qb_account_id and phase_budget_line_id in the INSERT.
+        // Without these the GL code (the source of truth for budget allocation)
+        // and the per-task assignment are silently dropped on every save.
         await client.query(
           `INSERT INTO invoice_line_items
              (invoice_id, billing_type, description, person, line_date, hours, rate,
@@ -581,7 +574,7 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
            li.rate   != null ? Number(li.rate)   : null,
            liAmt,
            li.sort_order != null ? Number(li.sort_order) : idx,
-           lineGlId,
+           li.qb_account_id        != null ? Number(li.qb_account_id)        : null,
            li.phase_budget_line_id != null ? Number(li.phase_budget_line_id) : null]
         );
       }
