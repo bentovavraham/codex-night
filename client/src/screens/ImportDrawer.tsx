@@ -519,6 +519,12 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
     .reduce((s, li) => s + (Number(li.budgeted_amount) || 0), 0);
   const hasTm = lineItems.some(li => li.billing_type === 'tm');
 
+  const invLineTotal = !isContract
+    ? invoiceLines.reduce((s, li) => s + (Number(li.amount) || 0), 0)
+    : 0;
+  const invLineTotalMismatch = !isContract && invoiceLines.length > 0
+    && Math.abs(invLineTotal - (Number(amount) || 0)) > 0.02;
+
   const isWrongProject = item.project_match === 'mismatch';
   const weakQbMatch = !isContract && (item.qb_match_confidence === 'low' || item.qb_match_confidence === 'none');
   const [qbOverrideAcked, setQbOverrideAcked] = useState(false);
@@ -940,6 +946,12 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
 
         {/* Sticky footer */}
         <div className={styles.reviewFormFooter}>
+          {invLineTotalMismatch && (
+            <div className={styles.overrideWarn}>
+              <strong>⚠ Line items don't add up</strong>
+              <span>Line items total {usd2.format(invLineTotal)} but invoice amount is {usd2.format(Number(amount) || 0)}. Fix the amounts before confirming.</span>
+            </div>
+          )}
           {isWrongProject && (
             <div className={styles.overrideWarn}>
               <strong>⚠ Possible Wrong Project</strong>
