@@ -531,15 +531,50 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
 
       // Insert line items if present
       const lineItems = formData.line_items || [];
+      if (lineItems.length === 0) {
+        // No line items — write a single allocation row for the contract header
+        const hdrGlId = formData.qb_account_id ? Number(formData.qb_account_id) : null;
+        if (!hdrGlId) throw Object.assign(new Error('GL code required — set a GL account before confirming'), { status: 400 });
+        const hdrTaskId = lineId ? Number(lineId) : null;
+        await client.query(
+          `INSERT INTO financial_allocations
+             (source_type, source_document_id, source_line_id, phase_id, qb_account_id, phase_budget_line_id,
+              billing_type, amount, allocation_status, allocation_source, created_by)
+           VALUES ('contract_line',$1,NULL,$2,$3,$4,$5,$6,$7,'explicit',$8)`,
+          [contractId, item.phase_id, hdrGlId, hdrTaskId,
+           formData.billing_type||'fixed', Number(formData.total_value)||0,
+           hdrTaskId ? 'confirmed' : 'needs_review', req.session.userId]
+        );
+      }
       for (let idx = 0; idx < lineItems.length; idx++) {
         const li = lineItems[idx];
-        await client.query(
+        let lineGlId = li.qb_account_id ? Number(li.qb_account_id) : null;
+        if (li.phase_budget_line_id) {
+          const blRow = await client.query(
+            'SELECT qb_account_id FROM phase_budget_lines WHERE id=$1',
+            [Number(li.phase_budget_line_id)]
+          );
+          if (blRow.rows[0]?.qb_account_id) lineGlId = blRow.rows[0].qb_account_id;
+        }
+        if (!lineGlId) throw Object.assign(new Error(`GL code required on line ${idx + 1} — set a GL account before confirming`), { status: 400 });
+        const cliRes = await client.query(
           `INSERT INTO contract_line_items
              (contract_id, sort_order, billing_type, description, budgeted_amount, phase_budget_line_id)
-           VALUES ($1,$2,$3,$4,$5,$6)`,
+           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
           [contractId, idx, li.billing_type||'fixed', li.description||'',
            Number(li.budgeted_amount)||0,
            li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null]
+        );
+        const cliId = cliRes.rows[0].id;
+        const cliTaskId = li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null;
+        await client.query(
+          `INSERT INTO financial_allocations
+             (source_type, source_document_id, source_line_id, phase_id, qb_account_id, phase_budget_line_id,
+              billing_type, amount, allocation_status, allocation_source, created_by)
+           VALUES ('contract_line',$1,$2,$3,$4,$5,$6,$7,$8,'explicit',$9)`,
+          [contractId, cliId, item.phase_id, lineGlId, cliTaskId,
+           li.billing_type||'fixed', Number(li.budgeted_amount)||0,
+           cliTaskId ? 'confirmed' : 'needs_review', req.session.userId]
         );
       }
     } else {
@@ -576,10 +611,11 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
           );
           if (blRow.rows[0]?.qb_account_id) lineGlId = blRow.rows[0].qb_account_id;
         }
-        await client.query(
+        if (!lineGlId) throw Object.assign(new Error(`GL code required on line ${idx + 1} — set a GL account before confirming`), { status: 400 });
+        const iliRes = await client.query(
           `INSERT INTO invoice_line_items
              (invoice_id, sort_order, billing_type, description, person, line_date, hours, rate, amount, qb_account_id, phase_budget_line_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
           [invoiceId, idx, li.billing_type||'fixed', li.description||'',
            li.person||null, li.line_date||null,
            li.hours != null ? Number(li.hours) : null,
@@ -587,6 +623,17 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
            Number(li.amount)||0,
            lineGlId,
            li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null]
+        );
+        const iliId = iliRes.rows[0].id;
+        const iliTaskId = li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null;
+        await client.query(
+          `INSERT INTO financial_allocations
+             (source_type, source_document_id, source_line_id, phase_id, qb_account_id, phase_budget_line_id,
+              billing_type, amount, allocation_status, allocation_source, created_by)
+           VALUES ('invoice_line',$1,$2,$3,$4,$5,$6,$7,$8,'explicit',$9)`,
+          [invoiceId, iliId, item.phase_id, lineGlId, iliTaskId,
+           li.billing_type||'fixed', Number(li.amount)||0,
+           iliTaskId ? 'confirmed' : 'needs_review', req.session.userId]
         );
       }
     }

@@ -85,361 +85,60 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         qp.sort_order                           AS qb_parent_sort,
         COALESCE(qa.category, qp.category)      AS qb_category,
 
-        -- Committed: sum contributions to this budget line from active contracts.
-        -- Line items with their own phase_budget_line_id override the contract-level line.
-        -- Contracts with no line items contribute total_value at the contract level.
+        -- Actuals from financial_allocations — single aggregation, no inference
+        COALESCE(fa.committed,      0) AS committed,
+        COALESCE(fa.co_value,       0) AS co_value,
+        COALESCE(fa.co_count,       0) AS co_count,
+        COALESCE(fa.fixed_charges,  0) AS fixed_charges,
+        COALESCE(fa.tm_charges,     0) AS tm_charges,
+        COALESCE(fa.expense_charges,0) AS expense_charges,
+        COALESCE(fa.billed,         0) AS billed,
+        COALESCE(fa.paid,           0) AS paid,
+
+        -- QB codes used by confirmed allocations on this task
         COALESCE((
-          SELECT SUM(contribution) FROM (
-            SELECT cli.budgeted_amount AS contribution
-            FROM contracts c
-            JOIN contract_line_items cli ON cli.contract_id = c.id
-            WHERE COALESCE(cli.phase_budget_line_id, c.phase_budget_line_id) = pbl.id
-              AND c.status NOT IN ('voided')
-
-            UNION ALL
-
-            SELECT c.total_value AS contribution
-            FROM contracts c
-            WHERE c.phase_budget_line_id = pbl.id
-              AND c.status NOT IN ('voided')
-              AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
-          ) sub
-        ), 0) AS committed,
-
-        -- Change order count: distinct COs that contribute to this pbl
-        -- (either via line items pointing here, or legacy CO with no line items
-        -- attached to a parent contract whose pbl is this one)
-        COALESCE((
-          SELECT COUNT(DISTINCT co.id)
-          FROM change_orders co
-          LEFT JOIN contracts c ON c.id = co.contract_id
-          LEFT JOIN change_order_line_items col ON col.change_order_id = co.id
-          WHERE co.status NOT IN ('voided','rejected')
-            AND (
-              col.phase_budget_line_id = pbl.id
-              OR (col.phase_budget_line_id IS NULL AND col.qb_account_id = pbl.qb_account_id
-                  AND c.phase_id = pbl.phase_id
-                  AND NOT EXISTS (SELECT 1 FROM phase_budget_lines o
-                                   WHERE o.phase_id = pbl.phase_id
-                                     AND o.qb_account_id = pbl.qb_account_id
-                                     AND o.id <> pbl.id))
-              OR (col.id IS NULL AND c.phase_budget_line_id = pbl.id)
-            )
-        ), 0) AS co_count,
-
-        -- Change order total value (COS column).
-        -- Allocation cascade for change-order line items mirrors the invoice
-        -- model: explicit per-line pbl, then GL-driven for unique-GL pbls,
-        -- then legacy fallback via parent contract's pbl when CO has no line items.
-        COALESCE((
-          SELECT SUM(contribution) FROM (
-            -- Path 1: CO line items explicitly assigned to this pbl
-            SELECT col.budgeted_amount AS contribution
-              FROM change_order_line_items col
-              JOIN change_orders co ON co.id = col.change_order_id
-             WHERE co.status NOT IN ('voided','rejected')
-               AND col.phase_budget_line_id = pbl.id
-            UNION ALL
-            -- Path 2: CO line items GL-coded to this pbl (only when pbl is unique-GL)
-            SELECT col.budgeted_amount
-              FROM change_order_line_items col
-              JOIN change_orders co ON co.id = col.change_order_id
-              JOIN contracts c2    ON c2.id  = co.contract_id
-             WHERE co.status NOT IN ('voided','rejected')
-               AND c2.phase_id = pbl.phase_id
-               AND col.phase_budget_line_id IS NULL
-               AND col.qb_account_id IS NOT NULL
-               AND col.qb_account_id = pbl.qb_account_id
-               AND NOT EXISTS (
-                 SELECT 1 FROM phase_budget_lines o
-                  WHERE o.phase_id = pbl.phase_id
-                    AND o.qb_account_id = pbl.qb_account_id
-                    AND o.id <> pbl.id
-               )
-            UNION ALL
-            -- Path 3: legacy COs with no line items — fall back to parent contract's pbl
-            SELECT co.amount
-              FROM change_orders co
-              JOIN contracts c ON c.id = co.contract_id
-             WHERE co.status NOT IN ('voided','rejected')
-               AND c.phase_budget_line_id = pbl.id
-               AND NOT EXISTS (SELECT 1 FROM change_order_line_items x WHERE x.change_order_id = co.id)
-          ) sub
-        ), 0) AS co_value,
-
-        -- Allocation cascade for invoice line items (used by all 5 aggregations below):
-        --   Path 1: ili.phase_budget_line_id = pbl.id   (Option C — explicit per-line, primary)
-        --   Path 2: ili.qb_account_id = pbl.qb_account_id   (GL-driven, when ili pbl is null)
-        --   Path 3: line items with NEITHER pbl_id NOR qb_account_id — legacy invoices that
-        --          predate the new model. Fall back to inv.phase_budget_line_id so the data
-        --          still appears in the grid until Richard migrates each invoice.
-        --   Path 4: invoices with NO line items at all — same legacy fallback via invoice level.
-        -- Paths 3 & 4 are TRANSITIONAL. As invoices are re-saved through the new flow,
-        -- they migrate naturally to Path 1 or 2.
-
-        -- T&M invoice charges
-        COALESCE((
-          SELECT SUM(contribution) FROM (
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'tm'
-              AND ili.phase_budget_line_id = pbl.id
-            UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'tm'
-              AND ili.phase_budget_line_id IS NULL
-              AND ili.qb_account_id IS NOT NULL
-              AND ili.qb_account_id = pbl.qb_account_id
-              AND inv.phase_id = pbl.phase_id
-              -- Only credit this leaf when it's the unique pbl for the GL code.
-              -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
-              -- amount appears as a separate "General [GL]" row instead, so it
-              -- visibly burns down as Richard assigns items to specific tasks.
-              AND NOT EXISTS (
-                SELECT 1 FROM phase_budget_lines pbl_other
-                WHERE pbl_other.phase_id = pbl.phase_id
-                  AND pbl_other.qb_account_id = pbl.qb_account_id
-                  AND pbl_other.id <> pbl.id
-              )
-            UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'tm'
-              AND ili.phase_budget_line_id IS NULL
-              AND ili.qb_account_id IS NULL
-              AND inv.phase_budget_line_id = pbl.id
-            UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
-            WHERE inv.invoice_type = 'tm'
-              AND inv.status NOT IN ('voided','rejected')
-              AND inv.phase_budget_line_id = pbl.id
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
-          ) sub
-        ), 0) AS tm_charges,
-
-        -- Expense invoice charges
-        COALESCE((
-          SELECT SUM(contribution) FROM (
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'expense'
-              AND ili.phase_budget_line_id = pbl.id
-            UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'expense'
-              AND ili.phase_budget_line_id IS NULL
-              AND ili.qb_account_id IS NOT NULL
-              AND ili.qb_account_id = pbl.qb_account_id
-              AND inv.phase_id = pbl.phase_id
-              -- Only credit this leaf when it's the unique pbl for the GL code.
-              -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
-              -- amount appears as a separate "General [GL]" row instead, so it
-              -- visibly burns down as Richard assigns items to specific tasks.
-              AND NOT EXISTS (
-                SELECT 1 FROM phase_budget_lines pbl_other
-                WHERE pbl_other.phase_id = pbl.phase_id
-                  AND pbl_other.qb_account_id = pbl.qb_account_id
-                  AND pbl_other.id <> pbl.id
-              )
-            UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'expense'
-              AND ili.phase_budget_line_id IS NULL
-              AND ili.qb_account_id IS NULL
-              AND inv.phase_budget_line_id = pbl.id
-            UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
-            WHERE inv.invoice_type = 'expense'
-              AND inv.status NOT IN ('voided','rejected')
-              AND inv.phase_budget_line_id = pbl.id
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
-          ) sub
-        ), 0) AS expense_charges,
-
-        -- Fixed invoice charges
-        COALESCE((
-          SELECT SUM(contribution) FROM (
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'fixed'
-              AND ili.phase_budget_line_id = pbl.id
-            UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'fixed'
-              AND ili.phase_budget_line_id IS NULL
-              AND ili.qb_account_id IS NOT NULL
-              AND ili.qb_account_id = pbl.qb_account_id
-              AND inv.phase_id = pbl.phase_id
-              -- Only credit this leaf when it's the unique pbl for the GL code.
-              -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
-              -- amount appears as a separate "General [GL]" row instead, so it
-              -- visibly burns down as Richard assigns items to specific tasks.
-              AND NOT EXISTS (
-                SELECT 1 FROM phase_budget_lines pbl_other
-                WHERE pbl_other.phase_id = pbl.phase_id
-                  AND pbl_other.qb_account_id = pbl.qb_account_id
-                  AND pbl_other.id <> pbl.id
-              )
-            UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.billing_type = 'fixed'
-              AND ili.phase_budget_line_id IS NULL
-              AND ili.qb_account_id IS NULL
-              AND inv.phase_budget_line_id = pbl.id
-            UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
-            WHERE inv.invoice_type = 'fixed'
-              AND inv.status NOT IN ('voided','rejected')
-              AND inv.phase_budget_line_id = pbl.id
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
-          ) sub
-        ), 0) AS fixed_charges,
-
-        -- Billed to date (all types)
-        COALESCE((
-          SELECT SUM(contribution) FROM (
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.phase_budget_line_id = pbl.id
-            UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.phase_budget_line_id IS NULL
-              AND ili.qb_account_id IS NOT NULL
-              AND ili.qb_account_id = pbl.qb_account_id
-              AND inv.phase_id = pbl.phase_id
-              -- Only credit this leaf when it's the unique pbl for the GL code.
-              -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
-              -- amount appears as a separate "General [GL]" row instead, so it
-              -- visibly burns down as Richard assigns items to specific tasks.
-              AND NOT EXISTS (
-                SELECT 1 FROM phase_budget_lines pbl_other
-                WHERE pbl_other.phase_id = pbl.phase_id
-                  AND pbl_other.qb_account_id = pbl.qb_account_id
-                  AND pbl_other.id <> pbl.id
-              )
-            UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND ili.phase_budget_line_id IS NULL
-              AND ili.qb_account_id IS NULL
-              AND inv.phase_budget_line_id = pbl.id
-            UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
-            WHERE inv.status NOT IN ('voided','rejected')
-              AND inv.phase_budget_line_id = pbl.id
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
-          ) sub
-        ), 0) AS billed,
-
-        -- Paid to date
-        COALESCE((
-          SELECT SUM(contribution) FROM (
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status = 'paid'
-              AND ili.phase_budget_line_id = pbl.id
-            UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status = 'paid'
-              AND ili.phase_budget_line_id IS NULL
-              AND ili.qb_account_id IS NOT NULL
-              AND ili.qb_account_id = pbl.qb_account_id
-              AND inv.phase_id = pbl.phase_id
-              -- Only credit this leaf when it's the unique pbl for the GL code.
-              -- Shared-GL pbls don't get Path-2 credit at the leaf level — the
-              -- amount appears as a separate "General [GL]" row instead, so it
-              -- visibly burns down as Richard assigns items to specific tasks.
-              AND NOT EXISTS (
-                SELECT 1 FROM phase_budget_lines pbl_other
-                WHERE pbl_other.phase_id = pbl.phase_id
-                  AND pbl_other.qb_account_id = pbl.qb_account_id
-                  AND pbl_other.id <> pbl.id
-              )
-            UNION ALL
-            SELECT ili.amount AS contribution
-            FROM invoice_line_items ili
-            JOIN invoices inv ON inv.id = ili.invoice_id
-            WHERE inv.status = 'paid'
-              AND ili.phase_budget_line_id IS NULL
-              AND ili.qb_account_id IS NULL
-              AND inv.phase_budget_line_id = pbl.id
-            UNION ALL
-            SELECT inv.amount AS contribution
-            FROM invoices inv
-            WHERE inv.status = 'paid'
-              AND inv.phase_budget_line_id = pbl.id
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
-          ) sub
-        ), 0) AS paid,
-
-        -- QB codes used (per line item when available, else invoice-level)
-        COALESCE((
-          SELECT string_agg(DISTINCT qa.account_number, ', ' ORDER BY qa.account_number)
-          FROM invoice_line_items ili
-          JOIN invoices inv ON inv.id = ili.invoice_id
-          JOIN qb_accounts qa ON qa.id = ili.qb_account_id
-          WHERE inv.status NOT IN ('voided','rejected')
-            AND qa.account_number IS NOT NULL
-            AND inv.phase_id = pbl.phase_id
-            AND (
-              ili.phase_budget_line_id = pbl.id
-              OR (ili.phase_budget_line_id IS NULL AND ili.qb_account_id = pbl.qb_account_id)
-            )
+          SELECT string_agg(DISTINCT qa2.account_number, ', ' ORDER BY qa2.account_number)
+          FROM financial_allocations fa2
+          JOIN qb_accounts qa2 ON qa2.id = fa2.qb_account_id
+          WHERE fa2.phase_budget_line_id = pbl.id
+            AND fa2.allocation_status IN ('confirmed','approved')
+            AND qa2.account_number IS NOT NULL
         ), '') AS qb_codes_used,
 
-        -- Flag: any direct invoices against this line — kept for legacy display
-        -- but does not drive aggregation anymore.
+        -- Flag: any confirmed invoice allocations against this task
         EXISTS (
-          SELECT 1 FROM invoice_line_items ili
-          JOIN invoices inv ON inv.id = ili.invoice_id
-          WHERE inv.status NOT IN ('voided','rejected')
-            AND inv.phase_id = pbl.phase_id
-            AND (
-              ili.phase_budget_line_id = pbl.id
-              OR (ili.phase_budget_line_id IS NULL AND ili.qb_account_id = pbl.qb_account_id)
-            )
+          SELECT 1 FROM financial_allocations fa3
+          WHERE fa3.phase_budget_line_id = pbl.id
+            AND fa3.source_type = 'invoice_line'
+            AND fa3.allocation_status IN ('confirmed','approved')
         ) AS has_direct_invoices
 
       FROM phase_budget_lines pbl
       LEFT JOIN qb_accounts qa ON qa.id = pbl.qb_account_id
       LEFT JOIN qb_accounts qp ON qp.id = qa.parent_id
+
+      -- Single join aggregates all confirmed/approved allocations per task.
+      -- Amounts always come from financial_allocations; paid status from invoices.
+      LEFT JOIN (
+        SELECT
+          fa.phase_budget_line_id,
+          SUM(CASE WHEN fa.source_type = 'contract_line' THEN fa.amount ELSE 0 END) AS committed,
+          SUM(CASE WHEN fa.source_type = 'co_line'       THEN fa.amount ELSE 0 END) AS co_value,
+          COUNT(DISTINCT CASE WHEN fa.source_type = 'co_line' THEN fa.source_document_id END) AS co_count,
+          SUM(CASE WHEN fa.source_type = 'invoice_line' AND fa.billing_type = 'fixed'   THEN fa.amount ELSE 0 END) AS fixed_charges,
+          SUM(CASE WHEN fa.source_type = 'invoice_line' AND fa.billing_type = 'tm'      THEN fa.amount ELSE 0 END) AS tm_charges,
+          SUM(CASE WHEN fa.source_type = 'invoice_line' AND fa.billing_type = 'expense' THEN fa.amount ELSE 0 END) AS expense_charges,
+          SUM(CASE WHEN fa.source_type = 'invoice_line' THEN fa.amount ELSE 0 END) AS billed,
+          SUM(CASE WHEN fa.source_type = 'invoice_line' AND inv.status = 'paid' THEN fa.amount ELSE 0 END) AS paid
+        FROM financial_allocations fa
+        LEFT JOIN invoices inv
+          ON inv.id = fa.source_document_id AND fa.source_type = 'invoice_line'
+        WHERE fa.phase_id = $1
+          AND fa.allocation_status IN ('confirmed','approved')
+          AND fa.phase_budget_line_id IS NOT NULL
+        GROUP BY fa.phase_budget_line_id
+      ) fa ON fa.phase_budget_line_id = pbl.id
+
       WHERE pbl.phase_id = $1
       ORDER BY
         COALESCE(qp.sort_order, qa.sort_order, 9999),
@@ -511,7 +210,8 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         paid            = pm_paid;
         amount_due      = pm_billed - pm_paid;
       }
-      const remaining_budget = budgeted - billed;
+      const remaining_budget = budgeted - total_commitment;
+      const commit_unbilled  = total_commitment - billed;
       const pct_billed       = budgeted > 0 ? billed / budgeted : null;
 
       const base = {
@@ -529,6 +229,7 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
         amount_due,
         remaining_budget,
         remaining_commit,
+        commit_unbilled,
         pct_billed,
         has_direct_invoices: r.has_direct_invoices === true || r.has_direct_invoices === 't',
         qb_account_id:      r.qb_account_id ?? null,
@@ -571,6 +272,8 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
     // task rows. As Richard assigns line items to specific tasks via the
     // Edit modal, the General row burns down toward zero.
     if (source !== 'qb') {
+      // Needs-review allocations: confirmed/approved rows with no task assigned yet.
+      // These are surfaced as "General — Unassigned" rows grouped by GL account.
       const sharedGl = await pool.query(`
         SELECT
           qa.id              AS qb_account_id,
@@ -581,26 +284,19 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
           qp.account_number  AS qb_parent_number,
           qp.short_name      AS qb_parent_name,
           qp.sort_order      AS qb_parent_sort,
-          COALESCE(SUM(CASE WHEN ili.billing_type = 'fixed'   THEN ili.amount ELSE 0 END), 0) AS fixed,
-          COALESCE(SUM(CASE WHEN ili.billing_type = 'tm'      THEN ili.amount ELSE 0 END), 0) AS tm,
-          COALESCE(SUM(CASE WHEN ili.billing_type = 'expense' THEN ili.amount ELSE 0 END), 0) AS expense,
-          COALESCE(SUM(ili.amount), 0)                                                        AS billed,
-          COALESCE(SUM(CASE WHEN inv.status = 'paid' THEN ili.amount ELSE 0 END), 0)          AS paid
-        FROM invoice_line_items ili
-        JOIN invoices inv      ON inv.id = ili.invoice_id
-        JOIN qb_accounts qa    ON qa.id = ili.qb_account_id
+          COALESCE(SUM(CASE WHEN fa.billing_type = 'fixed'   THEN fa.amount ELSE 0 END), 0) AS fixed,
+          COALESCE(SUM(CASE WHEN fa.billing_type = 'tm'      THEN fa.amount ELSE 0 END), 0) AS tm,
+          COALESCE(SUM(CASE WHEN fa.billing_type = 'expense' THEN fa.amount ELSE 0 END), 0) AS expense,
+          COALESCE(SUM(CASE WHEN fa.source_type = 'invoice_line' THEN fa.amount ELSE 0 END), 0) AS billed,
+          COALESCE(SUM(CASE WHEN fa.source_type = 'invoice_line' AND inv.status = 'paid' THEN fa.amount ELSE 0 END), 0) AS paid
+        FROM financial_allocations fa
+        JOIN qb_accounts qa    ON qa.id = fa.qb_account_id
         LEFT JOIN qb_accounts qp ON qp.id = qa.parent_id
-        WHERE inv.status NOT IN ('voided','rejected')
-          AND inv.phase_id = $1
-          AND ili.phase_budget_line_id IS NULL
-          AND ili.qb_account_id IN (
-            SELECT qb_account_id
-              FROM phase_budget_lines
-             WHERE phase_id = $1
-               AND qb_account_id IS NOT NULL
-             GROUP BY qb_account_id
-            HAVING COUNT(*) > 1
-          )
+        LEFT JOIN invoices inv  ON inv.id = fa.source_document_id AND fa.source_type = 'invoice_line'
+        WHERE fa.phase_id = $1
+          AND fa.allocation_status IN ('confirmed','approved')
+          AND fa.phase_budget_line_id IS NULL
+          AND fa.source_type = 'invoice_line'
         GROUP BY qa.id, qa.account_number, qa.short_name, qa.sort_order,
                  qp.id, qp.account_number, qp.short_name, qp.sort_order
       `, [phaseId]);
@@ -643,8 +339,9 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
           billed,
           paid,
           amount_due:       billed - paid,
-          remaining_budget: -billed,
+          remaining_budget: 0,
           remaining_commit: 0,
+          commit_unbilled:  0,
           pct_billed: null,
           qb_codes_used: r.qb_account_number || '',
           has_direct_invoices: false,
@@ -721,8 +418,9 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
           billed:          source === 'qb' ? qb.qb_billed     : 0,
           paid:            source === 'qb' ? qb.qb_paid       : 0,
           amount_due:      source === 'qb' ? qb.qb_amount_due : 0,
-          remaining_budget: -(source === 'qb' ? qb.qb_billed : 0),
+          remaining_budget: 0,
           remaining_commit: 0,
+          commit_unbilled:  0,
           pct_billed: null,
           qb_codes_used: '',
           has_direct_invoices: false,
@@ -2008,14 +1706,15 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
       const billed           = parseFloat(r.billed)          || 0;
       const paid             = parseFloat(r.paid)            || 0;
       const amount_due       = billed - paid;
-      const remaining_budget = budgeted - billed;
+      const remaining_budget = budgeted - total_commitment;
       const remaining_commit = budgeted - total_commitment;
+      const commit_unbilled  = total_commitment - billed;
       // Rem. % columns = REMAINING fraction (not spent fraction)
-      const rem_budget_pct   = budgeted > 0 ? (budgeted - billed) / budgeted : null;
+      const rem_budget_pct   = budgeted > 0 ? (budgeted - total_commitment) / budgeted : null;
       const rem_commit_pct   = total_commitment > 0 ? (total_commitment - billed) / total_commitment : null;
       return { ...r, budgeted, committed, co_value, total_commitment,
                fixed_charges, tm_charges, expense_charges, billed, paid,
-               amount_due, remaining_budget, remaining_commit,
+               amount_due, remaining_budget, remaining_commit, commit_unbilled,
                rem_budget_pct, rem_commit_pct };
     });
 
@@ -2034,12 +1733,12 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
     const PCT  = '0%';
 
     // Col map (1-based): 1=Acct# 2=Task 3=Budgeted 4=RemBudget 5=Rem%
-    //  6=Contracted 7=COs 8=TotalCommit 9=Rem% 10=Fixed 11=T&M 12=Expense
-    //  13=Billed 14=AmtDue 15=Paid 16=$/SF 17=$/AC
-    //  18=QBCodes 19=CalcMethod 20=Consultant 21=Notes
-    const NCOLS      = 21;
-    const MONEY_COLS = [3,4,6,7,8,10,11,12,13,14,15];
-    const PCT_COLS   = [5,9];
+    //  6=Contracted 7=COs 8=TotalCommit 9=RemCommit$ 10=Rem%
+    //  11=Fixed 12=T&M 13=Expense 14=Billed 15=AmtDue 16=Paid 17=$/SF 18=$/AC
+    //  19=QBCodes 20=CalcMethod 21=Consultant 22=Notes
+    const NCOLS      = 22;
+    const MONEY_COLS = [3,4,6,7,8,9,11,12,13,14,15,16];
+    const PCT_COLS   = [5,10];
 
     const glaSF   = phaseRow.gla_sf ? Number(phaseRow.gla_sf) : null;
     const glaAC   = phaseRow.gla_ac ? Number(phaseRow.gla_ac) : null;
@@ -2091,6 +1790,7 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         v(r.committed),
         v(r.co_value),
         v(r.total_commitment),
+        v(r.commit_unbilled),
         r.rem_commit_pct,
         v(r.fixed_charges),
         v(r.tm_charges),
@@ -2171,8 +1871,8 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
 
     // Row 3: Group bands
     const bands = [
-      [1,3,''], [4,5,'REMAINING'], [6,9,'CONTRACT COMMITMENT'],
-      [10,13,'INVOICED'], [14,15,'PAYMENTS'], [16,17,'UNIT COST'], [18,21,''],
+      [1,3,''], [4,5,'REMAINING'], [6,10,'CONTRACT COMMITMENT'],
+      [11,14,'INVOICED'], [15,16,'PAYMENTS'], [17,18,'UNIT COST'], [19,22,''],
     ];
     bands.forEach(([c1, c2, label], i) => {
       if (c1 < c2) ws.mergeCells(3, c1, 3, c2);
@@ -2186,7 +1886,7 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
     // Row 4: Column headers
     const hdrRow = ws.addRow([
       'Acct #', 'Task / Description', 'Budgeted', 'Rem. Budget', 'Rem. %',
-      'Contracted', 'COs', 'Total Commit', 'Rem. %',
+      'Contracted', 'COs', 'Total Commit', 'Rem. Commit $', 'Rem. Commit %',
       'Fixed', 'T&M', 'Expense', 'Billed', 'Amt Due', 'Paid',
       '$/SF', '$/AC', 'QB Codes Used', 'Calc Method', 'Consultant', 'Notes',
     ]);
@@ -2301,7 +2001,7 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
     // Column widths
     ws.columns = [
       { width: 10 }, { width: 44 }, { width: 13 }, { width: 13 }, { width: 8 },
-      { width: 13 }, { width: 9  }, { width: 13 }, { width: 8  },
+      { width: 13 }, { width: 9  }, { width: 13 }, { width: 13 }, { width: 8  },
       { width: 11 }, { width: 11 }, { width: 11 }, { width: 13 },
       { width: 11 }, { width: 11 }, { width: 9  }, { width: 9  },
       { width: 22 }, { width: 14 }, { width: 18 }, { width: 30 },

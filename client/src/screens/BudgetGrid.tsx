@@ -33,6 +33,7 @@ export interface BudgetRow {
   co_value: number;
   total_commitment: number;
   remaining_commit: number;
+  commit_unbilled: number;
   pct_billed: number | null;
   qb_codes_used: string;
   has_direct_invoices: boolean;
@@ -407,11 +408,11 @@ function DC({ value, row, cell, active, onDrill, className }: {
 
 type Totals = {
   budgeted: number; committed: number; co_value: number; total_commitment: number; remaining_commit: number;
-  fixed: number; tm: number; expenses: number; billed: number; paid: number; rem_budget: number;
+  fixed: number; tm: number; expenses: number; billed: number; paid: number; rem_budget: number; commit_unbilled: number;
 };
 const zero = (): Totals => ({
   budgeted: 0, committed: 0, co_value: 0, total_commitment: 0, remaining_commit: 0,
-  fixed: 0, tm: 0, expenses: 0, billed: 0, paid: 0, rem_budget: 0,
+  fixed: 0, tm: 0, expenses: 0, billed: 0, paid: 0, rem_budget: 0, commit_unbilled: 0,
 });
 // `skipActualsSum` skips the QB-derived actuals fields. Used in QB Source mode
 // where multiple pbls share one qb_account_id: each leaf gets the FULL GL-code
@@ -429,6 +430,7 @@ const addRow = (t: Totals, r: BudgetRow, skipActualsSum = false): Totals => ({
   billed:            t.billed            + (skipActualsSum ? 0 : r.billed),
   paid:              t.paid              + (skipActualsSum ? 0 : r.paid),
   rem_budget:        t.rem_budget        + (skipActualsSum ? 0 : r.remaining_budget),
+  commit_unbilled:   t.commit_unbilled   + (skipActualsSum ? 0 : r.commit_unbilled),
 });
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -674,7 +676,9 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     }
     if ((r as any).general_unassigned) return r; // never blank the General row itself
     return { ...r, fixed_charges: 0, tm_charges: 0, expense_charges: 0,
-             billed: 0, paid: 0, amount_due: 0, remaining_budget: r.budgeted_amount };
+             billed: 0, paid: 0, amount_due: 0,
+             remaining_budget: r.budgeted_amount - r.total_commitment,
+             commit_unbilled: r.total_commitment };
   };
 
   const handleTabNext = useCallback((rowId: number, field: string) => {
@@ -725,6 +729,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
       <td className={cls}/><td className={cls}/><td className={cls}/>
       <td className={cls}/><td className={cls}/><td className={cls}/>
       <td className={cls}/><td className={cls}/><td className={cls}/>
+      <td className={cls}/>
       <td className={`${cls} ${dc}`}/><td className={`${cls} ${dc}`}/>
       <td className={`${cls} ${dc}`}/><td className={`${cls} ${dc}`}/>
     </>;
@@ -732,10 +737,11 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     return <>
       <td className={cls}>{moneyD(t.budgeted)}</td>
       <td className={`${cls} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
-      <td className={cls}>{t.budgeted > 0 ? remPct(t.billed, t.budgeted) : '—'}</td>
+      <td className={cls}>{t.budgeted > 0 ? remPct(t.total_commitment, t.budgeted) : '—'}</td>
       <td className={cls}>{money(t.committed)}</td>
       <td className={cls}>{t.co_value > 0 ? money(t.co_value) : '—'}</td>
       <td className={`${cls} ${t.total_commitment > t.budgeted && t.budgeted > 0 ? styles.danger : ''}`}>{money(t.total_commitment)}</td>
+      <td className={cls}>{t.total_commitment > 0 ? moneyD(t.total_commitment - t.billed) : '—'}</td>
       <td className={cls}>{t.total_commitment > 0 ? remPct(t.billed, t.total_commitment) : '—'}</td>
       <td className={cls}>{money(t.fixed)}</td>
       <td className={cls}>{money(t.tm)}</td>
@@ -774,8 +780,8 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.budgeted_amount > 0 && row.remaining_budget < 0 ? styles.danger : ''}`}>
           {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
         </td>
-        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.billed, row.budgeted_amount)}`}>
-          {row.budgeted_amount > 0 ? remPct(row.billed, row.budgeted_amount) : '—'}
+        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.total_commitment, row.budgeted_amount)}`}>
+          {row.budgeted_amount > 0 ? remPct(row.total_commitment, row.budgeted_amount) : '—'}
         </td>
         <DC value={row.committed} row={row} cell="committed"
           active={isDrillActive && drillTarget?.cell === 'committed'} onDrill={drill} />
@@ -784,6 +790,9 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         </td>
         <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
           {money(row.total_commitment)}
+        </td>
+        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
+          {row.total_commitment > 0 ? usd.format(row.commit_unbilled) : '—'}
         </td>
         <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>
           {row.total_commitment > 0 ? remPct(row.billed, row.total_commitment) : '—'}
@@ -1062,15 +1071,17 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         const rawTotalCommit    = rawContracted + rawCoValue;
         const rawBilled         = cc?.raw_billed        ?? grand.billed;
         const rawPaid           = cc?.raw_paid          ?? grand.paid;
-        const rawRemBudget      = rawBudgeted - rawBilled;
+        const rawRemBudget      = rawBudgeted - rawTotalCommit;
         const rawRemBudgetPct   = rawBudgeted  > 0 ? rawRemBudget  / rawBudgeted  : 0;
-        const rawRemCommitPct   = rawTotalCommit > 0 ? (rawTotalCommit - rawBilled) / rawTotalCommit : 0;
+        const rawCommitUnbilled = rawTotalCommit - rawBilled;
+        const rawRemCommitPct   = rawTotalCommit > 0 ? rawCommitUnbilled / rawTotalCommit : 0;
 
         // --- Grid derived values ---
-        const gridTotalCommit   = grand.committed + grand.co_value;
-        const gridRemBudget     = grand.budgeted - grand.billed;
-        const gridRemBudgetPct  = grand.budgeted  > 0 ? gridRemBudget  / grand.budgeted  : 0;
-        const gridRemCommitPct  = gridTotalCommit > 0 ? (gridTotalCommit - grand.billed) / gridTotalCommit : 0;
+        const gridTotalCommit    = grand.committed + grand.co_value;
+        const gridRemBudget      = grand.budgeted - grand.total_commitment;
+        const gridRemBudgetPct   = grand.budgeted  > 0 ? gridRemBudget  / grand.budgeted  : 0;
+        const gridCommitUnbilled = grand.total_commitment - grand.billed;
+        const gridRemCommitPct   = gridTotalCommit > 0 ? gridCommitUnbilled / gridTotalCommit : 0;
 
         const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
         const pctEps = 0.001; // 0.1% tolerance for percentages
@@ -1081,15 +1092,16 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         const ccRemBudgetPct   = Math.abs(gridRemBudgetPct  - rawRemBudgetPct) > pctEps;
         const ccContracted     = Math.abs(grand.committed   - rawContracted)  > EPS;
         const ccCoValue        = Math.abs(grand.co_value    - rawCoValue)     > EPS;
-        const ccTotalCommit    = Math.abs(gridTotalCommit   - rawTotalCommit) > EPS;
-        const ccRemCommitPct   = Math.abs(gridRemCommitPct  - rawRemCommitPct) > pctEps;
-        const ccBilled         = Math.abs(grand.billed      - rawBilled)      > EPS;
+        const ccTotalCommit    = Math.abs(gridTotalCommit    - rawTotalCommit)    > EPS;
+        const ccCommitUnbilled = Math.abs(gridCommitUnbilled - rawCommitUnbilled) > EPS;
+        const ccRemCommitPct   = Math.abs(gridRemCommitPct   - rawRemCommitPct)   > pctEps;
+        const ccBilled         = Math.abs(grand.billed       - rawBilled)         > EPS;
         const ccPaid           = Math.abs(grand.paid        - rawPaid)        > EPS;
         const ccFixed          = Math.abs((grand.fixed    ?? 0) - (cc?.raw_fixed   ?? (grand.fixed    ?? 0))) > EPS;
         const ccTm             = Math.abs((grand.tm       ?? 0) - (cc?.raw_tm      ?? (grand.tm       ?? 0))) > EPS;
         const ccExpense        = Math.abs((grand.expenses ?? 0) - (cc?.raw_expense ?? (grand.expenses ?? 0))) > EPS;
         const anyMismatch      = ccBudgeted || ccRemBudget || ccRemBudgetPct || ccContracted || ccCoValue ||
-                                 ccTotalCommit || ccRemCommitPct || ccBilled || ccPaid || ccFixed || ccTm || ccExpense;
+                                 ccTotalCommit || ccCommitUnbilled || ccRemCommitPct || ccBilled || ccPaid || ccFixed || ccTm || ccExpense;
 
         const CcCell = ({ label, gridFmt, rawFmt, mismatch }: {
           label: string; gridFmt: string; rawFmt: string; mismatch: boolean;
@@ -1113,8 +1125,9 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
             <span className={styles.reconDivider} />
             <CcCell label="Contracted"   gridFmt={usd.format(grand.committed)}  rawFmt={usd.format(rawContracted)}  mismatch={ccContracted} />
             <CcCell label="COS"          gridFmt={usd.format(grand.co_value)}   rawFmt={usd.format(rawCoValue)}     mismatch={ccCoValue} />
-            <CcCell label="Total Commit" gridFmt={usd.format(gridTotalCommit)}  rawFmt={usd.format(rawTotalCommit)} mismatch={ccTotalCommit} />
-            <CcCell label="Rem. % Commit" gridFmt={pct(gridRemCommitPct)}       rawFmt={pct(rawRemCommitPct)}       mismatch={ccRemCommitPct} />
+            <CcCell label="Total Commit"   gridFmt={usd.format(gridTotalCommit)}    rawFmt={usd.format(rawTotalCommit)}    mismatch={ccTotalCommit} />
+            <CcCell label="Rem. Commit $"  gridFmt={usd.format(gridCommitUnbilled)} rawFmt={usd.format(rawCommitUnbilled)} mismatch={ccCommitUnbilled} />
+            <CcCell label="Rem. Commit %"  gridFmt={pct(gridRemCommitPct)}          rawFmt={pct(rawRemCommitPct)}          mismatch={ccRemCommitPct} />
             <span className={styles.reconDivider} />
             <CcCell label="Fixed"        gridFmt={usd.format(grand.fixed ?? 0)} rawFmt={usd.format(cc?.raw_fixed ?? 0)}   mismatch={ccFixed} />
             <CcCell label="T&M"          gridFmt={usd.format(grand.tm ?? 0)}    rawFmt={usd.format(cc?.raw_tm ?? 0)}      mismatch={ccTm} />
@@ -1138,12 +1151,12 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
       <div className={styles.scrollArea} style={{ display: viewMode === 'variance' ? 'none' : undefined }}
         onClick={() => setActive({ rowId: -1, field: '' })}>
         <table className={styles.table} onClick={e => e.stopPropagation()}>
-          <colgroup><col style={{width:24}}/><col style={{width:200}}/><col style={{width:210}}/><col style={{width:90}}/><col style={{width:88}}/><col style={{width:64}}/><col style={{width:90}}/><col style={{width:76}}/><col style={{width:90}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:76}}/><col style={{width:88}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:64}}/><col style={{width:64}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
+          <colgroup><col style={{width:24}}/><col style={{width:200}}/><col style={{width:210}}/><col style={{width:90}}/><col style={{width:88}}/><col style={{width:64}}/><col style={{width:90}}/><col style={{width:76}}/><col style={{width:90}}/><col style={{width:90}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:76}}/><col style={{width:88}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:64}}/><col style={{width:64}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
           <thead>
             <tr className={styles.theadGroup}>
               <th colSpan={4} />
               <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>Remaining</th>
-              <th className={styles.thGroup} colSpan={4}>Contract Commitment</th>
+              <th className={styles.thGroup} colSpan={5}>Contract Commitment</th>
               <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={4}>Invoiced</th>
               <th className={styles.thGroup} colSpan={2}>Payments</th>
               <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>Unit Cost</th>
@@ -1154,12 +1167,13 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
               <th className={`${styles.th} ${styles.thLeft}`}>Acct #</th>
               <th className={`${styles.th} ${styles.thLeft}`}>Task / Description</th>
               <th className={`${styles.th} ${styles.thRight}`}>Budgeted<div className={styles.thFormula}>PM input</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget<div className={styles.thFormula}>Budgeted − Billed</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget<div className={styles.thFormula}>Budgeted − Committed</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>Rem. %<div className={styles.thFormula}>Rem ÷ Budgeted</div></th>
               <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Contracted ↓<div className={styles.thFormula}>Σ contract line items</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>COs<div className={styles.thFormula}>Σ change orders</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>Total Commit<div className={styles.thFormula}>Contracted + COs</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. %<div className={styles.thFormula}>Rem ÷ Total Commit</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. Commit $<div className={styles.thFormula}>Commit − Billed</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. Commit %<div className={styles.thFormula}>Rem ÷ Total Commit</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>Fixed<div className={styles.thFormula}>Σ fixed invoices</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>T&amp;M<div className={styles.thFormula}>Σ T&amp;M invoices</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>Expense<div className={styles.thFormula}>Σ expense invoices</div></th>
@@ -1210,10 +1224,11 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
               <td /><td className={styles.totalLabel} colSpan={2}>TOTAL</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{usd.format(grand.budgeted)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(grand.rem_budget)}</td>
-              <td className={`${styles.totalCell} ${styles.tdPct}`}>{grand.budgeted > 0 ? remPct(grand.billed, grand.budgeted) : '—'}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{grand.budgeted > 0 ? remPct(grand.total_commitment, grand.budgeted) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.committed)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{grand.co_value > 0 ? usd.format(grand.co_value) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.total_commitment > grand.budgeted ? styles.danger : ''}`}>{usd.format(grand.total_commitment)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{grand.total_commitment > 0 ? moneyD(grand.total_commitment - grand.billed) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdPct}`}>{grand.total_commitment > 0 ? remPct(grand.billed, grand.total_commitment) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.fixed)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.tm)}</td>
