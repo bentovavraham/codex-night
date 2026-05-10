@@ -1010,7 +1010,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         <span className={styles.toolLabel}>{viewMode === 'variance' ? 'Variance Report' : 'Budget'}</span>
         {drillTarget && viewMode === 'budget' && (
           <span className={styles.drillHint}>
-            <strong>{drillTarget.rowName}</strong> · {drillTarget.cell === 'committed' ? 'Commitments' : 'Billed'}
+            <strong>{drillTarget.rowName}</strong> · {DRILL_LABEL[drillTarget.cell]}
             <button className={styles.drillClearBtn} onClick={() => setDrillTarget(null)}>✕</button>
           </span>
         )}
@@ -1283,17 +1283,17 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
             <CcCell label="Rem. Budget"  gridFmt={usd.format(gridRemBudget)}    rawFmt={usd.format(rawRemBudget)}   mismatch={ccRemBudget} />
             <CcCell label="Rem. %"       gridFmt={pct(gridRemBudgetPct)}        rawFmt={pct(rawRemBudgetPct)}       mismatch={ccRemBudgetPct} />
             <span className={styles.reconDivider} />
-            <CcCell label="Contracted"   gridFmt={usd.format(grand.committed)}  rawFmt={usd.format(rawContracted)}  mismatch={ccContracted} />
-            <CcCell label="COS"          gridFmt={usd.format(grand.co_value)}   rawFmt={usd.format(rawCoValue)}     mismatch={ccCoValue} />
-            <CcCell label="Total Commit"   gridFmt={usd.format(gridTotalCommit)}    rawFmt={usd.format(rawTotalCommit)}    mismatch={ccTotalCommit} />
-            <CcCell label="Rem. Commit $"  gridFmt={usd.format(gridCommitUnbilled)} rawFmt={usd.format(rawCommitUnbilled)} mismatch={ccCommitUnbilled} />
-            <CcCell label="Rem. Commit %"  gridFmt={pct(gridRemCommitPct)}          rawFmt={pct(rawRemCommitPct)}          mismatch={ccRemCommitPct} />
+            <CcCell label="Initial Contracts" gridFmt={usd.format(grand.committed)}  rawFmt={usd.format(rawContracted)}  mismatch={ccContracted} />
+            <CcCell label="COs"              gridFmt={usd.format(grand.co_value)}   rawFmt={usd.format(rawCoValue)}     mismatch={ccCoValue} />
+            <CcCell label="Total Commitment" gridFmt={usd.format(gridTotalCommit)}    rawFmt={usd.format(rawTotalCommit)}    mismatch={ccTotalCommit} />
+            <CcCell label="$ Rem. on Commit" gridFmt={usd.format(gridCommitUnbilled)} rawFmt={usd.format(rawCommitUnbilled)} mismatch={ccCommitUnbilled} />
+            <CcCell label="% Used of Commit" gridFmt={pct(gridRemCommitPct)}          rawFmt={pct(rawRemCommitPct)}          mismatch={ccRemCommitPct} />
             <span className={styles.reconDivider} />
-            <CcCell label="Fixed"        gridFmt={usd.format(grand.fixed ?? 0)} rawFmt={usd.format(cc?.raw_fixed ?? 0)}   mismatch={ccFixed} />
-            <CcCell label="T&M"          gridFmt={usd.format(grand.tm ?? 0)}    rawFmt={usd.format(cc?.raw_tm ?? 0)}      mismatch={ccTm} />
-            <CcCell label="Expense"      gridFmt={usd.format(grand.expenses ?? 0)} rawFmt={usd.format(cc?.raw_expense ?? 0)} mismatch={ccExpense} />
-            <CcCell label="Billed"       gridFmt={usd.format(grand.billed)}     rawFmt={usd.format(rawBilled)}      mismatch={ccBilled} />
-            <CcCell label="Paid"         gridFmt={usd.format(grand.paid)}       rawFmt={usd.format(rawPaid)}        mismatch={ccPaid} />
+            <CcCell label="Fixed"            gridFmt={usd.format(grand.fixed ?? 0)} rawFmt={usd.format(cc?.raw_fixed ?? 0)}   mismatch={ccFixed} />
+            <CcCell label="T&M"              gridFmt={usd.format(grand.tm ?? 0)}    rawFmt={usd.format(cc?.raw_tm ?? 0)}      mismatch={ccTm} />
+            <CcCell label="Expense"          gridFmt={usd.format(grand.expenses ?? 0)} rawFmt={usd.format(cc?.raw_expense ?? 0)} mismatch={ccExpense} />
+            <CcCell label="Total Invoiced"   gridFmt={usd.format(grand.billed)}     rawFmt={usd.format(rawBilled)}      mismatch={ccBilled} />
+            <CcCell label="Amt Paid"         gridFmt={usd.format(grand.paid)}       rawFmt={usd.format(rawPaid)}        mismatch={ccPaid} />
             <span className={styles.reconDivider} />
             {anyMismatch
               ? <span className={styles.reconWarnNote}>Grid totals do not match raw DB — aggregation bug detected</span>
@@ -1311,7 +1311,31 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
       <div className={styles.scrollArea} style={{ display: viewMode === 'variance' ? 'none' : undefined }}
         onClick={() => setActive({ rowId: -1, field: '' })}>
         <table className={styles.table} onClick={e => e.stopPropagation()}>
-          <colgroup><col style={{width:24}}/><col style={{width:200}}/><col style={{width:210}}/><col style={{width:90}}/><col style={{width:88}}/><col style={{width:64}}/><col style={{width:90}}/><col style={{width:76}}/><col style={{width:90}}/><col style={{width:90}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:76}}/><col style={{width:88}}/><col style={{width:80}}/><col style={{width:76}}/><col style={{width:64}}/><col style={{width:64}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
+          <colgroup>
+            <col style={{width:24}}/>   {/* gutter */}
+            <col style={{width:72}}/>   {/* Acct # */}
+            <col style={{width:220}}/>  {/* Task / Description */}
+            <col style={{width:88}}/>   {/* Budget */}
+            <col style={{width:120}}/>  {/* Initial Contracts */}
+            <col style={{width:66}}/>   {/* COs */}
+            <col style={{width:128}}/>  {/* Total Commitment */}
+            <col style={{width:100}}/>  {/* Rem. Budget */}
+            <col style={{width:70}}/>   {/* Rem. % */}
+            <col style={{width:72}}/>   {/* Fixed */}
+            <col style={{width:62}}/>   {/* T&M */}
+            <col style={{width:82}}/>   {/* Expense */}
+            <col style={{width:108}}/>  {/* Total Invoiced */}
+            <col style={{width:120}}/>  {/* $ Rem. on Commit */}
+            <col style={{width:112}}/>  {/* % Used of Commit */}
+            <col style={{width:88}}/>   {/* Amt Paid */}
+            <col style={{width:100}}/>  {/* Amount Due */}
+            <col style={{width:62}}/>   {/* $/SF */}
+            <col style={{width:62}}/>   {/* $/AC */}
+            <col style={{width:130}}/>  {/* QB Codes */}
+            <col style={{width:100}}/>  {/* Calc Method */}
+            <col style={{width:110}}/>  {/* Consultant */}
+            <col style={{width:150}}/>  {/* Notes */}
+          </colgroup>
           <thead>
             <tr className={styles.theadGroup}>
               <th colSpan={4} />
@@ -1328,19 +1352,19 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
               <th className={`${styles.th} ${styles.thLeft}`}>Acct #</th>
               <th className={`${styles.th} ${styles.thLeft}`}>Task / Description</th>
               <th className={`${styles.th} ${styles.thRight}`}>Budget<div className={styles.thFormula}>PM input</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Initial Contracts ↓<div className={styles.thFormula}>Σ contract line items</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>COs ↓<div className={styles.thFormula}>Σ change orders</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Total Commitment ↓<div className={styles.thFormula}>Contracts + COs</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Initial Contracts<div className={styles.thFormula}>Σ contract line items</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>COs<div className={styles.thFormula}>Σ change orders</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Total Commitment<div className={styles.thFormula}>Contracts + COs</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget<div className={styles.thFormula}>Budget − Commitment</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>Rem. %<div className={styles.thFormula}>Rem ÷ Budget</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Fixed ↓<div className={styles.thFormula}>Σ fixed invoices</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>T&amp;M ↓<div className={styles.thFormula}>Σ T&amp;M invoices</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Expense ↓<div className={styles.thFormula}>Σ expense invoices</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Total Invoiced ↓<div className={styles.thFormula}>Fixed + T&amp;M + Expense</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>$ Rem. on Commit ↓<div className={styles.thFormula}>Commitment − Invoiced</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Fixed<div className={styles.thFormula}>Σ fixed invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>T&amp;M<div className={styles.thFormula}>Σ T&amp;M invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Expense<div className={styles.thFormula}>Σ expense invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Total Invoiced<div className={styles.thFormula}>Fixed + T&amp;M + Expense</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>$ Rem. on Commit<div className={styles.thFormula}>Commitment − Invoiced</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>% Used of Commit<div className={styles.thFormula}>Invoiced ÷ Commitment</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amt Paid ↓<div className={styles.thFormula}>Σ paid invoices</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amount Due ↓<div className={styles.thFormula}>Invoiced − Paid</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amt Paid<div className={styles.thFormula}>Σ paid invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amount Due<div className={styles.thFormula}>Invoiced − Paid</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>$/SF<div className={styles.thFormula}>Billed ÷ GLA sf</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>$/AC<div className={styles.thFormula}>Billed ÷ GLA ac</div></th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>QB Codes Used</th>
