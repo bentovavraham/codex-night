@@ -451,15 +451,15 @@ router.get('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/phases/:phaseId/budget-lines/:lineId/drill — cell drill-down
+// GET /api/phases/:phaseId/budget-lines/:lineId/drill?cell=committed|co|fixed|tm|expense|billed|paid|due
 router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (req, res, next) => {
   try {
     const phaseId = Number(req.params.phaseId);
     const lineId  = Number(req.params.lineId);
+    const VALID_CELLS = new Set(['committed','co','fixed','tm','expense','billed','paid','due']);
+    const cell = VALID_CELLS.has(req.query.cell) ? req.query.cell : 'billed';
 
-    // Synthetic "General — Unassigned" rows have negative IDs encoding the
-    // qb_account_id: id = -1_000_000 - qb_account_id. Decode and return the
-    // line items GL-coded to that account but not yet assigned to a task.
+    // General — Unassigned rows (negative IDs encoding qb_account_id)
     if (lineId <= -1_000_000) {
       const qbAccountId = -1_000_000 - lineId;
       const invoicesQ = await pool.query(`
@@ -468,164 +468,111 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
           i.status, i.invoice_type, i.contract_id, i.file_reference,
           i.amount AS total_amount,
           c.reference_number AS contract_ref,
-          c.vendor_name      AS contract_vendor,
-          COALESCE((
-            SELECT SUM(ili.amount) FROM invoice_line_items ili
-             WHERE ili.invoice_id = i.id
-               AND ili.phase_budget_line_id IS NULL
-               AND ili.qb_account_id = $1
-          ), 0) AS amount  -- outer WHERE already scopes to phase_id = $2
-        FROM invoices i
+          SUM(fa.amount) AS amount
+        FROM financial_allocations fa
+        JOIN invoices i ON i.id = fa.source_document_id
         LEFT JOIN contracts c ON c.id = i.contract_id
-        WHERE i.status NOT IN ('voided','rejected')
-          AND i.phase_id = $2
-          AND EXISTS (
-            SELECT 1 FROM invoice_line_items ili
-             WHERE ili.invoice_id = i.id
-               AND ili.phase_budget_line_id IS NULL
-               AND ili.qb_account_id = $1
-          )
+        WHERE fa.phase_id = $2
+          AND fa.qb_account_id = $1
+          AND fa.phase_budget_line_id IS NULL
+          AND fa.source_type = 'invoice_line'
+          AND fa.allocation_status IN ('confirmed','approved')
+        GROUP BY i.id, i.vendor_name, i.invoice_number, i.invoice_date,
+                 i.status, i.invoice_type, i.contract_id, i.file_reference,
+                 i.amount, c.reference_number
         ORDER BY i.invoice_date DESC NULLS LAST, i.id
       `, [qbAccountId, phaseId]);
-      return res.json({
-        contracts: [],          // contracts don't apply to "general unassigned"
-        invoices:  invoicesQ.rows,
-        is_general_unassigned: true,
-        qb_account_id: qbAccountId,
-      });
+      return res.json({ contracts: [], invoices: invoicesQ.rows, is_general_unassigned: true, qb_account_id: qbAccountId });
     }
-    // Contracts: primary (phase_budget_line_id = lineId) or partial (cli line items)
-    const contractsQ = await pool.query(`
-      SELECT
-        c.id, c.vendor_name, c.reference_number, c.status,
-        c.total_value, c.contract_date,
-        -- amount attributed to this budget line
-        COALESCE(
-          (SELECT SUM(cli.budgeted_amount) FROM contract_line_items cli
-           WHERE cli.contract_id = c.id AND COALESCE(cli.phase_budget_line_id, c.phase_budget_line_id) = $1),
-          CASE WHEN c.phase_budget_line_id = $1 AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
-               THEN c.total_value ELSE 0 END
-        ) AS allocated_amount,
-        c.phase_budget_line_id = $1 AS is_primary
-      FROM contracts c
-      WHERE c.status NOT IN ('voided')
-        AND (
-          c.phase_budget_line_id = $1
-          OR EXISTS (
-            SELECT 1 FROM contract_line_items cli
-            WHERE cli.contract_id = c.id AND cli.phase_budget_line_id = $1
-          )
-        )
-      ORDER BY c.contract_date DESC NULLS LAST, c.id
-    `, [lineId]);
 
-    // Invoices that contribute to this budget line — using the SAME 4 allocation
-    // paths as the budget aggregation in the main GET /budget endpoint:
-    //   1. ili.phase_budget_line_id = pbl.id                     (explicit per-line)
-    //   2. ili.qb_account_id = pbl.qb_account_id (when unique-GL) (GL-driven)
-    //   3. ili has neither pbl_id nor qb_account_id → inv.phase_budget_line_id
-    //   4. invoice has no line items → inv.phase_budget_line_id
-    // Allocated amount per invoice = sum of contributions across whichever paths apply.
-    const invoicesQ = await pool.query(`
-      WITH pbl AS (
-        SELECT id, phase_id, qb_account_id FROM phase_budget_lines WHERE id = $1
-      ),
-      gl_sharing AS (
+    // Contract commitments
+    if (cell === 'committed') {
+      const contractsQ = await pool.query(`
         SELECT
-          (SELECT COUNT(*) FROM phase_budget_lines pbl2
-            WHERE pbl2.phase_id = (SELECT phase_id FROM pbl)
-              AND pbl2.qb_account_id = (SELECT qb_account_id FROM pbl)
-          ) AS share_count
-      )
+          c.id, c.vendor_name, c.reference_number, c.status,
+          c.total_value, c.contract_date,
+          SUM(fa.amount) AS allocated_amount,
+          (c.phase_budget_line_id = $1) AS is_primary
+        FROM financial_allocations fa
+        JOIN contracts c ON c.id = fa.source_document_id
+        WHERE fa.phase_budget_line_id = $1
+          AND fa.source_type = 'contract_line'
+          AND fa.allocation_status IN ('confirmed','approved')
+        GROUP BY c.id, c.vendor_name, c.reference_number, c.status,
+                 c.total_value, c.contract_date, is_primary
+        ORDER BY c.contract_date DESC NULLS LAST, c.id
+      `, [lineId]);
+      let contracts = contractsQ.rows;
+      if (contracts.length > 0) {
+        const contractIds = contracts.map(c => c.id);
+        const lineItemsQ = await pool.query(`
+          SELECT cli.contract_id, cli.billing_type, cli.description,
+                 cli.budgeted_amount::float AS budgeted_amount,
+                 cli.phase_budget_line_id,
+                 pbl.task_name AS budget_line_name
+            FROM contract_line_items cli
+            LEFT JOIN phase_budget_lines pbl ON pbl.id = cli.phase_budget_line_id
+           WHERE cli.contract_id = ANY($1)
+           ORDER BY cli.id
+        `, [contractIds]);
+        const itemsByContract = new Map();
+        for (const row of lineItemsQ.rows) {
+          if (!itemsByContract.has(row.contract_id)) itemsByContract.set(row.contract_id, []);
+          itemsByContract.get(row.contract_id).push(row);
+        }
+        contracts = contracts.map(c => ({ ...c, line_items: itemsByContract.get(c.id) ?? [] }));
+      }
+      return res.json({ contracts, invoices: [] });
+    }
+
+    // Change orders — direct query since co_line allocations not yet implemented
+    if (cell === 'co') {
+      const cosQ = await pool.query(`
+        SELECT co.id, co.description, co.amount::float AS amount,
+               co.status, co.created_at,
+               c.vendor_name, c.reference_number AS contract_ref, c.id AS contract_id
+        FROM change_orders co
+        JOIN contracts c ON c.id = co.contract_id
+        LEFT JOIN change_order_line_items col ON col.change_order_id = co.id
+        WHERE co.status NOT IN ('voided','rejected')
+          AND (col.phase_budget_line_id = $1 OR c.phase_budget_line_id = $1)
+        GROUP BY co.id, co.description, co.amount, co.status, co.created_at,
+                 c.vendor_name, c.reference_number, c.id
+        ORDER BY co.created_at DESC NULLS LAST, co.id
+      `, [lineId]);
+      return res.json({ contracts: [], invoices: [], change_orders: cosQ.rows });
+    }
+
+    // Invoice cells — filtered by billing_type or payment status
+    const billingTypes = { fixed: 'fixed', tm: 'tm', expense: 'expense' };
+    const billingType = billingTypes[cell] || null;
+    const paidOnly    = cell === 'paid';
+    const unpaidOnly  = cell === 'due';
+
+    const invoicesQ = await pool.query(`
       SELECT
         i.id, i.vendor_name, i.invoice_number, i.invoice_date,
         i.status, i.invoice_type, i.contract_id, i.file_reference,
         i.amount AS total_amount,
         c.reference_number AS contract_ref,
-        c.vendor_name      AS contract_vendor,
-        (
-          -- Path 1: explicit per-line
-          COALESCE((
-            SELECT SUM(ili.amount) FROM invoice_line_items ili
-             WHERE ili.invoice_id = i.id AND ili.phase_budget_line_id = $1
-          ), 0)
-          -- Path 2: GL-driven (only when this pbl is the sole pbl with this GL)
-          + CASE WHEN (SELECT share_count FROM gl_sharing) = 1
-                 THEN COALESCE((
-                   SELECT SUM(ili.amount) FROM invoice_line_items ili
-                    WHERE ili.invoice_id = i.id
-                      AND ili.phase_budget_line_id IS NULL
-                      AND ili.qb_account_id IS NOT NULL
-                      AND ili.qb_account_id = (SELECT qb_account_id FROM pbl)
-                 ), 0)
-                 ELSE 0 END
-          -- Path 3: legacy line items with neither pbl_id nor qb_account_id
-          + CASE WHEN i.phase_budget_line_id = $1
-                 THEN COALESCE((
-                   SELECT SUM(ili.amount) FROM invoice_line_items ili
-                    WHERE ili.invoice_id = i.id
-                      AND ili.phase_budget_line_id IS NULL
-                      AND ili.qb_account_id IS NULL
-                 ), 0)
-                 ELSE 0 END
-          -- Path 4: legacy invoice with no line items at all
-          + CASE WHEN i.phase_budget_line_id = $1
-                  AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = i.id)
-                 THEN i.amount ELSE 0 END
-        ) AS amount
-      FROM invoices i
+        SUM(fa.amount) AS amount
+      FROM financial_allocations fa
+      JOIN invoices i
+        ON i.id = fa.source_document_id
+       AND ($3::boolean IS FALSE OR i.status = 'paid')
+       AND ($4::boolean IS FALSE OR i.status NOT IN ('paid','voided','rejected'))
       LEFT JOIN contracts c ON c.id = i.contract_id
-      WHERE i.status NOT IN ('voided','rejected')
-        AND (
-          EXISTS (
-            SELECT 1 FROM invoice_line_items ili
-             WHERE ili.invoice_id = i.id AND ili.phase_budget_line_id = $1
-          )
-          OR ((SELECT share_count FROM gl_sharing) = 1 AND EXISTS (
-            SELECT 1 FROM invoice_line_items ili
-             WHERE ili.invoice_id = i.id
-               AND ili.phase_budget_line_id IS NULL
-               AND ili.qb_account_id IS NOT NULL
-               AND ili.qb_account_id = (SELECT qb_account_id FROM pbl)
-          ))
-          OR (i.phase_budget_line_id = $1 AND EXISTS (
-            SELECT 1 FROM invoice_line_items ili
-             WHERE ili.invoice_id = i.id
-               AND ili.phase_budget_line_id IS NULL
-               AND ili.qb_account_id IS NULL
-          ))
-          OR (i.phase_budget_line_id = $1
-              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = i.id))
-        )
+      WHERE fa.phase_budget_line_id = $1
+        AND fa.source_type = 'invoice_line'
+        AND fa.allocation_status IN ('confirmed','approved')
+        AND ($2::text IS NULL OR fa.billing_type = $2)
+      GROUP BY i.id, i.vendor_name, i.invoice_number, i.invoice_date,
+               i.status, i.invoice_type, i.contract_id, i.file_reference,
+               i.amount, c.reference_number
       ORDER BY i.invoice_date DESC NULLS LAST, i.id
-    `, [lineId]);
+    `, [lineId, billingType, paidOnly, unpaidOnly]);
 
-    // Attach per-contract line items so the UI can show task-level split
-    let contracts = contractsQ.rows;
-    if (contracts.length > 0) {
-      const contractIds = contracts.map(c => c.id);
-      const lineItemsQ = await pool.query(`
-        SELECT cli.contract_id, cli.billing_type, cli.description,
-               cli.budgeted_amount::float AS budgeted_amount,
-               cli.phase_budget_line_id,
-               pbl.task_name AS budget_line_name
-          FROM contract_line_items cli
-          LEFT JOIN phase_budget_lines pbl ON pbl.id = cli.phase_budget_line_id
-         WHERE cli.contract_id = ANY($1)
-         ORDER BY cli.id
-      `, [contractIds]);
-      const itemsByContract = new Map();
-      for (const row of lineItemsQ.rows) {
-        if (!itemsByContract.has(row.contract_id)) itemsByContract.set(row.contract_id, []);
-        itemsByContract.get(row.contract_id).push(row);
-      }
-      contracts = contracts.map(c => ({ ...c, line_items: itemsByContract.get(c.id) ?? [] }));
-    }
-
-    res.json({
-      contracts,
-      invoices: invoicesQ.rows,
-    });
+    res.json({ contracts: [], invoices: invoicesQ.rows });
   } catch (err) { next(err); }
 });
 

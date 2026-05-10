@@ -72,7 +72,7 @@ export const api = {
     primary_confidence?: string;
     primary_reason?: string;
   }>('POST', `/api/phases/${phaseId}/suggest-line-tasks`, body),
-  drillBudgetLine: (phaseId: number, lineId: number) => request<any>('GET', `/api/phases/${phaseId}/budget-lines/${lineId}/drill`),
+  drillBudgetLine: (phaseId: number, lineId: number, cell: string) => request<any>('GET', `/api/phases/${phaseId}/budget-lines/${lineId}/drill?cell=${encodeURIComponent(cell)}`),
   initBudget:      (phaseId: number, template: string) => request<any>('POST', `/api/phases/${phaseId}/budget/init`, { template }),
   addBudgetLine:   (phaseId: number, data: { task_name: string; budgeted_amount?: number; qb_account_id?: number | null }) =>
     request<any>('POST', `/api/phases/${phaseId}/budget`, data),

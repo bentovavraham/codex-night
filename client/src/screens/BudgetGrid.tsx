@@ -123,8 +123,19 @@ function EditCell({ value, rowId, field, numeric, isActive, onActivate, onCommit
 
 // ─── Drill panel ──────────────────────────────────────────────────────────────
 
-type DrillCell = 'committed' | 'billed';
+type DrillCell = 'committed' | 'co' | 'fixed' | 'tm' | 'expense' | 'billed' | 'paid' | 'due';
 interface DrillTarget { rowId: number; rowName: string; cell: DrillCell; }
+
+const DRILL_LABEL: Record<DrillCell, string> = {
+  committed: 'Contract Commitments',
+  co:        'Change Orders',
+  fixed:     'Fixed Fee Invoices',
+  tm:        'T&M Invoices',
+  expense:   'Expense Invoices',
+  billed:    'All Invoiced',
+  paid:      'Paid Invoices',
+  due:       'Outstanding (Unpaid)',
+};
 
 // ─── Inline History ────────────────────────────────────────────────────────────
 
@@ -168,8 +179,8 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
     });
   }
   const { data, isLoading } = useQuery({
-    queryKey: ['drill', phaseId, target.rowId],
-    queryFn: () => api.drillBudgetLine(phaseId, target.rowId),
+    queryKey: ['drill', phaseId, target.rowId, target.cell],
+    queryFn: () => api.drillBudgetLine(phaseId, target.rowId, target.cell),
     staleTime: 0,
   });
   const isGeneralUnassigned = (data as any)?.is_general_unassigned;
@@ -192,11 +203,44 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
         <div className={styles.drillHeader}>
           <div>
             <div className={styles.drillTitle}>{target.rowName}</div>
-            <div className={styles.drillSub}>{target.cell === 'committed' ? 'Contract Commitments' : 'Invoiced / Billed'}</div>
+            <div className={styles.drillSub}>{DRILL_LABEL[target.cell]}</div>
           </div>
           <button className={styles.drillClose} onClick={onClose}>✕</button>
         </div>
         {isLoading && <div className={styles.drillLoading}>Loading…</div>}
+        {!isLoading && target.cell === 'co' && (
+          <div className={styles.drillBody}>
+            {((data as any)?.change_orders ?? []).length === 0
+              ? <div className={styles.drillEmpty}>No change orders on this line.</div>
+              : <table className={styles.drillTable}>
+                  <thead><tr>
+                    <th>Vendor</th><th>Contract</th><th>Description</th><th>Status</th>
+                    <th className={styles.drillAmt}>Amount</th>
+                  </tr></thead>
+                  <tbody>
+                    {((data as any).change_orders as any[]).map((co: any) => (
+                      <tr key={co.id} className={styles.drillRow}>
+                        <td className={styles.drillVendor}>{co.vendor_name}</td>
+                        <td className={styles.drillRef}>{co.contract_ref || '—'}</td>
+                        <td className={styles.drillRef}>{co.description || '—'}</td>
+                        <td>
+                          <span className={styles.drillBadge}
+                            style={{ background: (STATUS_COLOR[co.status] ?? '#888') + '22', color: STATUS_COLOR[co.status] ?? '#555' }}>
+                            {co.status}
+                          </span>
+                        </td>
+                        <td className={`${styles.drillAmt} ${styles.drillAmtBold}`}>{usd.format(Number(co.amount))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr className={styles.drillTotal}>
+                    <td colSpan={4}>Total change orders</td>
+                    <td className={styles.drillAmt}>{usd.format(((data as any).change_orders as any[]).reduce((s: number, co: any) => s + Number(co.amount), 0))}</td>
+                  </tr></tfoot>
+                </table>
+            }
+          </div>
+        )}
         {!isLoading && target.cell === 'committed' && (
           <div className={styles.drillBody}>
             {contracts.length === 0
@@ -273,7 +317,7 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
             }
           </div>
         )}
-        {!isLoading && target.cell === 'billed' && (
+        {!isLoading && ['fixed','tm','expense','billed','paid','due'].includes(target.cell) && (
           <div className={styles.drillBody}>
             {isGeneralUnassigned && invoices.length > 0 && (
               <div style={{
@@ -289,7 +333,7 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
             {invoices.length === 0
               ? <div className={styles.drillEmpty}>{isGeneralUnassigned
                   ? 'No unassigned line items on this GL code.'
-                  : 'No invoices billed against this line.'}</div>
+                  : `No invoices for "${DRILL_LABEL[target.cell].toLowerCase()}" on this line.`}</div>
               : <table className={styles.drillTable}>
                   <thead><tr>
                     <th>Invoice #</th><th>Vendor</th><th>Date</th><th>Type</th>
@@ -374,7 +418,7 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
                       );
                     })}
                     <tr className={styles.drillTotal}>
-                      <td colSpan={7}>Total billed to this line</td>
+                      <td colSpan={7}>{DRILL_LABEL[target.cell]}</td>
                       <td className={styles.drillAmt}>{usd.format(invoiceTotal)}</td>
                       <td />
                     </tr>
@@ -390,16 +434,16 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
 
 // ─── Drillable read-only cell ──────────────────────────────────────────────────
 
-function DC({ value, row, cell, active, onDrill, className }: {
+function DC({ value, row, cell, active, onDrill, className, showDash }: {
   value: number; row: BudgetRow; cell: DrillCell;
-  active: boolean; onDrill: (t: DrillTarget) => void; className?: string;
+  active: boolean; onDrill: (t: DrillTarget) => void; className?: string; showDash?: boolean;
 }) {
   const has = value !== 0;
   return (
     <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${className ?? ''} ${has ? styles.drillable : ''} ${active ? styles.drillActive : ''}`}
       onClick={has ? () => onDrill({ rowId: row.id, rowName: row.task_name, cell }) : undefined}
       title={has ? 'Click to see breakdown' : undefined}>
-      {value === 0 ? '' : usd.format(value)}
+      {value === 0 ? (showDash ? '—' : '') : usd.format(value)}
     </td>
   );
 }
@@ -785,26 +829,28 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         </td>
         <DC value={row.committed} row={row} cell="committed"
           active={isDrillActive && drillTarget?.cell === 'committed'} onDrill={drill} />
-        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
-          {row.co_count > 0 ? <span title={`${row.co_count} CO${row.co_count > 1 ? 's' : ''}`}>{money(row.co_value)}</span> : ''}
-        </td>
-        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''}`}>
-          {money(row.total_commitment)}
-        </td>
-        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>
-          {row.total_commitment > 0 ? usd.format(row.commit_unbilled) : '—'}
-        </td>
+        <DC value={row.co_value} row={row} cell="co"
+          active={isDrillActive && drillTarget?.cell === 'co'} onDrill={drill} />
+        <DC value={row.total_commitment} row={row} cell="committed"
+          active={isDrillActive && drillTarget?.cell === 'committed'}
+          onDrill={drill}
+          className={row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''} />
+        <DC value={row.commit_unbilled} row={row} cell="committed"
+          active={isDrillActive && drillTarget?.cell === 'committed'}
+          onDrill={drill} showDash />
         <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>
           {row.total_commitment > 0 ? remPct(row.billed, row.total_commitment) : '—'}
         </td>
-        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.fixed_charges)}</td>
-        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.tm_charges)}</td>
-        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.expense_charges)}</td>
+        <DC value={row.fixed_charges}   row={row} cell="fixed"   active={isDrillActive && drillTarget?.cell === 'fixed'}   onDrill={drill} />
+        <DC value={row.tm_charges}      row={row} cell="tm"      active={isDrillActive && drillTarget?.cell === 'tm'}      onDrill={drill} />
+        <DC value={row.expense_charges} row={row} cell="expense" active={isDrillActive && drillTarget?.cell === 'expense'} onDrill={drill} />
         <DC value={row.billed} row={row} cell="billed"
           active={isDrillActive && drillTarget?.cell === 'billed'} onDrill={drill}
           className={warnCls(row.billed, row.budgeted_amount)} />
-        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.amount_due)}</td>
-        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro}`}>{money(row.paid)}</td>
+        <DC value={row.amount_due} row={row} cell="due"
+          active={isDrillActive && drillTarget?.cell === 'due'} onDrill={drill} />
+        <DC value={row.paid} row={row} cell="paid"
+          active={isDrillActive && drillTarget?.cell === 'paid'} onDrill={drill} />
         <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.billed, gla_sf)}</td>
         <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
         <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`}>
