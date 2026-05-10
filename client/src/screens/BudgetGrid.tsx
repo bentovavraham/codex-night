@@ -504,6 +504,9 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
   const [trayOpen,         setTrayOpen]         = useState(true);
   const [editInvoiceId,    setEditInvoiceId]    = useState<number | null>(null);
   const [editContractId,   setEditContractId]   = useState<number | null>(null);
+  const [snapshotForm,     setSnapshotForm]     = useState(false);
+  const [snapshotName,     setSnapshotName]     = useState('');
+  const [compareSnapshotId, setCompareSnapshotId] = useState<number | null>(null);
 
   const { data: rows = [], isLoading, error } = useQuery<BudgetRow[]>({
     queryKey: ['budget', phaseIdNum, source],
@@ -534,6 +537,23 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     queryKey: ['contracts', phaseIdNum],
     queryFn: () => api.listContracts(phaseIdNum),
     enabled: !!phaseIdNum,
+  });
+
+  const { data: snapshots = [], refetch: refetchSnapshots } = useQuery<any[]>({
+    queryKey: ['snapshots', phaseIdNum],
+    queryFn: () => api.listSnapshots(phaseIdNum),
+    enabled: !!phaseIdNum,
+  });
+
+  const { data: compareData } = useQuery<any>({
+    queryKey: ['snapshot', phaseIdNum, compareSnapshotId],
+    queryFn: () => api.getSnapshot(phaseIdNum, compareSnapshotId!),
+    enabled: !!compareSnapshotId,
+  });
+
+  const createSnapshotMutation = useMutation({
+    mutationFn: (name: string) => api.createSnapshot(phaseIdNum, name),
+    onSuccess: () => { refetchSnapshots(); setSnapshotForm(false); setSnapshotName(''); },
   });
 
   const { data: unassigned, refetch: refetchUnassigned } = useQuery<{ contracts: any[]; invoices: any[] }>({
@@ -1014,6 +1034,25 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
             title="Add a custom budget line">
             + Row
           </button>
+          <button className={`${styles.tbBtn} ${snapshotForm ? styles.tbBtnActive : ''}`}
+            onClick={() => setSnapshotForm(v => !v)}
+            title="Save a point-in-time snapshot of the current budget state">
+            📷 Snapshot
+          </button>
+          {snapshots.length > 0 && (
+            <select
+              className={styles.tbSelect}
+              value={compareSnapshotId ?? ''}
+              onChange={e => setCompareSnapshotId(e.target.value ? Number(e.target.value) : null)}
+              title="Compare current grid against a past snapshot">
+              <option value="">Compare snapshot…</option>
+              {snapshots.map((s: any) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} · {new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                </option>
+              ))}
+            </select>
+          )}
           <button className={styles.tbBtn} onClick={() => api.downloadBudgetExcel(phaseIdNum)}
             title="Download Excel — includes Variance Report + Budget Detail tabs">
             ↓ Excel
@@ -1029,6 +1068,81 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
           )}
         </div>
       </div>
+
+      {snapshotForm && (
+        <div className={styles.snapshotForm}>
+          <span className={styles.snapshotFormLabel}>Snapshot name:</span>
+          <input
+            className={styles.snapshotInput}
+            value={snapshotName}
+            onChange={e => setSnapshotName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && snapshotName.trim()) createSnapshotMutation.mutate(snapshotName.trim()); if (e.key === 'Escape') setSnapshotForm(false); }}
+            placeholder={`e.g. Pre-Construction Sign-Off — ${new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`}
+            autoFocus
+          />
+          <button className={`${styles.tbBtn} ${styles.tbBtnAdd}`}
+            onClick={() => snapshotName.trim() && createSnapshotMutation.mutate(snapshotName.trim())}
+            disabled={!snapshotName.trim() || createSnapshotMutation.isPending}>
+            {createSnapshotMutation.isPending ? 'Saving…' : 'Save'}
+          </button>
+          <button className={styles.tbBtn} onClick={() => setSnapshotForm(false)}>Cancel</button>
+        </div>
+      )}
+
+      {compareSnapshotId && compareData && (() => {
+        const snap = compareData.snapshot;
+        const st = compareData.totals;
+        const fmt = (n: any) => n ? usd.format(Number(n)) : '—';
+        const delta = (cur: number, prev: any) => {
+          const d = cur - Number(prev || 0);
+          if (Math.abs(d) < 0.5) return <span style={{ color: '#9aa0a6' }}>—</span>;
+          const up = d > 0;
+          return <span style={{ color: up ? '#dc2626' : '#16a34a', fontWeight: 600 }}>{up ? '+' : ''}{usd.format(d)}</span>;
+        };
+        return (
+          <div className={styles.snapshotCompare}>
+            <div className={styles.snapshotCompareHeader}>
+              <span className={styles.snapshotCompareName}>vs. {snap.name}</span>
+              <span className={styles.snapshotCompareMeta}>
+                {new Date(snap.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                {snap.created_by_name && ` · ${snap.created_by_name}`}
+              </span>
+              <button className={styles.drillClearBtn} onClick={() => setCompareSnapshotId(null)}>✕</button>
+            </div>
+            <table className={styles.snapshotCompareTable}>
+              <thead>
+                <tr>
+                  <th />
+                  <th>Snapshot</th>
+                  <th>Current</th>
+                  <th>Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {([
+                  ['Budgeted',          st.budgeted,          grand.budgeted],
+                  ['Committed',         st.committed,         grand.committed],
+                  ['COs',               st.co_value,          grand.co_value],
+                  ['Total Commitment',  st.total_commitment,  grand.total_commitment],
+                  ['Fixed',             st.fixed_charges,     grand.fixed],
+                  ['T&M',               st.tm_charges,        grand.tm],
+                  ['Expense',           st.expense_charges,   grand.expenses],
+                  ['Total Billed',      st.billed,            grand.billed],
+                  ['Paid',              st.paid,              grand.paid],
+                  ['Amount Due',        st.amount_due,        grand.billed - grand.paid],
+                ] as [string, any, number][]).map(([label, prev, cur]) => (
+                  <tr key={label}>
+                    <td className={styles.snapshotCompareLabel}>{label}</td>
+                    <td className={styles.snapshotCompareSnap}>{fmt(prev)}</td>
+                    <td className={styles.snapshotCompareCur}>{usd.format(cur)}</td>
+                    <td className={styles.snapshotCompareDelta}>{delta(cur, prev)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
 
       {viewMode === 'variance' && (
         <div className={styles.vrWrap}>

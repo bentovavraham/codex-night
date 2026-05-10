@@ -78,6 +78,12 @@ export const api = {
     request<any>('POST', `/api/phases/${phaseId}/budget`, data),
   getUnassigned:   (phaseId: number) => request<{ contracts: any[]; invoices: any[] }>('GET', `/api/phases/${phaseId}/budget/unassigned`),
 
+  // Snapshots
+  listSnapshots:   (phaseId: number) => request<any[]>('GET', `/api/phases/${phaseId}/snapshots`),
+  createSnapshot:  (phaseId: number, name: string, note?: string) => request<any>('POST', `/api/phases/${phaseId}/snapshots`, { name, note }),
+  getSnapshot:     (phaseId: number, snapshotId: number) => request<any>('GET', `/api/phases/${phaseId}/snapshots/${snapshotId}`),
+  renameSnapshot:  (phaseId: number, snapshotId: number, name: string) => request<any>('PATCH', `/api/phases/${phaseId}/snapshots/${snapshotId}`, { name }),
+
   // Contracts
   listContracts:   (phaseId: number)  => request<any[]>('GET',  `/api/phases/${phaseId}/contracts`),
   listBudgetLines: (phaseId: number)  => request<any[]>('GET',  `/api/phases/${phaseId}/budget-lines`),

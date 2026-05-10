@@ -1963,4 +1963,155 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
   } catch (err) { next(err); }
 });
 
+// ── Budget Snapshots ──────────────────────────────────────────────────────────
+
+// POST /api/phases/:phaseId/snapshots — capture current grid state as a named snapshot
+router.post('/phases/:phaseId/snapshots', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const phaseId = Number(req.params.phaseId);
+    const name = String(req.body.name || '').trim();
+    const note = String(req.body.note || '').trim() || null;
+    if (!name) return res.status(400).json({ error: 'name is required' });
+
+    await client.query('BEGIN');
+
+    const snapRes = await client.query(
+      `INSERT INTO budget_snapshots (phase_id, name, note, snapshot_type, created_by)
+       VALUES ($1,$2,$3,'manual',$4) RETURNING id, created_at`,
+      [phaseId, name, note, req.session.userId]
+    );
+    const snapshotId = snapRes.rows[0].id;
+
+    await client.query(`
+      INSERT INTO budget_snapshot_lines (
+        snapshot_id, phase_budget_line_id, task_name, qb_account_number, qb_short_name,
+        budgeted_amount, contracted, co_value, total_commitment, remaining_budget,
+        fixed_charges, tm_charges, expense_charges, billed,
+        remaining_commitment, pct_used_of_committed, paid, amount_due
+      )
+      SELECT
+        $1,
+        pbl.id,
+        pbl.task_name,
+        qa.account_number,
+        qa.short_name,
+        pbl.budgeted_amount,
+        COALESCE(fa.committed,      0),
+        COALESCE(fa.co_value,       0),
+        COALESCE(fa.committed, 0) + COALESCE(fa.co_value, 0),
+        pbl.budgeted_amount - COALESCE(fa.committed, 0) - COALESCE(fa.co_value, 0),
+        COALESCE(fa.fixed_charges,  0),
+        COALESCE(fa.tm_charges,     0),
+        COALESCE(fa.expense_charges,0),
+        COALESCE(fa.billed,         0),
+        COALESCE(fa.committed, 0) + COALESCE(fa.co_value, 0) - COALESCE(fa.billed, 0),
+        CASE WHEN COALESCE(fa.committed, 0) + COALESCE(fa.co_value, 0) > 0
+             THEN COALESCE(fa.billed, 0) / (COALESCE(fa.committed, 0) + COALESCE(fa.co_value, 0))
+             ELSE NULL END,
+        COALESCE(fa.paid,           0),
+        COALESCE(fa.billed, 0) - COALESCE(fa.paid, 0)
+      FROM phase_budget_lines pbl
+      LEFT JOIN qb_accounts qa ON qa.id = pbl.qb_account_id
+      LEFT JOIN (
+        SELECT
+          fa.phase_budget_line_id,
+          SUM(CASE WHEN fa.source_type = 'contract_line' THEN fa.amount ELSE 0 END) AS committed,
+          SUM(CASE WHEN fa.source_type = 'co_line'       THEN fa.amount ELSE 0 END) AS co_value,
+          SUM(CASE WHEN fa.source_type = 'invoice_line' AND fa.billing_type = 'fixed'   THEN fa.amount ELSE 0 END) AS fixed_charges,
+          SUM(CASE WHEN fa.source_type = 'invoice_line' AND fa.billing_type = 'tm'      THEN fa.amount ELSE 0 END) AS tm_charges,
+          SUM(CASE WHEN fa.source_type = 'invoice_line' AND fa.billing_type = 'expense' THEN fa.amount ELSE 0 END) AS expense_charges,
+          SUM(CASE WHEN fa.source_type = 'invoice_line' THEN fa.amount ELSE 0 END) AS billed,
+          SUM(CASE WHEN fa.source_type = 'invoice_line' AND inv.status = 'paid' THEN fa.amount ELSE 0 END) AS paid
+        FROM financial_allocations fa
+        LEFT JOIN invoices inv ON inv.id = fa.source_document_id AND fa.source_type = 'invoice_line'
+        WHERE fa.phase_id = $2
+          AND fa.allocation_status IN ('confirmed','approved')
+          AND fa.phase_budget_line_id IS NOT NULL
+        GROUP BY fa.phase_budget_line_id
+      ) fa ON fa.phase_budget_line_id = pbl.id
+      WHERE pbl.phase_id = $2
+    `, [snapshotId, phaseId]);
+
+    await client.query('COMMIT');
+    res.json({ id: snapshotId, created_at: snapRes.rows[0].created_at, name, note });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally { client.release(); }
+});
+
+// GET /api/phases/:phaseId/snapshots — list snapshots for a phase
+router.get('/phases/:phaseId/snapshots', requireAuth, async (req, res, next) => {
+  try {
+    const phaseId = Number(req.params.phaseId);
+    const r = await pool.query(
+      `SELECT s.id, s.name, s.note, s.snapshot_type, s.created_at,
+              u.name AS created_by_name
+         FROM budget_snapshots s
+         LEFT JOIN users u ON u.id = s.created_by
+        WHERE s.phase_id = $1
+        ORDER BY s.created_at DESC`,
+      [phaseId]
+    );
+    res.json(r.rows);
+  } catch (err) { next(err); }
+});
+
+// GET /api/phases/:phaseId/snapshots/:snapshotId — get aggregated totals for a snapshot
+router.get('/phases/:phaseId/snapshots/:snapshotId', requireAuth, async (req, res, next) => {
+  try {
+    const snapshotId = Number(req.params.snapshotId);
+    const snap = await pool.query(
+      `SELECT s.id, s.name, s.note, s.snapshot_type, s.created_at,
+              u.name AS created_by_name
+         FROM budget_snapshots s
+         LEFT JOIN users u ON u.id = s.created_by
+        WHERE s.id = $1`,
+      [snapshotId]
+    );
+    if (!snap.rows.length) return res.status(404).json({ error: 'Not found' });
+
+    const totals = await pool.query(
+      `SELECT
+         SUM(budgeted_amount)    AS budgeted,
+         SUM(contracted)         AS committed,
+         SUM(co_value)           AS co_value,
+         SUM(total_commitment)   AS total_commitment,
+         SUM(remaining_budget)   AS remaining_budget,
+         SUM(fixed_charges)      AS fixed_charges,
+         SUM(tm_charges)         AS tm_charges,
+         SUM(expense_charges)    AS expense_charges,
+         SUM(billed)             AS billed,
+         SUM(remaining_commitment) AS remaining_commitment,
+         SUM(paid)               AS paid,
+         SUM(amount_due)         AS amount_due
+       FROM budget_snapshot_lines
+       WHERE snapshot_id = $1`,
+      [snapshotId]
+    );
+
+    const lines = await pool.query(
+      `SELECT * FROM budget_snapshot_lines WHERE snapshot_id = $1 ORDER BY id`,
+      [snapshotId]
+    );
+
+    res.json({ snapshot: snap.rows[0], totals: totals.rows[0], lines: lines.rows });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/phases/:phaseId/snapshots/:snapshotId — rename
+router.patch('/phases/:phaseId/snapshots/:snapshotId', requireAuth, async (req, res, next) => {
+  try {
+    const snapshotId = Number(req.params.snapshotId);
+    const name = String(req.body.name || '').trim();
+    const note = req.body.note !== undefined ? (String(req.body.note).trim() || null) : undefined;
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const setClauses = note !== undefined ? 'name=$1, note=$2' : 'name=$1';
+    const params = note !== undefined ? [name, note, snapshotId] : [name, snapshotId];
+    await pool.query(`UPDATE budget_snapshots SET ${setClauses} WHERE id=$${params.length}`, params);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
