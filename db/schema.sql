@@ -603,6 +603,18 @@ CREATE INDEX IF NOT EXISTS idx_co_lines_qba ON change_order_line_items(qb_accoun
 -- The database enforces that allocation splits always sum to the source total.
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ALLOCATION LAYER
+--
+-- financial_allocations is the single source of truth for all dollar amounts
+-- in the budget grid. Every contract line, invoice line, and CO line that has
+-- been confirmed through the import flow has a corresponding row here.
+--
+-- The budget grid query, drillthrough, and snapshots all aggregate from this
+-- table — never directly from contracts or invoices. See ALLOCATION_LAYER.md.
+--
+-- Introduced: May 2026 (backfill migration run against existing Richwood data)
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Layer 2: Allocation table — one row per slice of a source line.
 -- Amounts are stored here explicitly (not inferred from source records).
 -- SUM(amount) for a source line MUST equal the source line's amount.

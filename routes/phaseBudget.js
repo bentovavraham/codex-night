@@ -1,3 +1,14 @@
+/**
+ * Allocation Layer — phaseBudget routes
+ *
+ * All financial queries in this file read from the `financial_allocations`
+ * table, not directly from contracts or invoices. See ALLOCATION_LAYER.md
+ * for the full architecture description.
+ *
+ * The budget grid aggregates fa rows where allocation_status IN
+ * ('confirmed','approved'). Drillthrough filters those same rows by
+ * source_type and billing_type. Snapshots freeze the current fa state.
+ */
 const express = require('express');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');

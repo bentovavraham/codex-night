@@ -1,3 +1,16 @@
+/**
+ * Allocation Layer — import/confirm routes
+ *
+ * The confirm endpoint (`POST /api/import-queue/:id/confirm`) is the primary
+ * write path into the Allocation Layer. After inserting the source record
+ * (invoice_line_items or contract_line_items), it immediately writes one
+ * financial_allocations row per line with:
+ *   - allocation_source = 'explicit'  (human-confirmed via the import UI)
+ *   - allocation_status = 'confirmed' (GL + task set) or 'needs_review' (no task)
+ *
+ * GL code is required at confirm time — missing GL throws 400.
+ * See ALLOCATION_LAYER.md for the full architecture.
+ */
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
