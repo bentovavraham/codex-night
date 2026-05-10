@@ -1684,8 +1684,11 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
     //  11=Fixed 12=T&M 13=Expense 14=Billed 15=AmtDue 16=Paid 17=$/SF 18=$/AC
     //  19=QBCodes 20=CalcMethod 21=Consultant 22=Notes
     const NCOLS      = 22;
-    const MONEY_COLS = [3,4,6,7,8,9,11,12,13,14,15,16];
-    const PCT_COLS   = [5,10];
+    // Col layout: Acct#, Task, Budget, Contracts, COs, Total Commit, Rem Budget, Rem%,
+    //             Fixed, T&M, Expense, Total Invoiced, $RemOnCommit, %UsedOfCommit, AmtPaid, AmtDue,
+    //             $/SF, $/AC, QB Codes, Calc Method, Consultant, Notes
+    const MONEY_COLS = [3,4,5,6,7,9,10,11,12,13,15,16,17,18];
+    const PCT_COLS   = [8,14];
 
     const glaSF   = phaseRow.gla_sf ? Number(phaseRow.gla_sf) : null;
     const glaAC   = phaseRow.gla_ac ? Number(phaseRow.gla_ac) : null;
@@ -1732,19 +1735,19 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
         r.qb_account_number || '',
         r.task_name || '',
         v(r.budgeted),
-        v(r.remaining_budget),
-        r.rem_budget_pct,
         v(r.committed),
         v(r.co_value),
         v(r.total_commitment),
-        v(r.commit_unbilled),
-        r.rem_commit_pct,
+        v(r.remaining_budget),
+        r.rem_budget_pct,
         v(r.fixed_charges),
         v(r.tm_charges),
         v(r.expense_charges),
         v(r.billed),
-        v(r.amount_due),
+        v(r.commit_unbilled),
+        r.rem_commit_pct,
         v(r.paid),
+        v(r.amount_due),
         perSF(r.billed),
         perAC(r.billed),
         r.qb_codes_used || '',
@@ -1818,8 +1821,9 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
 
     // Row 3: Group bands
     const bands = [
-      [1,3,''], [4,5,'REMAINING'], [6,10,'CONTRACT COMMITMENT'],
-      [11,14,'INVOICED'], [15,16,'PAYMENTS'], [17,18,'UNIT COST'], [19,22,''],
+      [1,3,''], [4,6,'CONTRACT COMMITMENT'], [7,8,'REMAINING BUDGET'],
+      [9,12,'INVOICED'], [13,14,'VS. COMMITMENT'], [15,16,'PAYMENTS'],
+      [17,18,'UNIT COST'], [19,22,''],
     ];
     bands.forEach(([c1, c2, label], i) => {
       if (c1 < c2) ws.mergeCells(3, c1, 3, c2);
@@ -1832,9 +1836,12 @@ router.get('/phases/:phaseId/budget/export-excel', requireAuth, async (req, res,
 
     // Row 4: Column headers
     const hdrRow = ws.addRow([
-      'Acct #', 'Task / Description', 'Budgeted', 'Rem. Budget', 'Rem. %',
-      'Contracted', 'COs', 'Total Commit', 'Rem. Commit $', 'Rem. Commit %',
-      'Fixed', 'T&M', 'Expense', 'Billed', 'Amt Due', 'Paid',
+      'Acct #', 'Task / Description', 'Budget',
+      'Initial Contracts', 'COs', 'Total Commitment',
+      'Rem. Budget', 'Rem. %',
+      'Fixed', 'T&M', 'Expense', 'Total Invoiced',
+      '$ Rem. on Commit', '% Used of Commit',
+      'Amt Paid', 'Amount Due',
       '$/SF', '$/AC', 'QB Codes Used', 'Calc Method', 'Consultant', 'Notes',
     ]);
     hdrRow.height = 28;

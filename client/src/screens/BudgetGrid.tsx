@@ -800,19 +800,19 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     const amtDue = t.billed - t.paid;
     return <>
       <td className={cls}>{moneyD(t.budgeted)}</td>
-      <td className={`${cls} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
-      <td className={cls}>{t.budgeted > 0 ? remPct(t.total_commitment, t.budgeted) : '—'}</td>
       <td className={cls}>{money(t.committed)}</td>
       <td className={cls}>{t.co_value > 0 ? money(t.co_value) : '—'}</td>
       <td className={`${cls} ${t.total_commitment > t.budgeted && t.budgeted > 0 ? styles.danger : ''}`}>{money(t.total_commitment)}</td>
-      <td className={cls}>{t.total_commitment > 0 ? moneyD(t.total_commitment - t.billed) : '—'}</td>
-      <td className={cls}>{t.total_commitment > 0 ? remPct(t.billed, t.total_commitment) : '—'}</td>
+      <td className={`${cls} ${t.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(t.rem_budget)}</td>
+      <td className={cls}>{t.budgeted > 0 ? remPct(t.total_commitment, t.budgeted) : '—'}</td>
       <td className={cls}>{money(t.fixed)}</td>
       <td className={cls}>{money(t.tm)}</td>
       <td className={cls}>{money(t.expenses)}</td>
       <td className={cls}>{moneyD(t.billed)}</td>
-      <td className={cls}>{money(amtDue)}</td>
+      <td className={cls}>{t.total_commitment > 0 ? moneyD(t.total_commitment - t.billed) : '—'}</td>
+      <td className={cls}>{t.total_commitment > 0 ? remPct(t.billed, t.total_commitment) : '—'}</td>
       <td className={cls}>{money(t.paid)}</td>
+      <td className={cls}>{money(amtDue)}</td>
       <td className={cls}>{perSF(t.billed, gla_sf)}</td>
       <td className={cls}>{perAC(t.billed, gla_ac)}</td>
       <td className={`${cls} ${dc}`} /><td className={`${cls} ${dc}`} />
@@ -841,12 +841,6 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
           isActive={isA('budgeted_amount')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
           onCommit={handleCommit} onTabNext={handleTabNext}
           className={`${styles.tdMoney} ${(row.source ?? 'template') === 'template' && !row.amount_modified ? styles.amtTemplate : styles.amtModified}`} />
-        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.budgeted_amount > 0 && row.remaining_budget < 0 ? styles.danger : ''}`}>
-          {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
-        </td>
-        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.total_commitment, row.budgeted_amount)}`}>
-          {row.budgeted_amount > 0 ? remPct(row.total_commitment, row.budgeted_amount) : '—'}
-        </td>
         <DC value={row.committed} row={row} cell="committed"
           active={isDrillActive && drillTarget?.cell === 'committed'} onDrill={drill} />
         <DC value={row.co_value} row={row} cell="co"
@@ -855,11 +849,11 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
           active={isDrillActive && drillTarget?.cell === 'committed'}
           onDrill={drill}
           className={row.total_commitment > row.budgeted_amount && row.budgeted_amount > 0 ? styles.danger : ''} />
-        <DC value={row.commit_unbilled} row={row} cell="committed"
-          active={isDrillActive && drillTarget?.cell === 'committed'}
-          onDrill={drill} showDash />
-        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>
-          {row.total_commitment > 0 ? remPct(row.billed, row.total_commitment) : '—'}
+        <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${row.budgeted_amount > 0 && row.remaining_budget < 0 ? styles.danger : ''}`}>
+          {row.budgeted_amount > 0 ? usd.format(row.remaining_budget) : '—'}
+        </td>
+        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro} ${warnCls(row.total_commitment, row.budgeted_amount)}`}>
+          {row.budgeted_amount > 0 ? remPct(row.total_commitment, row.budgeted_amount) : '—'}
         </td>
         <DC value={row.fixed_charges}   row={row} cell="fixed"   active={isDrillActive && drillTarget?.cell === 'fixed'}   onDrill={drill} />
         <DC value={row.tm_charges}      row={row} cell="tm"      active={isDrillActive && drillTarget?.cell === 'tm'}      onDrill={drill} />
@@ -867,10 +861,16 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         <DC value={row.billed} row={row} cell="billed"
           active={isDrillActive && drillTarget?.cell === 'billed'} onDrill={drill}
           className={warnCls(row.billed, row.budgeted_amount)} />
-        <DC value={row.amount_due} row={row} cell="due"
-          active={isDrillActive && drillTarget?.cell === 'due'} onDrill={drill} />
+        <DC value={row.commit_unbilled} row={row} cell="committed"
+          active={isDrillActive && drillTarget?.cell === 'committed'}
+          onDrill={drill} showDash />
+        <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>
+          {row.total_commitment > 0 ? remPct(row.billed, row.total_commitment) : '—'}
+        </td>
         <DC value={row.paid} row={row} cell="paid"
           active={isDrillActive && drillTarget?.cell === 'paid'} onDrill={drill} />
+        <DC value={row.amount_due} row={row} cell="due"
+          active={isDrillActive && drillTarget?.cell === 'due'} onDrill={drill} />
         <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perSF(row.billed, gla_sf)}</td>
         <td className={`${styles.cell} ${styles.tdPct} ${styles.ro}`}>{perAC(row.billed, gla_ac)}</td>
         <td className={`${styles.cell} ${styles.tdQb} ${styles.ro} ${dc}`}>
@@ -1315,9 +1315,10 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
           <thead>
             <tr className={styles.theadGroup}>
               <th colSpan={4} />
-              <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>Remaining</th>
-              <th className={styles.thGroup} colSpan={5}>Contract Commitment</th>
-              <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={4}>Invoiced</th>
+              <th className={styles.thGroup} colSpan={3}>Contract Commitment</th>
+              <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>Remaining Budget</th>
+              <th className={styles.thGroup} colSpan={4}>Invoiced</th>
+              <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>vs. Commitment</th>
               <th className={styles.thGroup} colSpan={2}>Payments</th>
               <th className={`${styles.thGroup} ${styles.thGroupAlt}`} colSpan={2}>Unit Cost</th>
               <th className={`${styles.th} ${dc}`} colSpan={4} />
@@ -1326,20 +1327,20 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
               <th className={styles.th} />
               <th className={`${styles.th} ${styles.thLeft}`}>Acct #</th>
               <th className={`${styles.th} ${styles.thLeft}`}>Task / Description</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Budgeted<div className={styles.thFormula}>PM input</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget<div className={styles.thFormula}>Budgeted − Committed</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. %<div className={styles.thFormula}>Rem ÷ Budgeted</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Contracted ↓<div className={styles.thFormula}>Σ contract line items</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>COs<div className={styles.thFormula}>Σ change orders</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Total Commit<div className={styles.thFormula}>Contracted + COs</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. Commit $<div className={styles.thFormula}>Commit − Billed</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. Commit %<div className={styles.thFormula}>Rem ÷ Total Commit</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Fixed<div className={styles.thFormula}>Σ fixed invoices</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>T&amp;M<div className={styles.thFormula}>Σ T&amp;M invoices</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Expense<div className={styles.thFormula}>Σ expense invoices</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Billed ↓<div className={styles.thFormula}>Fixed + T&amp;M + Expense</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Amt Due<div className={styles.thFormula}>Billed − Paid</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Paid<div className={styles.thFormula}>Σ paid invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Budget<div className={styles.thFormula}>PM input</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Initial Contracts ↓<div className={styles.thFormula}>Σ contract line items</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>COs ↓<div className={styles.thFormula}>Σ change orders</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Total Commitment ↓<div className={styles.thFormula}>Contracts + COs</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget<div className={styles.thFormula}>Budget − Commitment</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. %<div className={styles.thFormula}>Rem ÷ Budget</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Fixed ↓<div className={styles.thFormula}>Σ fixed invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>T&amp;M ↓<div className={styles.thFormula}>Σ T&amp;M invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Expense ↓<div className={styles.thFormula}>Σ expense invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Total Invoiced ↓<div className={styles.thFormula}>Fixed + T&amp;M + Expense</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>$ Rem. on Commit ↓<div className={styles.thFormula}>Commitment − Invoiced</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>% Used of Commit<div className={styles.thFormula}>Invoiced ÷ Commitment</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amt Paid ↓<div className={styles.thFormula}>Σ paid invoices</div></th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amount Due ↓<div className={styles.thFormula}>Invoiced − Paid</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>$/SF<div className={styles.thFormula}>Billed ÷ GLA sf</div></th>
               <th className={`${styles.th} ${styles.thRight}`}>$/AC<div className={styles.thFormula}>Billed ÷ GLA ac</div></th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>QB Codes Used</th>
@@ -1383,19 +1384,19 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
             <tr className={styles.totalRow}>
               <td /><td className={styles.totalLabel} colSpan={2}>TOTAL</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{usd.format(grand.budgeted)}</td>
-              <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(grand.rem_budget)}</td>
-              <td className={`${styles.totalCell} ${styles.tdPct}`}>{grand.budgeted > 0 ? remPct(grand.total_commitment, grand.budgeted) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.committed)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{grand.co_value > 0 ? usd.format(grand.co_value) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.total_commitment > grand.budgeted ? styles.danger : ''}`}>{usd.format(grand.total_commitment)}</td>
-              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{grand.total_commitment > 0 ? moneyD(grand.total_commitment - grand.billed) : '—'}</td>
-              <td className={`${styles.totalCell} ${styles.tdPct}`}>{grand.total_commitment > 0 ? remPct(grand.billed, grand.total_commitment) : '—'}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney} ${grand.rem_budget < 0 ? styles.danger : ''}`}>{moneyD(grand.rem_budget)}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{grand.budgeted > 0 ? remPct(grand.total_commitment, grand.budgeted) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.fixed)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.tm)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.expenses)}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.billed)}</td>
-              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.billed - grand.paid)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{grand.total_commitment > 0 ? moneyD(grand.total_commitment - grand.billed) : '—'}</td>
+              <td className={`${styles.totalCell} ${styles.tdPct}`}>{grand.total_commitment > 0 ? remPct(grand.billed, grand.total_commitment) : '—'}</td>
               <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.paid)}</td>
+              <td className={`${styles.totalCell} ${styles.tdMoney}`}>{moneyD(grand.billed - grand.paid)}</td>
               <td className={`${styles.totalCell} ${styles.tdPct}`}>{perSF(grand.billed, gla_sf)}</td>
               <td className={`${styles.totalCell} ${styles.tdPct}`}>{perAC(grand.billed, gla_ac)}</td>
               <td className={`${styles.totalCell} ${dc}`} /><td className={`${styles.totalCell} ${dc}`} />
