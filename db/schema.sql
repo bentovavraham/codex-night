@@ -595,3 +595,288 @@ CREATE TABLE IF NOT EXISTS change_order_line_items (
 CREATE INDEX IF NOT EXISTS idx_co_lines_co  ON change_order_line_items(change_order_id);
 CREATE INDEX IF NOT EXISTS idx_co_lines_pbl ON change_order_line_items(phase_budget_line_id);
 CREATE INDEX IF NOT EXISTS idx_co_lines_qba ON change_order_line_items(qb_account_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- FINANCIAL ALLOCATION LEDGER
+-- Architecture decision: 2026-05-09
+-- Three layers: source record → allocation splits → reporting grid
+-- The database enforces that allocation splits always sum to the source total.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Layer 2: Allocation table — one row per slice of a source line.
+-- Amounts are stored here explicitly (not inferred from source records).
+-- SUM(amount) for a source line MUST equal the source line's amount.
+-- This is enforced by the reconciliation trigger below.
+CREATE TABLE IF NOT EXISTS financial_allocations (
+  id                    SERIAL PRIMARY KEY,
+
+  -- Source reference — which document and line this allocation belongs to
+  source_type           VARCHAR(20) NOT NULL,
+  -- 'invoice_line' | 'contract_line' | 'co_line' | 'payment'
+  source_document_id    INTEGER NOT NULL,
+  -- invoice_id | contract_id | change_order_id | payment_id
+  source_line_id        INTEGER,
+  -- invoice_line_item_id | contract_line_item_id | change_order_line_item_id
+
+  -- Routing — set explicitly by a human, never inferred at query time
+  phase_id              INTEGER NOT NULL REFERENCES phases(id) ON DELETE RESTRICT,
+  qb_account_id         INTEGER NOT NULL REFERENCES qb_accounts(id) ON DELETE RESTRICT,
+  -- GL code is always required — enforced by NOT NULL
+  phase_budget_line_id  INTEGER REFERENCES phase_budget_lines(id) ON DELETE RESTRICT,
+  -- Task — null is allowed (lands in needs_review), required for confirmed status
+  billing_type          VARCHAR(20),
+  -- 'fixed' | 'tm' | 'expense' | 'contract' | 'co' | 'payment'
+
+  -- The allocated slice amount — explicit, never computed
+  amount                NUMERIC(14,2) NOT NULL,
+
+  -- Status lifecycle
+  allocation_status     VARCHAR(20) NOT NULL DEFAULT 'draft',
+  -- draft | confirmed | approved | out_of_balance | needs_review | voided | rejected
+
+  -- Provenance
+  allocation_source     VARCHAR(20) NOT NULL DEFAULT 'explicit',
+  -- 'explicit' → human set it in the import/edit flow
+  -- 'migrated' → backfilled from legacy data, flagged for review
+
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at            TIMESTAMPTZ,
+  updated_by            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+
+  -- A source line cannot have two allocation rows for the exact same
+  -- GL code + task + billing type combination (prevents accidental duplicates)
+  CONSTRAINT uq_allocation_slice
+    UNIQUE NULLS NOT DISTINCT (source_type, source_line_id, qb_account_id, phase_budget_line_id, billing_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fa_source      ON financial_allocations(source_type, source_document_id);
+CREATE INDEX IF NOT EXISTS idx_fa_source_line  ON financial_allocations(source_type, source_line_id);
+CREATE INDEX IF NOT EXISTS idx_fa_phase        ON financial_allocations(phase_id);
+CREATE INDEX IF NOT EXISTS idx_fa_pbl          ON financial_allocations(phase_budget_line_id);
+CREATE INDEX IF NOT EXISTS idx_fa_status       ON financial_allocations(allocation_status);
+
+-- Audit log — every change to an allocation is a permanent record
+CREATE TABLE IF NOT EXISTS allocation_audit_log (
+  id                 SERIAL PRIMARY KEY,
+  allocation_id      INTEGER NOT NULL REFERENCES financial_allocations(id) ON DELETE RESTRICT,
+  changed_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  changed_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  field_changed      VARCHAR(50),
+  old_value          TEXT,
+  new_value          TEXT,
+  reason             TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_aal_allocation ON allocation_audit_log(allocation_id);
+CREATE INDEX IF NOT EXISTS idx_aal_changed_at ON allocation_audit_log(changed_at);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- RECONCILIATION TRIGGER
+-- After any allocation insert/update/delete, check whether the allocation
+-- rows for that source line sum to the source line's amount.
+-- If they don't balance: mark the source document out_of_balance.
+-- If they do balance:    clear out_of_balance back to its prior status.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION check_allocation_balance()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+  v_source_type       VARCHAR(20);
+  v_source_line_id    INTEGER;
+  v_source_amount     NUMERIC(14,2);
+  v_allocated_total   NUMERIC(14,2);
+  v_diff              NUMERIC(14,2);
+BEGIN
+  -- Determine which row was affected
+  IF TG_OP = 'DELETE' THEN
+    v_source_type    := OLD.source_type;
+    v_source_line_id := OLD.source_line_id;
+  ELSE
+    v_source_type    := NEW.source_type;
+    v_source_line_id := NEW.source_line_id;
+  END IF;
+
+  -- Only check line-level allocations (document-level has no line to sum against)
+  IF v_source_line_id IS NULL THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
+
+  -- Sum all non-voided/non-rejected allocations for this source line
+  SELECT COALESCE(SUM(amount), 0)
+    INTO v_allocated_total
+    FROM financial_allocations
+   WHERE source_type    = v_source_type
+     AND source_line_id = v_source_line_id
+     AND allocation_status NOT IN ('voided', 'rejected');
+
+  -- Look up the official source line amount
+  IF v_source_type = 'invoice_line' THEN
+    SELECT amount INTO v_source_amount
+      FROM invoice_line_items WHERE id = v_source_line_id;
+  ELSIF v_source_type = 'contract_line' THEN
+    SELECT budgeted_amount INTO v_source_amount
+      FROM contract_line_items WHERE id = v_source_line_id;
+  ELSIF v_source_type = 'co_line' THEN
+    SELECT budgeted_amount INTO v_source_amount
+      FROM change_order_line_items WHERE id = v_source_line_id;
+  ELSE
+    RETURN COALESCE(NEW, OLD);
+  END IF;
+
+  v_diff := COALESCE(v_source_amount, 0) - v_allocated_total;
+
+  -- Update all allocations for this line with current balance status
+  IF ABS(v_diff) > 0.01 THEN
+    -- Out of balance — flag every allocation row for this line
+    UPDATE financial_allocations
+       SET allocation_status = 'out_of_balance',
+           updated_at        = NOW()
+     WHERE source_type    = v_source_type
+       AND source_line_id = v_source_line_id
+       AND allocation_status NOT IN ('voided', 'rejected', 'out_of_balance');
+  ELSE
+    -- Balanced — restore draft status so a human can confirm
+    UPDATE financial_allocations
+       SET allocation_status = 'draft',
+           updated_at        = NOW()
+     WHERE source_type    = v_source_type
+       AND source_line_id = v_source_line_id
+       AND allocation_status = 'out_of_balance';
+  END IF;
+
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_check_allocation_balance ON financial_allocations;
+CREATE TRIGGER trg_check_allocation_balance
+  AFTER INSERT OR UPDATE OR DELETE ON financial_allocations
+  FOR EACH ROW EXECUTE FUNCTION check_allocation_balance();
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- NO HARD DELETE TRIGGER
+-- Blocks DELETE on financial tables. Records must be voided, not deleted.
+-- Applies to: financial_allocations, invoices, contracts, change_orders.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION block_financial_delete()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION
+    'Hard delete is not permitted on financial records. Set status = ''voided'' instead. Table: %, ID: %',
+    TG_TABLE_NAME, OLD.id;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_no_delete_allocations ON financial_allocations;
+CREATE TRIGGER trg_no_delete_allocations
+  BEFORE DELETE ON financial_allocations
+  FOR EACH ROW EXECUTE FUNCTION block_financial_delete();
+
+DROP TRIGGER IF EXISTS trg_no_delete_invoices ON invoices;
+CREATE TRIGGER trg_no_delete_invoices
+  BEFORE DELETE ON invoices
+  FOR EACH ROW EXECUTE FUNCTION block_financial_delete();
+
+DROP TRIGGER IF EXISTS trg_no_delete_contracts ON contracts;
+CREATE TRIGGER trg_no_delete_contracts
+  BEFORE DELETE ON contracts
+  FOR EACH ROW EXECUTE FUNCTION block_financial_delete();
+
+DROP TRIGGER IF EXISTS trg_no_delete_change_orders ON change_orders;
+CREATE TRIGGER trg_no_delete_change_orders
+  BEFORE DELETE ON change_orders
+  FOR EACH ROW EXECUTE FUNCTION block_financial_delete();
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- CONFIRM GUARD
+-- Blocks setting allocation_status = 'confirmed' if the line is out of balance.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION block_confirm_if_unbalanced()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+  v_source_amount   NUMERIC(14,2);
+  v_allocated_total NUMERIC(14,2);
+BEGIN
+  -- Only fire when status is being set to confirmed or approved
+  IF NEW.allocation_status NOT IN ('confirmed', 'approved') THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.source_line_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Get source line total
+  IF NEW.source_type = 'invoice_line' THEN
+    SELECT amount INTO v_source_amount FROM invoice_line_items WHERE id = NEW.source_line_id;
+  ELSIF NEW.source_type = 'contract_line' THEN
+    SELECT budgeted_amount INTO v_source_amount FROM contract_line_items WHERE id = NEW.source_line_id;
+  ELSIF NEW.source_type = 'co_line' THEN
+    SELECT budgeted_amount INTO v_source_amount FROM change_order_line_items WHERE id = NEW.source_line_id;
+  ELSE
+    RETURN NEW;
+  END IF;
+
+  -- Sum all non-voided allocations for this line
+  SELECT COALESCE(SUM(amount), 0)
+    INTO v_allocated_total
+    FROM financial_allocations
+   WHERE source_type    = NEW.source_type
+     AND source_line_id = NEW.source_line_id
+     AND allocation_status NOT IN ('voided', 'rejected')
+     AND id != NEW.id;
+
+  v_allocated_total := v_allocated_total + NEW.amount;
+
+  IF ABS(COALESCE(v_source_amount, 0) - v_allocated_total) > 0.01 THEN
+    RAISE EXCEPTION
+      'Cannot confirm: allocation total ($%) does not equal source line amount ($%). Difference: $%',
+      v_allocated_total, v_source_amount, (v_source_amount - v_allocated_total);
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_block_confirm_unbalanced ON financial_allocations;
+CREATE TRIGGER trg_block_confirm_unbalanced
+  BEFORE INSERT OR UPDATE ON financial_allocations
+  FOR EACH ROW EXECUTE FUNCTION block_confirm_if_unbalanced();
+
+-- Budget snapshots — full grid state frozen at a point in time
+CREATE TABLE IF NOT EXISTS budget_snapshots (
+  id             SERIAL PRIMARY KEY,
+  phase_id       INTEGER NOT NULL REFERENCES phases(id) ON DELETE RESTRICT,
+  name           TEXT NOT NULL,
+  note           TEXT,
+  snapshot_type  VARCHAR(10) NOT NULL DEFAULT 'manual', -- 'manual' | 'auto'
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS budget_snapshot_lines (
+  id                    SERIAL PRIMARY KEY,
+  snapshot_id           INTEGER NOT NULL REFERENCES budget_snapshots(id) ON DELETE CASCADE,
+  phase_budget_line_id  INTEGER,
+  task_name             TEXT,
+  qb_account_number     TEXT,
+  qb_short_name         TEXT,
+  budgeted_amount       NUMERIC(14,2),
+  contracted            NUMERIC(14,2),
+  co_value              NUMERIC(14,2),
+  total_commitment      NUMERIC(14,2),
+  remaining_budget      NUMERIC(14,2),
+  fixed_charges         NUMERIC(14,2),
+  tm_charges            NUMERIC(14,2),
+  expense_charges       NUMERIC(14,2),
+  billed                NUMERIC(14,2),
+  remaining_commitment  NUMERIC(14,2),
+  pct_used_of_committed NUMERIC(8,4),
+  paid                  NUMERIC(14,2),
+  amount_due            NUMERIC(14,2)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bsl_snapshot ON budget_snapshot_lines(snapshot_id);
