@@ -155,17 +155,18 @@ router.post('/contracts', requireAuth, async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden' });
 
     const total = Number(total_value) || 0;
+    const phaseIdNum = phase_id ? Number(phase_id) : null;
 
     await client.query('BEGIN');
     const result = await client.query(
       `INSERT INTO contracts
          (project_id, phase_id, vendor_name, description, total_value,
           contract_date, reference_number, status, file_reference, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'draft'),$9,$10) RETURNING *`,
-      [Number(project_id), phase_id ? Number(phase_id) : null,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8,$9) RETURNING *`,
+      [Number(project_id), phaseIdNum,
        vendor_name, description || null, total,
        contract_date || null, reference_number || null,
-       status || null, file_reference || null, req.session.userId]
+       file_reference || null, req.session.userId]
     );
     const contractId = result.rows[0].id;
 
@@ -173,19 +174,45 @@ router.post('/contracts', requireAuth, async (req, res, next) => {
       for (let i = 0; i < lineItems.length; i++) {
         const li = lineItems[i];
         const qbAccountId = li.qb_account_id ? Number(li.qb_account_id) : null;
+        if (!qbAccountId) throw Object.assign(new Error(`GL code required on line ${i + 1}`), { status: 400 });
         const explicitPbl = li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null;
-        const pblId = explicitPbl ?? await resolvePbl(client, phase_id ? Number(phase_id) : null, qbAccountId);
-        await client.query(
+        const pblId = explicitPbl ?? await resolvePbl(client, phaseIdNum, qbAccountId);
+        const cliRes = await client.query(
           `INSERT INTO contract_line_items
              (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id, qb_account_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
           [contractId,
            ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed',
            li.description || null,
            Number(li.budgeted_amount) || 0,
-           i,
-           pblId,
-           qbAccountId]
+           i, pblId, qbAccountId]
+        );
+        // Allocation Layer — write FA row for every contract line
+        await client.query(
+          `INSERT INTO financial_allocations
+             (source_type, source_document_id, source_line_id, phase_id, qb_account_id,
+              phase_budget_line_id, billing_type, amount, allocation_status, allocation_source, created_by)
+           VALUES ('contract_line',$1,$2,$3,$4,$5,$6,$7,$8,'explicit',$9)`,
+          [contractId, cliRes.rows[0].id, phaseIdNum, qbAccountId, pblId,
+           ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed',
+           Number(li.budgeted_amount) || 0,
+           pblId ? 'confirmed' : 'needs_review',
+           req.session.userId]
+        );
+      }
+    } else if (total > 0 && phaseIdNum) {
+      // No line items — write a single FA row for the contract header total
+      // using the contract's own qb_account_id if present
+      const headerGl = req.body.qb_account_id ? Number(req.body.qb_account_id) : null;
+      if (headerGl) {
+        const pblId = await resolvePbl(client, phaseIdNum, headerGl);
+        await client.query(
+          `INSERT INTO financial_allocations
+             (source_type, source_document_id, source_line_id, phase_id, qb_account_id,
+              phase_budget_line_id, billing_type, amount, allocation_status, allocation_source, created_by)
+           VALUES ('contract_line',$1,NULL,$2,$3,$4,'fixed',$5,$6,'explicit',$7)`,
+          [contractId, phaseIdNum, headerGl, pblId, total,
+           pblId ? 'confirmed' : 'needs_review', req.session.userId]
         );
       }
     }
@@ -757,17 +784,20 @@ router.get('/contracts/:id/invoices', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// DELETE /api/contracts/:id — permanently remove a contract and all its line items / logs.
+// DELETE /api/contracts/:id — void the contract and its FA rows (hard delete blocked by DB trigger).
 router.delete('/contracts/:id', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const contractId = Number(req.params.id);
     const access = await userCanAccessContract(req.session.userId, contractId);
     if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Not found' : 'Forbidden' });
-    // Null-out contract_id on any invoices so they're not orphaned (preserve invoices)
-    await pool.query('UPDATE invoices SET contract_id = NULL WHERE contract_id = $1', [contractId]);
-    await pool.query('DELETE FROM contracts WHERE id = $1', [contractId]);
+    await client.query('BEGIN');
+    await client.query("UPDATE contracts SET status = 'voided' WHERE id = $1", [contractId]);
+    await client.query("UPDATE financial_allocations SET allocation_status = 'voided' WHERE source_type = 'contract_line' AND source_document_id = $1", [contractId]);
+    await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (err) { next(err); }
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
 });
 
 module.exports = router;

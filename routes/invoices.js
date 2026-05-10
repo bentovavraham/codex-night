@@ -301,6 +301,12 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
       const pblRes = await pool.query('SELECT phase_budget_line_id FROM contracts WHERE id = $1', [allocs[0].contract_id]);
       resolvedPblId = pblRes.rows[0]?.phase_budget_line_id || null;
     }
+    // Resolve phase_id for Allocation Layer rows — get from primary contract
+    let resolvedPhaseId = null;
+    if (allocs.length > 0) {
+      const phRes = await pool.query('SELECT phase_id FROM contracts WHERE id = $1', [allocs[0].contract_id]);
+      resolvedPhaseId = phRes.rows[0]?.phase_id || null;
+    }
 
     const result = await client.query(
       `INSERT INTO invoices (contract_id, project_id, phase_budget_line_id, invoice_number, vendor_name, amount,
@@ -342,32 +348,54 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
     }
 
     // Insert detailed invoice_line_items (new model: T&M hours, fixed tasks, expenses per line)
+    // Allocation Layer: write one FA row per line item immediately after insert.
     const invoiceLineItems = req.body?.invoice_line_items;
+    let wroteFA = false;
     if (Array.isArray(invoiceLineItems) && invoiceLineItems.length > 0) {
       for (let idx = 0; idx < invoiceLineItems.length; idx++) {
         const li = invoiceLineItems[idx];
         const liAmt = Number(li.amount);
         if (!liAmt) continue;
         const liType = ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : invoiceType;
-        // CRITICAL: include qb_account_id and phase_budget_line_id — these are the
-        // primary allocation signals. Dropping them silently corrupts the budget grid.
-        await client.query(
+        const liGl  = li.qb_account_id        != null ? Number(li.qb_account_id)        : null;
+        const liPbl = li.phase_budget_line_id != null ? Number(li.phase_budget_line_id) : null;
+        const iliRes = await client.query(
           `INSERT INTO invoice_line_items
              (invoice_id, billing_type, description, person, line_date, hours, rate,
               amount, sort_order, qb_account_id, phase_budget_line_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
           [invoiceId, liType,
-           li.description || null,
-           li.person      || null,
-           li.line_date   || null,
-           li.hours  != null ? Number(li.hours)  : null,
-           li.rate   != null ? Number(li.rate)   : null,
-           liAmt,
-           li.sort_order != null ? Number(li.sort_order) : idx,
-           li.qb_account_id        != null ? Number(li.qb_account_id)        : null,
-           li.phase_budget_line_id != null ? Number(li.phase_budget_line_id) : null]
+           li.description || null, li.person || null, li.line_date || null,
+           li.hours != null ? Number(li.hours) : null,
+           li.rate  != null ? Number(li.rate)  : null,
+           liAmt, li.sort_order != null ? Number(li.sort_order) : idx,
+           liGl, liPbl]
         );
+        if (liGl && resolvedPhaseId) {
+          await client.query(
+            `INSERT INTO financial_allocations
+               (source_type, source_document_id, source_line_id, phase_id, qb_account_id,
+                phase_budget_line_id, billing_type, amount, allocation_status, allocation_source, created_by)
+             VALUES ('invoice_line',$1,$2,$3,$4,$5,$6,$7,$8,'explicit',$9)`,
+            [invoiceId, iliRes.rows[0].id, resolvedPhaseId, liGl, liPbl, liType, liAmt,
+             liPbl ? 'confirmed' : 'needs_review', req.session.userId]
+          );
+          wroteFA = true;
+        }
       }
+    }
+
+    // Allocation Layer fallback: no line items but invoice has a header-level GL — write one FA row
+    const headerGl = req.body?.qb_account_id ? Number(req.body.qb_account_id) : null;
+    if (!wroteFA && headerGl && resolvedPhaseId) {
+      await client.query(
+        `INSERT INTO financial_allocations
+           (source_type, source_document_id, source_line_id, phase_id, qb_account_id,
+            phase_budget_line_id, billing_type, amount, allocation_status, allocation_source, created_by)
+         VALUES ('invoice_line',$1,NULL,$2,$3,$4,$5,$6,$7,'explicit',$8)`,
+        [invoiceId, resolvedPhaseId, headerGl, resolvedPblId, invoiceType, amt,
+         resolvedPblId ? 'confirmed' : 'needs_review', req.session.userId]
+      );
     }
 
     await client.query('COMMIT');

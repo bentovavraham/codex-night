@@ -504,6 +504,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
   const [trayOpen,         setTrayOpen]         = useState(true);
   const [editInvoiceId,    setEditInvoiceId]    = useState<number | null>(null);
   const [editContractId,   setEditContractId]   = useState<number | null>(null);
+  const [showFormulas,     setShowFormulas]     = useState(false);
   const [snapshotForm,     setSnapshotForm]     = useState(false);
   const [snapshotName,     setSnapshotName]     = useState('');
   const [compareSnapshotId, setCompareSnapshotId] = useState<number | null>(null);
@@ -1029,6 +1030,11 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
               onClick={() => setShowDetails(v => !v)}>
               {showDetails ? 'Hide Details' : 'Details'}
             </button>
+            <button className={`${styles.tbBtn} ${showFormulas ? styles.tbBtnActive : ''}`}
+              onClick={() => setShowFormulas(v => !v)}
+              title="Show column formula explanations">
+              ƒ
+            </button>
           </>}
           <button className={`${styles.tbBtn} ${styles.tbBtnAdd}`} onClick={() => setShowAddRow(v => !v)}
             title="Add a custom budget line">
@@ -1311,31 +1317,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
       <div className={styles.scrollArea} style={{ display: viewMode === 'variance' ? 'none' : undefined }}
         onClick={() => setActive({ rowId: -1, field: '' })}>
         <table className={styles.table} onClick={e => e.stopPropagation()}>
-          <colgroup>
-            <col style={{width:24}}/>   {/* gutter */}
-            <col style={{width:72}}/>   {/* Acct # */}
-            <col style={{width:220}}/>  {/* Task / Description */}
-            <col style={{width:88}}/>   {/* Budget */}
-            <col style={{width:120}}/>  {/* Initial Contracts */}
-            <col style={{width:66}}/>   {/* COs */}
-            <col style={{width:128}}/>  {/* Total Commitment */}
-            <col style={{width:100}}/>  {/* Rem. Budget */}
-            <col style={{width:70}}/>   {/* Rem. % */}
-            <col style={{width:72}}/>   {/* Fixed */}
-            <col style={{width:62}}/>   {/* T&M */}
-            <col style={{width:82}}/>   {/* Expense */}
-            <col style={{width:108}}/>  {/* Total Invoiced */}
-            <col style={{width:120}}/>  {/* $ Rem. on Commit */}
-            <col style={{width:112}}/>  {/* % Used of Commit */}
-            <col style={{width:88}}/>   {/* Amt Paid */}
-            <col style={{width:100}}/>  {/* Amount Due */}
-            <col style={{width:62}}/>   {/* $/SF */}
-            <col style={{width:62}}/>   {/* $/AC */}
-            <col style={{width:130}}/>  {/* QB Codes */}
-            <col style={{width:100}}/>  {/* Calc Method */}
-            <col style={{width:110}}/>  {/* Consultant */}
-            <col style={{width:150}}/>  {/* Notes */}
-          </colgroup>
+          <colgroup><col style={{width:24}}/><col style={{width:72}}/><col style={{width:220}}/><col style={{width:88}}/><col style={{width:120}}/><col style={{width:66}}/><col style={{width:128}}/><col style={{width:100}}/><col style={{width:70}}/><col style={{width:72}}/><col style={{width:62}}/><col style={{width:82}}/><col style={{width:108}}/><col style={{width:120}}/><col style={{width:112}}/><col style={{width:88}}/><col style={{width:100}}/><col style={{width:62}}/><col style={{width:62}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
           <thead>
             <tr className={styles.theadGroup}>
               <th colSpan={4} />
@@ -1351,27 +1333,51 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
               <th className={styles.th} />
               <th className={`${styles.th} ${styles.thLeft}`}>Acct #</th>
               <th className={`${styles.th} ${styles.thLeft}`}>Task / Description</th>
-              <th className={`${styles.th} ${styles.thRight}`}>Budget<div className={styles.thFormula}>PM input</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Initial Contracts<div className={styles.thFormula}>Σ contract line items</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>COs<div className={styles.thFormula}>Σ change orders</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Total Commitment<div className={styles.thFormula}>Contracts + COs</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget<div className={styles.thFormula}>Budget − Commitment</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>Rem. %<div className={styles.thFormula}>Rem ÷ Budget</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Fixed<div className={styles.thFormula}>Σ fixed invoices</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>T&amp;M<div className={styles.thFormula}>Σ T&amp;M invoices</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Expense<div className={styles.thFormula}>Σ expense invoices</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Total Invoiced<div className={styles.thFormula}>Fixed + T&amp;M + Expense</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>$ Rem. on Commit<div className={styles.thFormula}>Commitment − Invoiced</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>% Used of Commit<div className={styles.thFormula}>Invoiced ÷ Commitment</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amt Paid<div className={styles.thFormula}>Σ paid invoices</div></th>
-              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amount Due<div className={styles.thFormula}>Invoiced − Paid</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>$/SF<div className={styles.thFormula}>Billed ÷ GLA sf</div></th>
-              <th className={`${styles.th} ${styles.thRight}`}>$/AC<div className={styles.thFormula}>Billed ÷ GLA ac</div></th>
+              <th className={`${styles.th} ${styles.thRight}`}>Budget</th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Initial Contracts</th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>COs</th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Total Commitment</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. Budget</th>
+              <th className={`${styles.th} ${styles.thRight}`}>Rem. %</th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Fixed</th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>T&amp;M</th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Expense</th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Total Invoiced</th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>$ Rem. on Commit</th>
+              <th className={`${styles.th} ${styles.thRight}`}>% Used of Commit</th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amt Paid</th>
+              <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amount Due</th>
+              <th className={`${styles.th} ${styles.thRight}`}>$/SF</th>
+              <th className={`${styles.th} ${styles.thRight}`}>$/AC</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>QB Codes Used</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Calc Method</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Consultant</th>
               <th className={`${styles.th} ${styles.thLeft} ${dc}`}>Notes</th>
             </tr>
+            {showFormulas && (
+              <tr className={styles.theadFormulas}>
+                <td className={styles.theadFormulaCell} />
+                <td className={styles.theadFormulaCell} />
+                <td className={styles.theadFormulaCell} />
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight}`}>PM input</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Σ contract line items</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Σ change orders</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Contracts + COs</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight}`}>Budget − Commitment</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight}`}>Rem ÷ Budget</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Σ fixed invoices</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Σ T&amp;M invoices</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Σ expense invoices</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Fixed + T&amp;M + Expense</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Commitment − Invoiced</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight}`}>Invoiced ÷ Commitment</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Σ paid invoices</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Invoiced − Paid</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight}`}>Billed ÷ GLA sf</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight}`}>Billed ÷ GLA ac</td>
+                <td className={styles.theadFormulaCell} colSpan={4} />
+              </tr>
+            )}
           </thead>
           <tbody>
             {qbRoots.length > 0 ? renderAccts(qbRoots, 0) : null}

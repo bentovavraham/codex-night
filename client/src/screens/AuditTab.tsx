@@ -402,12 +402,6 @@ export default function AuditTab() {
               ↓ Correction Report
             </button>
           )}
-          <button className={`${styles.btnSecondary} ${styles.btnImport}`} onClick={() => setShowImport(true)}>
-            ↑ Import Invoices
-          </button>
-          <button className={`${styles.btnSecondary} ${styles.btnImport}`} onClick={() => setShowContractUpload(true)}>
-            ↑ Import Contract
-          </button>
         </div>
       </div>
 

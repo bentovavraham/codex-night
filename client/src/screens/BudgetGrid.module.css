@@ -78,6 +78,8 @@
   table-layout: fixed;
   font-family: 'Inter', system-ui, sans-serif;
 }
+.table td { border-right: 1px solid #dadce0; }
+.table td:last-child { border-right: none; }
 
 /* ── Sticky header ───────────────────────────────────────────────────────── */
 
@@ -86,60 +88,76 @@
   top: 0;
   z-index: 11;
 }
-.theadGroup th { background: #fff; }
+.theadGroup th { background: #1a1d21; }
 
 .thGroup {
-  padding: 4px 8px;
-  height: 22px;
-  font-size: 9.5px;
+  padding: 5px 10px;
+  height: 24px;
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: .1em;
-  color: #9aa0a6;
+  letter-spacing: .12em;
+  color: rgba(255,255,255,0.45);
   text-align: center;
-  border-bottom: 1px solid #e8eaed;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  border-right: 1px solid rgba(255,255,255,0.1);
   white-space: nowrap;
-  background: #fff;
+  background: #1a1d21;
 }
-.thGroupAlt { color: #9aa0a6; }
+.thGroupAlt { color: rgba(255,255,255,0.45); }
 
 .thead {
   position: sticky;
-  top: 22px;
+  top: 24px;
   z-index: 10;
 }
 
 .th {
-  padding: 8px 10px;
-  height: 54px;
+  padding: 9px 10px 8px;
+  height: 40px;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .04em;
-  color: #3c4043;
-  border-bottom: 2px solid #202124;
+  color: #ffffff;
+  border-bottom: 2px solid rgba(255,255,255,0.6);
+  border-right: 1px solid rgba(255,255,255,0.1);
   white-space: normal;
   overflow-wrap: break-word;
   line-height: 1.25;
   user-select: none;
-  background: #fff;
+  background: #1a1d21;
   vertical-align: bottom;
   box-sizing: border-box;
 }
+.th:last-child { border-right: none; }
 .thLeft  { text-align: left; }
 .thRight { text-align: right; }
 
-.thFormula {
-  font-size: 9px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  font-style: italic;
-  color: #9aa0a6;
-  margin-top: 3px;
-  white-space: normal;
-  line-height: 1.3;
+.thFormula { display: none; }
+
+/* ── Collapsible formula row ─────────────────────────────────────────────── */
+.theadFormulas {
+  position: sticky;
+  top: 64px;
+  z-index: 9;
 }
+.theadFormulas td { border-top: 1px solid rgba(255,255,255,0.15); }
+.theadFormulas td.theadFormulaCell {
+  padding: 4px 10px 5px;
+  font-size: 9px;
+  font-style: italic;
+  font-weight: 400;
+  color: #ffffff;
+  background: #13151a;
+  border-bottom: 2px solid rgba(255,255,255,0.6);
+  border-right: 1px solid rgba(255,255,255,0.08);
+  white-space: normal;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+.theadFormulaCellRight { text-align: right; }
+.theadFormulaCellDrill { color: #ffffff; }
 
 /* ── Level 1: Root account rows (1600 Land, 1700 Entitlement…) ──────────── */
 
@@ -307,9 +325,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: #202124;
-  border-right: 1px solid #f1f3f4;
 }
-.cell:last-child { border-right: none; }
 .cell:not(.ro):hover { cursor: text; }
 
 .tdTask  { font-weight: 500; }
@@ -418,8 +434,7 @@
 .drillable:hover { background: #e8f0fe !important; color: #1a73e8 !important; text-decoration: underline; text-underline-offset: 2px; }
 .drillActive { background: #d2e3fc !important; color: #1967d2 !important; font-weight: 700; outline: 2px solid #1a73e8; outline-offset: -2px; }
 .drillActiveRow { background: #f0f7ff !important; }
-.drillHdr { color: #1a73e8; }
-.drillHdr .thFormula { color: #a8c7fa; }
+.drillHdr { color: #7baaf7; }
 .drillHint { font-size: 11px; color: var(--text-2); display: flex; align-items: center; gap: 8px; flex: 1; margin-left: 16px; }
 .drillHint strong { color: var(--text-1); }
 .drillClearBtn { font-size: 10px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-2); cursor: pointer; color: var(--text-2); }

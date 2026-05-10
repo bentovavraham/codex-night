@@ -1,7 +1,10 @@
 import { NavLink, Outlet, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './PhaseHome.module.css';
+import { UploadPanel as ContractUploadPanel } from './ContractsTab';
+import { UploadPanel as InvoiceUploadPanel } from './InvoicesTab';
 
 const TABS = [
   { to: 'budget',      label: 'Budget' },
@@ -14,21 +17,53 @@ const TABS = [
 
 export default function PhaseHome() {
   const { projectId, phaseId } = useParams();
+  const qc = useQueryClient();
+  const pid = Number(phaseId);
+  const proj = Number(projectId);
+
+  const [showContractUpload, setShowContractUpload] = useState(false);
+  const [showInvoiceUpload,  setShowInvoiceUpload]  = useState(false);
 
   const { data: project } = useQuery({
-    queryKey: ['project', Number(projectId)],
-    queryFn: () => api.getProject(Number(projectId)),
+    queryKey: ['project', proj],
+    queryFn: () => api.getProject(proj),
     enabled: !!projectId,
   });
 
   const { data: phases = [] } = useQuery({
-    queryKey: ['phases', Number(projectId)],
-    queryFn: () => api.listPhases(Number(projectId)),
+    queryKey: ['phases', proj],
+    queryFn: () => api.listPhases(proj),
     enabled: !!projectId,
   });
 
-  const phase = (phases as any[]).find((p: any) => p.id === Number(phaseId));
+  const { data: qbAccounts = [] } = useQuery({
+    queryKey: ['qbAccounts'],
+    queryFn: () => api.listQbAccounts(),
+    staleTime: 300_000,
+  });
+
+  const { data: phaseContracts = [] } = useQuery({
+    queryKey: ['phaseContracts', pid],
+    queryFn: () => api.listContracts(pid),
+    enabled: !!pid,
+    staleTime: 30_000,
+  });
+
+  const { data: budgetLines = [] } = useQuery({
+    queryKey: ['budgetLines', pid],
+    queryFn: () => api.listBudgetLines(pid),
+    enabled: !!pid,
+    staleTime: 60_000,
+  });
+
+  const phase = (phases as any[]).find((p: any) => p.id === pid);
   const p = project as any;
+
+  function invalidateAfterUpload() {
+    qc.invalidateQueries({ queryKey: ['budget', pid] });
+    qc.invalidateQueries({ queryKey: ['phaseContracts', pid] });
+    qc.invalidateQueries({ queryKey: ['invoices', pid] });
+  }
 
   return (
     <div className={styles.page}>
@@ -63,12 +98,47 @@ export default function PhaseHome() {
             {tab.label}
           </NavLink>
         ))}
+        <div className={styles.tabBarSpacer} />
+        <button className={styles.importBtn} onClick={() => setShowInvoiceUpload(true)}>
+          ↑ Invoice
+        </button>
+        <button className={styles.importBtn} onClick={() => setShowContractUpload(true)}>
+          ↑ Contract
+        </button>
       </div>
 
       {/* Tab content */}
       <div className={styles.tabContent}>
         <Outlet />
       </div>
+
+      {/* Global contract upload panel */}
+      {showContractUpload && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'var(--bg)' }}>
+          <ContractUploadPanel
+            qbAccounts={qbAccounts as any[]}
+            projectId={proj}
+            phaseId={pid}
+            onClose={() => setShowContractUpload(false)}
+            onSaved={() => { setShowContractUpload(false); invalidateAfterUpload(); }}
+          />
+        </div>
+      )}
+
+      {/* Global invoice upload panel */}
+      {showInvoiceUpload && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'var(--bg)' }}>
+          <InvoiceUploadPanel
+            contracts={phaseContracts as any[]}
+            budgetLines={budgetLines as any[]}
+            qbAccounts={qbAccounts as any[]}
+            projectId={proj}
+            phaseIdNum={pid}
+            onClose={() => setShowInvoiceUpload(false)}
+            onSaved={() => { setShowInvoiceUpload(false); invalidateAfterUpload(); }}
+          />
+        </div>
+      )}
     </div>
   );
 }
