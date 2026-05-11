@@ -1293,7 +1293,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
             <CcCell label="COs"              gridFmt={usd.format(grand.co_value)}   rawFmt={usd.format(rawCoValue)}     mismatch={ccCoValue} />
             <CcCell label="Total Commitment" gridFmt={usd.format(gridTotalCommit)}    rawFmt={usd.format(rawTotalCommit)}    mismatch={ccTotalCommit} />
             <CcCell label="$ Rem. on Commit" gridFmt={usd.format(gridCommitUnbilled)} rawFmt={usd.format(rawCommitUnbilled)} mismatch={ccCommitUnbilled} />
-            <CcCell label="% Used of Commit" gridFmt={pct(gridRemCommitPct)}          rawFmt={pct(rawRemCommitPct)}          mismatch={ccRemCommitPct} />
+            <CcCell label="% Rem. of Commit" gridFmt={pct(gridRemCommitPct)}          rawFmt={pct(rawRemCommitPct)}          mismatch={ccRemCommitPct} />
             <span className={styles.reconDivider} />
             <CcCell label="Fixed"            gridFmt={usd.format(grand.fixed ?? 0)} rawFmt={usd.format(cc?.raw_fixed ?? 0)}   mismatch={ccFixed} />
             <CcCell label="T&M"              gridFmt={usd.format(grand.tm ?? 0)}    rawFmt={usd.format(cc?.raw_tm ?? 0)}      mismatch={ccTm} />
@@ -1317,7 +1317,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
       <div className={styles.scrollArea} style={{ display: viewMode === 'variance' ? 'none' : undefined }}
         onClick={() => setActive({ rowId: -1, field: '' })}>
         <table className={styles.table} onClick={e => e.stopPropagation()}>
-          <colgroup><col style={{width:24}}/><col style={{width:72}}/><col style={{width:220}}/><col style={{width:88}}/><col style={{width:120}}/><col style={{width:66}}/><col style={{width:128}}/><col style={{width:100}}/><col style={{width:70}}/><col style={{width:72}}/><col style={{width:62}}/><col style={{width:82}}/><col style={{width:108}}/><col style={{width:120}}/><col style={{width:112}}/><col style={{width:88}}/><col style={{width:100}}/><col style={{width:62}}/><col style={{width:62}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
+          <colgroup><col style={{width:24}}/><col style={{width:180}}/><col style={{width:220}}/><col style={{width:88}}/><col style={{width:120}}/><col style={{width:66}}/><col style={{width:128}}/><col style={{width:100}}/><col style={{width:70}}/><col style={{width:72}}/><col style={{width:62}}/><col style={{width:82}}/><col style={{width:108}}/><col style={{width:120}}/><col style={{width:112}}/><col style={{width:88}}/><col style={{width:100}}/><col style={{width:62}}/><col style={{width:62}}/><col style={{width:130}}/><col style={{width:100}}/><col style={{width:110}}/><col style={{width:150}}/></colgroup>
           <thead>
             <tr className={styles.theadGroup}>
               <th colSpan={4} />
@@ -1344,7 +1344,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
               <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Expense</th>
               <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Total Invoiced</th>
               <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>$ Rem. on Commit</th>
-              <th className={`${styles.th} ${styles.thRight}`}>% Used of Commit</th>
+              <th className={`${styles.th} ${styles.thRight}`}>% Rem. of Commit</th>
               <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amt Paid</th>
               <th className={`${styles.th} ${styles.thRight} ${styles.drillHdr}`}>Amount Due</th>
               <th className={`${styles.th} ${styles.thRight}`}>$/SF</th>
@@ -1370,7 +1370,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
                 <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Σ expense invoices</td>
                 <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Fixed + T&amp;M + Expense</td>
                 <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Commitment − Invoiced</td>
-                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight}`}>Invoiced ÷ Commitment</td>
+                <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight}`}>(Commit − Invoiced) ÷ Commit</td>
                 <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Σ paid invoices</td>
                 <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight} ${styles.theadFormulaCellDrill}`}>Invoiced − Paid</td>
                 <td className={`${styles.theadFormulaCell} ${styles.theadFormulaCellRight}`}>Billed ÷ GLA sf</td>

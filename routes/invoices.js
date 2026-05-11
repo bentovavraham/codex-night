@@ -5,6 +5,7 @@ const { requireAuth, hasMinRole } = require('../middleware/auth');
 const projects = require('./projects');
 const storage = require('../lib/storage');
 const { extractInvoice, suggestInvoiceLineCodes } = require('../lib/extract');
+const { createInvoice, syncInvoiceFA } = require('../lib/financials');
 
 const router = express.Router();
 const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -294,112 +295,40 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
       }
     }
 
-    await client.query('BEGIN');
-    // Resolve phase_budget_line_id: explicit value, or derive from contract if only one allocation
-    let resolvedPblId = phase_budget_line_id ? Number(phase_budget_line_id) : null;
-    if (!resolvedPblId && allocs.length === 1) {
-      const pblRes = await pool.query('SELECT phase_budget_line_id FROM contracts WHERE id = $1', [allocs[0].contract_id]);
-      resolvedPblId = pblRes.rows[0]?.phase_budget_line_id || null;
-    }
-    // Resolve phase_id for Allocation Layer rows — get from primary contract
+    // Resolve phase_id from primary contract
     let resolvedPhaseId = null;
     if (allocs.length > 0) {
       const phRes = await pool.query('SELECT phase_id FROM contracts WHERE id = $1', [allocs[0].contract_id]);
       resolvedPhaseId = phRes.rows[0]?.phase_id || null;
     }
+    if (!resolvedPhaseId) return res.status(400).json({ error: 'Could not resolve phase_id from contract' });
 
-    const result = await client.query(
-      `INSERT INTO invoices (contract_id, project_id, phase_budget_line_id, invoice_number, vendor_name, amount,
-          invoice_date, description, file_reference, qb_code_id, invoice_type, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [primaryContractId, resolvedProjectId, resolvedPblId, invoice_number, resolvedVendor, amt,
-       invoice_date || null, description || null, file_reference || null,
-       qb_code_id || null, invoiceType, req.session.userId]);
-    const invoiceId = result.rows[0].id;
-    // Insert allocation rows.
+    await client.query('BEGIN');
+    const { invoiceId, invoice } = await createInvoice(client, {
+      project_id: resolvedProjectId,
+      phase_id: resolvedPhaseId,
+      phase_budget_line_id,
+      contract_id: primaryContractId,
+      vendor_name: resolvedVendor,
+      invoice_number,
+      amount: amt,
+      invoice_date: invoice_date || null,
+      description: description || null,
+      file_reference: file_reference || null,
+      invoice_type: invoiceType,
+      qb_account_id: req.body?.qb_account_id || null,
+      line_items: req.body?.invoice_line_items || [],
+    }, req.session.userId);
+
+    // Insert multi-contract allocation rows
     for (const alloc of allocs) {
       await client.query(
         'INSERT INTO invoice_contracts (invoice_id, contract_id, amount) VALUES ($1, $2, $3)',
         [invoiceId, alloc.contract_id, alloc.amount]);
     }
-    const contractNames = allocs.map(a => `contract #${a.contract_id}: $${a.amount.toFixed(2)}`).join(', ');
-    await logInvoice(client, invoiceId, 'created',
-      `Created: ${invoice_number} for $${amt.toFixed(2)} from ${resolvedVendor}${allocs.length > 1 ? ` (split: ${contractNames})` : ''}`,
-      req.session.userId);
-    // Save confirmed fields as a future few-shot example for this vendor.
-    if (file_reference && resolvedVendor) {
-      await saveExtractionExample(client, resolvedVendor, {
-        invoice_number, vendor_name: resolvedVendor,
-        amount: amt, invoice_date: invoice_date || null,
-        description: description || null,
-      }, req.session.userId);
-    }
-    // Insert G703 line items (pay-application line breakdown, legacy fixed-scope)
-    const lines = req.body?.lines;
-    if (Array.isArray(lines) && lines.length > 0 && invoiceType === 'fixed') {
-      for (const line of lines) {
-        const lineAmt = Number(line.current_amount);
-        if (!line.qb_code_id || !lineAmt || lineAmt <= 0) continue;
-        await client.query(
-          'INSERT INTO invoice_lines (invoice_id, qb_code_id, current_amount) VALUES ($1, $2, $3)',
-          [invoiceId, Number(line.qb_code_id), lineAmt]
-        );
-      }
-    }
-
-    // Insert detailed invoice_line_items (new model: T&M hours, fixed tasks, expenses per line)
-    // Allocation Layer: write one FA row per line item immediately after insert.
-    const invoiceLineItems = req.body?.invoice_line_items;
-    let wroteFA = false;
-    if (Array.isArray(invoiceLineItems) && invoiceLineItems.length > 0) {
-      for (let idx = 0; idx < invoiceLineItems.length; idx++) {
-        const li = invoiceLineItems[idx];
-        const liAmt = Number(li.amount);
-        if (!liAmt) continue;
-        const liType = ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : invoiceType;
-        const liGl  = li.qb_account_id        != null ? Number(li.qb_account_id)        : null;
-        const liPbl = li.phase_budget_line_id != null ? Number(li.phase_budget_line_id) : null;
-        const iliRes = await client.query(
-          `INSERT INTO invoice_line_items
-             (invoice_id, billing_type, description, person, line_date, hours, rate,
-              amount, sort_order, qb_account_id, phase_budget_line_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-          [invoiceId, liType,
-           li.description || null, li.person || null, li.line_date || null,
-           li.hours != null ? Number(li.hours) : null,
-           li.rate  != null ? Number(li.rate)  : null,
-           liAmt, li.sort_order != null ? Number(li.sort_order) : idx,
-           liGl, liPbl]
-        );
-        if (liGl && resolvedPhaseId) {
-          await client.query(
-            `INSERT INTO financial_allocations
-               (source_type, source_document_id, source_line_id, phase_id, qb_account_id,
-                phase_budget_line_id, billing_type, amount, allocation_status, allocation_source, created_by)
-             VALUES ('invoice_line',$1,$2,$3,$4,$5,$6,$7,$8,'explicit',$9)`,
-            [invoiceId, iliRes.rows[0].id, resolvedPhaseId, liGl, liPbl, liType, liAmt,
-             liPbl ? 'confirmed' : 'needs_review', req.session.userId]
-          );
-          wroteFA = true;
-        }
-      }
-    }
-
-    // Allocation Layer fallback: no line items but invoice has a header-level GL — write one FA row
-    const headerGl = req.body?.qb_account_id ? Number(req.body.qb_account_id) : null;
-    if (!wroteFA && headerGl && resolvedPhaseId) {
-      await client.query(
-        `INSERT INTO financial_allocations
-           (source_type, source_document_id, source_line_id, phase_id, qb_account_id,
-            phase_budget_line_id, billing_type, amount, allocation_status, allocation_source, created_by)
-         VALUES ('invoice_line',$1,NULL,$2,$3,$4,$5,$6,$7,'explicit',$8)`,
-        [invoiceId, resolvedPhaseId, headerGl, resolvedPblId, invoiceType, amt,
-         resolvedPblId ? 'confirmed' : 'needs_review', req.session.userId]
-      );
-    }
 
     await client.query('COMMIT');
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(invoice);
   } catch (err) { await client.query('ROLLBACK'); next(err); }
   finally { client.release(); }
 });
@@ -608,6 +537,9 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
       }
       if (lineItems.length > 0) changes.push(`line items updated (${lineItems.length} lines)`);
     }
+
+    // Sync FA rows — always, so budget grid stays consistent with whatever was saved
+    await syncInvoiceFA(client, invId, req.session.userId);
 
     if (changes.length > 0) {
       await logInvoice(client, invId, 'edited', changes.join('; '), req.session.userId);

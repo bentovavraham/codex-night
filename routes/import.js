@@ -20,6 +20,7 @@ const pool = require('../db/pool');
 const fileStorage = require('../lib/storage');
 const { requireAuth } = require('../middleware/auth');
 const { classifyDocument, extractContract, extractInvoice, suggestLineBudgets, suggestInvoiceLineCodes, matchQbTransaction, matchProject } = require('../lib/extract');
+const { createContract, createInvoice } = require('../lib/financials');
 
 // Use memory storage — save to Postgres immediately so files survive restarts + Render deploys
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -522,167 +523,82 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
   try {
     const item = (await pool.query('SELECT * FROM import_queue WHERE id=$1', [Number(req.params.id)])).rows[0];
     if (!item) return res.status(404).json({ error: 'Not found' });
-    // project_match === 'mismatch' is surfaced as a warning on the frontend; user can override and confirm anyway
     const { formData } = req.body;
-    const lineId = formData.phase_budget_line_id || item.suggested_budget_line_id || null;
+
+    const phaseRes = await client.query('SELECT project_id FROM phases WHERE id=$1', [item.phase_id]);
+    const projectId = phaseRes.rows[0]?.project_id;
 
     await client.query('BEGIN');
-    let contractId = null, invoiceId = null, pmGlId = null;
+    let contractId = null, invoiceId = null;
 
     if (item.doc_type === 'contract') {
-      const phaseRes = await client.query('SELECT project_id FROM phases WHERE id=$1', [item.phase_id]);
-      const projectId = phaseRes.rows[0]?.project_id;
-      const r = await client.query(
-        `INSERT INTO contracts (project_id, phase_budget_line_id, vendor_name, description, total_value,
-          contract_date, reference_number, status, file_reference, source_batch, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-        [projectId, lineId, formData.vendor_name, formData.description, Number(formData.total_value)||0,
-         formData.contract_date||null, formData.reference_number||null,
-         formData.status||'active', item.file_reference, item.source_batch||null, req.session.userId]
-      );
-      contractId = r.rows[0].id;
-
-      // Insert line items if present
-      const lineItems = formData.line_items || [];
-      if (lineItems.length === 0) {
-        // No line items — write a single allocation row for the contract header
-        const hdrGlId = formData.qb_account_id ? Number(formData.qb_account_id) : null;
-        if (!hdrGlId) throw Object.assign(new Error('GL code required — set a GL account before confirming'), { status: 400 });
-        const hdrTaskId = lineId ? Number(lineId) : null;
-        await client.query(
-          `INSERT INTO financial_allocations
-             (source_type, source_document_id, source_line_id, phase_id, qb_account_id, phase_budget_line_id,
-              billing_type, amount, allocation_status, allocation_source, created_by)
-           VALUES ('contract_line',$1,NULL,$2,$3,$4,$5,$6,$7,'explicit',$8)`,
-          [contractId, item.phase_id, hdrGlId, hdrTaskId,
-           formData.billing_type||'fixed', Number(formData.total_value)||0,
-           hdrTaskId ? 'confirmed' : 'needs_review', req.session.userId]
-        );
-      }
-      for (let idx = 0; idx < lineItems.length; idx++) {
-        const li = lineItems[idx];
-        let lineGlId = li.qb_account_id ? Number(li.qb_account_id) : null;
-        if (li.phase_budget_line_id) {
-          const blRow = await client.query(
-            'SELECT qb_account_id FROM phase_budget_lines WHERE id=$1',
-            [Number(li.phase_budget_line_id)]
-          );
-          if (blRow.rows[0]?.qb_account_id) lineGlId = blRow.rows[0].qb_account_id;
-        }
-        if (!lineGlId) throw Object.assign(new Error(`GL code required on line ${idx + 1} — set a GL account before confirming`), { status: 400 });
-        const cliRes = await client.query(
-          `INSERT INTO contract_line_items
-             (contract_id, sort_order, billing_type, description, budgeted_amount, phase_budget_line_id)
-           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-          [contractId, idx, li.billing_type||'fixed', li.description||'',
-           Number(li.budgeted_amount)||0,
-           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null]
-        );
-        const cliId = cliRes.rows[0].id;
-        const cliTaskId = li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null;
-        await client.query(
-          `INSERT INTO financial_allocations
-             (source_type, source_document_id, source_line_id, phase_id, qb_account_id, phase_budget_line_id,
-              billing_type, amount, allocation_status, allocation_source, created_by)
-           VALUES ('contract_line',$1,$2,$3,$4,$5,$6,$7,$8,'explicit',$9)`,
-          [contractId, cliId, item.phase_id, lineGlId, cliTaskId,
-           li.billing_type||'fixed', Number(li.budgeted_amount)||0,
-           cliTaskId ? 'confirmed' : 'needs_review', req.session.userId]
-        );
-      }
+      const result = await createContract(client, {
+        project_id: projectId,
+        phase_id: item.phase_id,
+        vendor_name: formData.vendor_name,
+        description: formData.description,
+        total_value: Number(formData.total_value) || 0,
+        contract_date: formData.contract_date || null,
+        reference_number: formData.reference_number || null,
+        file_reference: item.file_reference,
+        source_batch: item.source_batch || null,
+        qb_account_id: formData.qb_account_id || null,
+        line_items: formData.line_items || [],
+      }, req.session.userId);
+      contractId = result.contractId;
     } else {
-      const phaseRes = await client.query('SELECT project_id FROM phases WHERE id=$1', [item.phase_id]);
-      const projectId = phaseRes.rows[0]?.project_id;
-      // Determine PM validated GL from header or first line item
-      pmGlId = formData.qb_account_id
+      const pmGlId = formData.qb_account_id
         ? Number(formData.qb_account_id)
         : (Array.isArray(formData.line_items) && formData.line_items[0]?.qb_account_id
             ? Number(formData.line_items[0].qb_account_id) : null);
-      const r = await client.query(
-        `INSERT INTO invoices (project_id, phase_id, phase_budget_line_id, contract_id, vendor_name, invoice_number, amount,
-          invoice_date, description, status, file_reference, invoice_type, qb_account_id, pm_validated_gl_id, qb_transaction_id, source_batch, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
-        [projectId, item.phase_id, lineId, formData.contract_id||null, formData.vendor_name, formData.invoice_number||'',
-         Number(formData.amount)||0, formData.invoice_date||null, formData.description||null,
-         'approved', item.file_reference, formData.invoice_type||'fixed',
-         pmGlId, pmGlId,
-         item.suggested_qb_txn_id || null,
-         item.source_batch||null, req.session.userId]
-      );
-      invoiceId = r.rows[0].id;
-      // Save invoice line items
-      // GL code is always derived from the selected budget task (phase_budget_line_id) when one is set —
-      // this ensures the two can never disagree regardless of what the form sent.
-      const invLines = Array.isArray(formData.line_items) ? formData.line_items : [];
-      for (let idx = 0; idx < invLines.length; idx++) {
-        const li = invLines[idx];
-        let lineGlId = li.qb_account_id ? Number(li.qb_account_id) : null;
-        if (li.phase_budget_line_id) {
-          const blRow = await client.query(
-            'SELECT qb_account_id FROM phase_budget_lines WHERE id=$1',
-            [Number(li.phase_budget_line_id)]
-          );
-          if (blRow.rows[0]?.qb_account_id) lineGlId = blRow.rows[0].qb_account_id;
+      const result = await createInvoice(client, {
+        project_id: projectId,
+        phase_id: item.phase_id,
+        phase_budget_line_id: formData.phase_budget_line_id || item.suggested_budget_line_id || null,
+        contract_id: formData.contract_id || null,
+        vendor_name: formData.vendor_name,
+        invoice_number: formData.invoice_number || '',
+        amount: Number(formData.amount) || 0,
+        invoice_date: formData.invoice_date || null,
+        description: formData.description || null,
+        file_reference: item.file_reference,
+        invoice_type: formData.invoice_type || 'fixed',
+        source_batch: item.source_batch || null,
+        qb_account_id: pmGlId,
+        pm_validated_gl_id: pmGlId,
+        qb_transaction_id: item.suggested_qb_txn_id || null,
+        line_items: formData.line_items || [],
+      }, req.session.userId);
+      invoiceId = result.invoiceId;
+
+      // Compute recon_status when a QB transaction is linked
+      if (item.suggested_qb_txn_id) {
+        const txn = (await client.query(
+          'SELECT amount, qb_gl_code FROM qb_transactions WHERE id=$1', [item.suggested_qb_txn_id]
+        )).rows[0];
+        if (txn) {
+          const pmGlAccount = pmGlId
+            ? (await client.query('SELECT account_number FROM qb_accounts WHERE id=$1', [pmGlId])).rows[0]?.account_number
+            : null;
+          let recon = 'matched';
+          if (Math.abs((Number(formData.amount) || 0) - Number(txn.amount)) >= 0.02) recon = 'amount_mismatch';
+          else if (pmGlAccount && txn.qb_gl_code && pmGlAccount !== txn.qb_gl_code) recon = 'gl_mismatch';
+          await client.query('UPDATE invoices SET recon_status=$1 WHERE id=$2', [recon, invoiceId]);
         }
-        if (!lineGlId) throw Object.assign(new Error(`GL code required on line ${idx + 1} — set a GL account before confirming`), { status: 400 });
-        const iliRes = await client.query(
-          `INSERT INTO invoice_line_items
-             (invoice_id, sort_order, billing_type, description, person, line_date, hours, rate, amount, qb_account_id, phase_budget_line_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-          [invoiceId, idx, li.billing_type||'fixed', li.description||'',
-           li.person||null, li.line_date||null,
-           li.hours != null ? Number(li.hours) : null,
-           li.rate != null ? Number(li.rate) : null,
-           Number(li.amount)||0,
-           lineGlId,
-           li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null]
-        );
-        const iliId = iliRes.rows[0].id;
-        const iliTaskId = li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null;
-        await client.query(
-          `INSERT INTO financial_allocations
-             (source_type, source_document_id, source_line_id, phase_id, qb_account_id, phase_budget_line_id,
-              billing_type, amount, allocation_status, allocation_source, created_by)
-           VALUES ('invoice_line',$1,$2,$3,$4,$5,$6,$7,$8,'explicit',$9)`,
-          [invoiceId, iliId, item.phase_id, lineGlId, iliTaskId,
-           li.billing_type||'fixed', Number(li.amount)||0,
-           iliTaskId ? 'confirmed' : 'needs_review', req.session.userId]
-        );
       }
     }
 
-    // Compute recon_status immediately if we have a linked QB transaction
-    if (invoiceId && item.suggested_qb_txn_id) {
-      const txnRes = await client.query(
-        'SELECT amount, qb_gl_code FROM qb_transactions WHERE id=$1', [item.suggested_qb_txn_id]
-      );
-      const txn = txnRes.rows[0];
-      if (txn) {
-        const invAmount = Number(formData.amount) || 0;
-        const pmGlAccount = pmGlId
-          ? (await client.query('SELECT account_number FROM qb_accounts WHERE id=$1', [pmGlId])).rows[0]?.account_number
-          : null;
-        let recon = 'matched';
-        if (Math.abs(invAmount - Number(txn.amount)) >= 0.02) recon = 'amount_mismatch';
-        else if (pmGlAccount && txn.qb_gl_code && pmGlAccount !== txn.qb_gl_code) recon = 'gl_mismatch';
-        await client.query('UPDATE invoices SET recon_status=$1 WHERE id=$2', [recon, invoiceId]);
-      }
-    }
-
-    // Learn vendor job number → project mapping from confirmed invoices
+    // Learn vendor → project mapping from confirmed items
     const ext = item.extracted_data || {};
     const vjn = String(ext.vendor_job_number || '').trim();
     const vname = String(formData.vendor_name || ext.vendor_name || '').trim();
-    if (vjn && vname && item.phase_id) {
-      const phaseProjectForMap = (await client.query('SELECT project_id FROM phases WHERE id=$1', [item.phase_id])).rows[0];
-      if (phaseProjectForMap) {
-        await client.query(`
-          INSERT INTO vendor_project_map (vendor_name, vendor_job_number, project_id, confirmed_count)
-          VALUES ($1, $2, $3, 1)
-          ON CONFLICT (vendor_name, vendor_job_number)
-          DO UPDATE SET confirmed_count = vendor_project_map.confirmed_count + 1, updated_at = NOW()
-        `, [vname, vjn, phaseProjectForMap.project_id]);
-      }
+    if (vjn && vname && projectId) {
+      await client.query(`
+        INSERT INTO vendor_project_map (vendor_name, vendor_job_number, project_id, confirmed_count)
+        VALUES ($1, $2, $3, 1)
+        ON CONFLICT (vendor_name, vendor_job_number)
+        DO UPDATE SET confirmed_count = vendor_project_map.confirmed_count + 1, updated_at = NOW()
+      `, [vname, vjn, projectId]);
     }
 
     await client.query(
@@ -990,44 +906,45 @@ router.post('/phases/:phaseId/import/confirm-batch-high', requireAuth, async (re
       const client = await pool.connect();
       try {
         const ext = item.extracted_data || {};
-        const lineId = item.suggested_budget_line_id || null;
-
         await client.query('BEGIN');
         let contractId = null, invoiceId = null;
 
         if (item.doc_type === 'contract') {
-          const r = await client.query(
-            `INSERT INTO contracts (project_id, phase_budget_line_id, vendor_name, description, total_value,
-               contract_date, reference_number, status, file_reference, source_batch, created_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-            [projectId, lineId, ext.vendor_name || 'Unknown', ext.description || ext.summary || null,
-             Number(ext.total_value) || 0, ext.contract_date || null, ext.reference_number || null,
-             'active', item.file_reference, item.source_batch || null, req.session.userId]
-          );
-          contractId = r.rows[0].id;
-          const lineItems = ext.line_items || [];
-          for (let idx = 0; idx < lineItems.length; idx++) {
-            const li = lineItems[idx];
-            await client.query(
-              `INSERT INTO contract_line_items
-                 (contract_id, sort_order, billing_type, description, budgeted_amount, phase_budget_line_id)
-               VALUES ($1,$2,$3,$4,$5,$6)`,
-              [contractId, idx, li.billing_type || 'fixed', li.description || '',
-               Number(li.budgeted_amount) || 0, li.suggested_budget_line_id || null]
-            );
-          }
+          const result = await createContract(client, {
+            project_id: projectId,
+            phase_id: item.phase_id,
+            vendor_name: ext.vendor_name || 'Unknown',
+            description: ext.description || ext.summary || null,
+            total_value: Number(ext.total_value) || 0,
+            contract_date: ext.contract_date || null,
+            reference_number: ext.reference_number || null,
+            file_reference: item.file_reference,
+            source_batch: item.source_batch || null,
+            qb_account_id: ext.qb_account_id || null,
+            line_items: (ext.line_items || []).map(li => ({
+              ...li,
+              phase_budget_line_id: li.suggested_budget_line_id || null,
+            })),
+          }, req.session.userId);
+          contractId = result.contractId;
         } else {
-          const r = await client.query(
-            `INSERT INTO invoices (project_id, phase_id, phase_budget_line_id, contract_id, vendor_name, invoice_number,
-               amount, invoice_date, description, status, file_reference, invoice_type, qb_transaction_id, source_batch, created_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
-            [projectId, item.phase_id, lineId, null, ext.vendor_name || 'Unknown', ext.invoice_number || '',
-             Number(ext.amount) || 0, ext.invoice_date || null, ext.description || null,
-             'approved', item.file_reference, ext.invoice_type || 'fixed',
-             item.suggested_qb_txn_id || null,
-             item.source_batch || null, req.session.userId]
-          );
-          invoiceId = r.rows[0].id;
+          const result = await createInvoice(client, {
+            project_id: projectId,
+            phase_id: item.phase_id,
+            phase_budget_line_id: item.suggested_budget_line_id || null,
+            vendor_name: ext.vendor_name || 'Unknown',
+            invoice_number: ext.invoice_number || '',
+            amount: Number(ext.amount) || 0,
+            invoice_date: ext.invoice_date || null,
+            description: ext.description || null,
+            file_reference: item.file_reference,
+            invoice_type: ext.invoice_type || 'fixed',
+            source_batch: item.source_batch || null,
+            qb_account_id: ext.qb_account_id || null,
+            qb_transaction_id: item.suggested_qb_txn_id || null,
+            line_items: ext.line_items || [],
+          }, req.session.userId);
+          invoiceId = result.invoiceId;
         }
 
         await client.query(

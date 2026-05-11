@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './InvoicesTab.module.css';
 import { ContractPanel } from './ContractPanel';
+import { InvoiceEditOverlay } from './ImportDrawer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1068,19 +1069,16 @@ export default function InvoicesTab() {
   const projectIdNum = Number(projectId);
   const qc = useQueryClient();
 
-  const [uploadOpen, setUploadOpen] = useState(false);
   const [editInvoiceId, setEditInvoiceId] = useState<number | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Open Edit modal when navigated here with ?edit=X (from drill panel etc.)
+  // Open Edit overlay when navigated here with ?edit=X (from drill panel etc.)
   useEffect(() => {
     const editParam = searchParams.get('edit');
     if (editParam) {
       const id = Number(editParam);
       if (Number.isInteger(id) && id > 0) {
         setEditInvoiceId(id);
-        setUploadOpen(true);
-        // Clear the param so it doesn't re-fire on tab re-mount
         const next = new URLSearchParams(searchParams);
         next.delete('edit');
         setSearchParams(next, { replace: true });
@@ -1114,41 +1112,34 @@ export default function InvoicesTab() {
   });
 
   function handleSaved() {
-    // Invalidate every cached query that could be affected by an invoice save —
-    // budget grid (all source variants), invoices list, drill panels, contract
-    // detail, and the audit/transaction-report views.
-    qc.invalidateQueries({ queryKey: ['invoices',          phaseIdNum] });
-    qc.invalidateQueries({ queryKey: ['budget',            phaseIdNum] });
-    qc.invalidateQueries({ queryKey: ['phaseContracts',    phaseIdNum] });
-    qc.invalidateQueries({ queryKey: ['drill',             phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['invoices',       phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['budget',         phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['phaseContracts', phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['drill',          phaseIdNum] });
     qc.invalidateQueries({ queryKey: ['contractDetail'] });
-    qc.invalidateQueries({ queryKey: ['audit',             phaseIdNum] });
-    qc.invalidateQueries({ queryKey: ['txnReport',         phaseIdNum] });
-    setUploadOpen(false);
+    qc.invalidateQueries({ queryKey: ['audit',          phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['txnReport',      phaseIdNum] });
     setEditInvoiceId(null);
   }
 
   function handleClose() {
-    setUploadOpen(false);
     setEditInvoiceId(null);
   }
 
   function handleEdit(id: number) {
     setEditInvoiceId(id);
-    setUploadOpen(true);
   }
 
   if (isLoading) return <div className={styles.splash}>Loading…</div>;
 
-  if (uploadOpen) {
+  if (editInvoiceId) {
     return (
-      <UploadPanel
+      <InvoiceEditOverlay
+        invoiceId={editInvoiceId}
+        phaseId={phaseIdNum}
         contracts={contracts}
         budgetLines={budgetLines}
         qbAccounts={qbAccounts}
-        projectId={projectIdNum}
-        phaseIdNum={phaseIdNum}
-        editId={editInvoiceId ?? undefined}
         onClose={handleClose}
         onSaved={handleSaved}
       />

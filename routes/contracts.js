@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const projects = require('./projects');
 const storage = require('../lib/storage');
 const { extractContract, suggestContractLines, suggestInvoiceLineCodes, suggestLineBudgets } = require('../lib/extract');
+const { createContract, syncContractFA, resolvePbl } = require('../lib/financials');
 
 const router = express.Router();
 
@@ -30,14 +31,6 @@ async function getVendorContext(vendorName, documentType, limit = 3) {
   return { examples: ex.rows, vendorNotes: prof.rows[0]?.notes || null };
 }
 
-// Save a confirmed extraction as a future few-shot example.
-async function saveExtractionExample(client, vendorName, documentType, fields, userId) {
-  await client.query(
-    `INSERT INTO extraction_examples (vendor_name, document_type, fields_json, confirmed_by)
-     VALUES ($1, $2, $3, $4)`,
-    [vendorName, documentType, JSON.stringify(fields), userId]
-  );
-}
 
 // POST /api/contracts/extract — upload contract PDF → store + Claude extraction
 router.post('/contracts/extract', requireAuth, pdfUpload.single('file'), async (req, res, next) => {
@@ -128,112 +121,27 @@ router.post('/contracts/extract', requireAuth, pdfUpload.single('file'), async (
   } catch (err) { next(err); }
 });
 
-// Resolve phase_budget_line_id from qb_account_id + phase_id.
-// Falls back gracefully if no match (budget template may not have that GL code yet).
-async function resolvePbl(client, phaseId, qbAccountId) {
-  if (!phaseId || !qbAccountId) return null;
-  const r = await client.query(
-    `SELECT id FROM phase_budget_lines WHERE phase_id = $1 AND qb_account_id = $2 LIMIT 1`,
-    [phaseId, qbAccountId]
-  );
-  return r.rows[0]?.id ?? null;
-}
 
-// POST /api/contracts — create a contract (COA-driven flow)
+
+// POST /api/contracts — create a contract
 router.post('/contracts', requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const {
-      project_id, phase_id,
-      vendor_name, description, total_value, contract_date,
-      reference_number, status, file_reference,
-      contract_line_items: lineItems,
-    } = req.body || {};
-    if (!vendor_name) return res.status(400).json({ error: 'vendor_name required' });
-    if (!project_id)  return res.status(400).json({ error: 'project_id required' });
+    const { project_id } = req.body || {};
     if (!(await projects.userCanAccess(req.session.userId, Number(project_id))))
       return res.status(403).json({ error: 'Forbidden' });
-
-    const total = Number(total_value) || 0;
-    const phaseIdNum = phase_id ? Number(phase_id) : null;
-
     await client.query('BEGIN');
-    const result = await client.query(
-      `INSERT INTO contracts
-         (project_id, phase_id, vendor_name, description, total_value,
-          contract_date, reference_number, status, file_reference, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8,$9) RETURNING *`,
-      [Number(project_id), phaseIdNum,
-       vendor_name, description || null, total,
-       contract_date || null, reference_number || null,
-       file_reference || null, req.session.userId]
-    );
-    const contractId = result.rows[0].id;
-
-    if (Array.isArray(lineItems) && lineItems.length > 0) {
-      for (let i = 0; i < lineItems.length; i++) {
-        const li = lineItems[i];
-        const qbAccountId = li.qb_account_id ? Number(li.qb_account_id) : null;
-        if (!qbAccountId) throw Object.assign(new Error(`GL code required on line ${i + 1}`), { status: 400 });
-        const explicitPbl = li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null;
-        const pblId = explicitPbl ?? await resolvePbl(client, phaseIdNum, qbAccountId);
-        const cliRes = await client.query(
-          `INSERT INTO contract_line_items
-             (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id, qb_account_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-          [contractId,
-           ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed',
-           li.description || null,
-           Number(li.budgeted_amount) || 0,
-           i, pblId, qbAccountId]
-        );
-        // Allocation Layer — write FA row for every contract line
-        await client.query(
-          `INSERT INTO financial_allocations
-             (source_type, source_document_id, source_line_id, phase_id, qb_account_id,
-              phase_budget_line_id, billing_type, amount, allocation_status, allocation_source, created_by)
-           VALUES ('contract_line',$1,$2,$3,$4,$5,$6,$7,$8,'explicit',$9)`,
-          [contractId, cliRes.rows[0].id, phaseIdNum, qbAccountId, pblId,
-           ['fixed','tm','expense'].includes(li.billing_type) ? li.billing_type : 'fixed',
-           Number(li.budgeted_amount) || 0,
-           pblId ? 'confirmed' : 'needs_review',
-           req.session.userId]
-        );
-      }
-    } else if (total > 0 && phaseIdNum) {
-      // No line items — write a single FA row for the contract header total
-      // using the contract's own qb_account_id if present
-      const headerGl = req.body.qb_account_id ? Number(req.body.qb_account_id) : null;
-      if (headerGl) {
-        const pblId = await resolvePbl(client, phaseIdNum, headerGl);
-        await client.query(
-          `INSERT INTO financial_allocations
-             (source_type, source_document_id, source_line_id, phase_id, qb_account_id,
-              phase_budget_line_id, billing_type, amount, allocation_status, allocation_source, created_by)
-           VALUES ('contract_line',$1,NULL,$2,$3,$4,'fixed',$5,$6,'explicit',$7)`,
-          [contractId, phaseIdNum, headerGl, pblId, total,
-           pblId ? 'confirmed' : 'needs_review', req.session.userId]
-        );
-      }
-    }
-
-    await client.query(
-      `INSERT INTO contract_logs (contract_id, action, detail, changed_by)
-       VALUES ($1,'created',$2,$3)`,
-      [contractId, `Created: ${vendor_name} for $${total}`, req.session.userId]
-    );
+    const { contract } = await createContract(client, {
+      ...req.body,
+      line_items: req.body.contract_line_items,
+    }, req.session.userId);
     await client.query('COMMIT');
-
-    if (file_reference && vendor_name) {
-      saveExtractionExample(client, vendor_name, 'contract', {
-        vendor_name, total_value: total, contract_date: contract_date || null,
-        reference_number: reference_number || null, description: description || null,
-      }, req.session.userId).catch(() => {});
-    }
-
-    res.status(201).json(result.rows[0]);
-  } catch (err) { await client.query('ROLLBACK'); next(err); }
-  finally { client.release(); }
+    res.status(201).json(contract);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  } finally { client.release(); }
 });
 
 async function userCanAccessContract(userId, contractId) {
@@ -299,77 +207,6 @@ router.get('/projects/:id/contracts', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// Create contract with allocation lines.
-router.post('/projects/:id/contracts', requireAuth, async (req, res, next) => {
-  const client = await pool.connect();
-  try {
-    const projectId = Number(req.params.id);
-    if (!(await projects.userCanAccess(req.session.userId, projectId))) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    const {
-      vendor_name, description, total_value, earmarked_amount, contract_date,
-      reference_number, status, file_reference, lines,
-    } = req.body || {};
-    if (!vendor_name || total_value == null) {
-      return res.status(400).json({ error: 'vendor_name and total_value required' });
-    }
-    const total = Number(total_value);
-    if (!Number.isFinite(total) || total < 0) {
-      return res.status(400).json({ error: 'total_value must be >= 0' });
-    }
-    const earmarked = earmarked_amount != null ? Number(earmarked_amount) : null;
-    const allocs = Array.isArray(lines) ? lines : [];
-    if (allocs.length === 0) return res.status(400).json({ error: 'At least one line required' });
-    const sum = allocs.reduce((s, l) => s + Number(l.amount || 0), 0);
-    if (Math.abs(sum - total) > APPROX) {
-      return res.status(400).json({
-        error: `Contract lines must sum to total_value (${total}). Got ${sum}.`,
-      });
-    }
-
-    await client.query('BEGIN');
-    const contract = await client.query(
-      `INSERT INTO contracts
-         (project_id, vendor_name, description, total_value, earmarked_amount, contract_date,
-          reference_number, status, file_reference, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'draft'),$9,$10)
-       RETURNING *`,
-      [projectId, vendor_name, description || null, total, earmarked,
-       contract_date || null, reference_number || null,
-       status || null, file_reference || null, req.session.userId]
-    );
-    const contractId = contract.rows[0].id;
-    for (const l of allocs) {
-      await client.query(
-        `INSERT INTO contract_lines (contract_id, qb_code_id, amount)
-         VALUES ($1, $2, $3)`,
-        [contractId, Number(l.qb_code_id), Number(l.amount)]
-      );
-    }
-    await client.query('COMMIT');
-
-    // Save extraction example if a PDF was attached (PM confirmed AI-filled fields)
-    if (file_reference && vendor_name) {
-      saveExtractionExample(pool, vendor_name, 'contract', {
-        vendor_name, total_value: total, contract_date: contract_date || null,
-        reference_number: reference_number || null, description: description || null,
-      }, req.session.userId).catch(e => console.warn('Failed to save extraction example:', e.message));
-    }
-
-    // Log creation (outside transaction is fine — contract is committed).
-    await pool.query(
-      `INSERT INTO contract_logs (contract_id, action, detail, changed_by)
-       VALUES ($1,'created',$2,$3)`,
-      [contractId, `Created: ${vendor_name} for $${total}`, req.session.userId]);
-    res.status(201).json(contract.rows[0]);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    next(err);
-  } finally {
-    client.release();
-  }
-});
 
 // Get contract with lines and invoices.
 router.get('/contracts/:id', requireAuth, async (req, res, next) => {
@@ -475,28 +312,26 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
        status ?? null,
        file_reference ?? null]);
 
-    // Replace line items when provided (full replace).
-    // Honour explicit phase_budget_line_id from the client; fall back to GL-code lookup only when absent.
+    // Replace line items when provided (full replace) then sync FA rows.
     if (Array.isArray(lineItems)) {
       await client.query('DELETE FROM contract_line_items WHERE contract_id = $1', [contractId]);
+      const phaseIdForPbl = phase_id ? Number(phase_id) : (old.phase_id || null);
       for (let i = 0; i < lineItems.length; i++) {
         const li = lineItems[i];
         const qbAccountId = li.qb_account_id ? Number(li.qb_account_id) : null;
         const explicitPbl = li.phase_budget_line_id ? Number(li.phase_budget_line_id) : null;
-        const pblId = explicitPbl ?? await resolvePbl(client, phase_id ? Number(phase_id) : null, qbAccountId);
+        const pblId = explicitPbl ?? await resolvePbl(client, phaseIdForPbl, qbAccountId);
         await client.query(
           `INSERT INTO contract_line_items
              (contract_id, billing_type, description, budgeted_amount, sort_order, phase_budget_line_id, qb_account_id)
            VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [contractId,
            ['fixed', 'tm', 'expense'].includes(li.billing_type) ? li.billing_type : 'fixed',
-           li.description || null,
-           Number(li.budgeted_amount) || 0,
-           i,
-           pblId,
-           qbAccountId]
+           li.description || null, Number(li.budgeted_amount) || 0,
+           i, pblId, qbAccountId]
         );
       }
+      await syncContractFA(client, contractId, phaseIdForPbl, req.session.userId);
     }
 
     const changes = [];

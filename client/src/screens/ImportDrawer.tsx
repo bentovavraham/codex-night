@@ -399,7 +399,7 @@ interface InvLineItem {
   suggestion_reason: string | null;
 }
 
-function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, onBack, saving }: {
+function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, onBack, saving, contracts, editMode }: {
   item: ImportItem;
   budgetLines: any[];
   qbAccounts: QbAccount[];
@@ -407,9 +407,14 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   onDiscard: () => Promise<void>;
   onBack: () => void;
   saving: boolean;
+  contracts?: any[];
+  editMode?: { invoiceId: number; contractId: number | null; status: string };
 }) {
   const ext = item.extracted_data || {};
   const isContract = item.doc_type === 'contract';
+  const isEditMode = !!editMode;
+  const [contractId, setContractId] = useState<number | null>(editMode?.contractId ?? null);
+  const [editStatus, setEditStatus] = useState(editMode?.status ?? 'pending');
 
   // Common fields
   const [vendor, setVendor] = useState(ext.vendor_name || '');
@@ -503,12 +508,13 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   const [dupLoading, setDupLoading] = useState(true);
 
   useEffect(() => {
+    if (isEditMode) { setDupLoading(false); return; }
     setDupLoading(true);
     api.checkImportDuplicates(item.id)
       .then(r => { setDupMatches(r.matches); })
       .catch(() => { setDupMatches([]); })
       .finally(() => setDupLoading(false));
-  }, [item.id]);
+  }, [item.id, isEditMode]);
 
   const pdfSrc = item.file_reference
     ? `/api/files/${encodeURIComponent(item.file_reference)}`
@@ -525,9 +531,10 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   const [wrongProjectAcked, setWrongProjectAcked] = useState(false);
 
   const dupBlocked = dupMatches.length > 0 && !dupAcked;
-  const canConfirm = reviewed && !!vendor.trim() && !dupBlocked && !saving
-    && (!isWrongProject || wrongProjectAcked)
-    && (!weakQbMatch || qbOverrideAcked);
+  const canConfirm = reviewed && !!vendor.trim() && !saving
+    && (isEditMode || !dupBlocked)
+    && (isEditMode || !isWrongProject || wrongProjectAcked)
+    && (isEditMode || !weakQbMatch || qbOverrideAcked);
 
   function addLine() {
     setLineItems(li => [...li, { billing_type: 'fixed', description: '', budgeted_amount: '', phase_budget_line_id: null }]);
@@ -571,7 +578,8 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
           amount: Number(amount) || 0,
           invoice_date: invoiceDate || null,
           invoice_type: invoiceType,
-          status: invoiceStatus,
+          status: isEditMode ? editStatus : invoiceStatus,
+          ...(isEditMode ? { contract_id: contractId } : {}),
           line_items: invoiceLines.map(li => ({
             billing_type: li.billing_type,
             description: li.description,
@@ -609,9 +617,9 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
       <div className={styles.reviewFormPane} style={{ width: formWidth }}>
         {/* Bar */}
         <div className={styles.reviewBar}>
-          <button className={styles.reviewBackBtn} onClick={onBack}>← Queue</button>
+          <button className={styles.reviewBackBtn} onClick={onBack}>{isEditMode ? '← Cancel' : '← Queue'}</button>
           <div className={styles.reviewBarTitle}>
-            <TypeChip type={item.doc_type} />
+            {!isEditMode && <TypeChip type={item.doc_type} />}
             <span className={styles.reviewBarFile} title={item.original_filename}>{item.original_filename}</span>
           </div>
           <div className={styles.reviewSnapBtns}>
@@ -626,11 +634,11 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
           <button className={styles.reviewCloseBtn} onClick={onBack}>✕</button>
         </div>
 
-        {/* Duplicate warning */}
-        {!dupLoading && (
+        {/* Duplicate warning — import mode only */}
+        {!isEditMode && !dupLoading && (
           <DupBanner matches={dupMatches} acknowledged={dupAcked} onAck={() => setDupAcked(true)} />
         )}
-        {dupLoading && <div className={styles.dupChecking}>Checking for duplicates…</div>}
+        {!isEditMode && dupLoading && <div className={styles.dupChecking}>Checking for duplicates…</div>}
 
         {/* Scrollable form body */}
         <div className={styles.reviewFormScroll}>
@@ -825,6 +833,39 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                 </div>
               </div>
 
+              {/* Contract picker */}
+              {contracts && (
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>Contract <span className={styles.rFallbackHint}>(optional)</span></label>
+                  <select className={styles.rInput} value={contractId ?? ''}
+                    onChange={e => setContractId(e.target.value ? Number(e.target.value) : null)}>
+                    <option value="">— No contract —</option>
+                    {contracts.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.vendor_name}{c.reference_number ? ` · ${c.reference_number}` : ''} (${Number(c.total_value).toLocaleString()})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Status picker — edit mode only */}
+              {isEditMode && (
+                <div className={styles.rGroup}>
+                  <label className={styles.rLabel}>Status</label>
+                  <select className={styles.rInput} value={editStatus} onChange={e => setEditStatus(e.target.value)}>
+                    <option value="pending">Pending</option>
+                    <option value="pm_approved">PM Approved</option>
+                    <option value="partner_approved">Partner Approved</option>
+                    <option value="approved">Approved</option>
+                    <option value="pushed">Pushed</option>
+                    <option value="paid">Paid</option>
+                    <option value="on_hold">On Hold</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </div>
+              )}
+
               <div className={styles.rGroup}>
                 <label className={styles.rLabel}>Description</label>
                 <textarea className={styles.rTextarea} value={description}
@@ -940,7 +981,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
 
         {/* Sticky footer */}
         <div className={styles.reviewFormFooter}>
-          {isWrongProject && (
+          {!isEditMode && isWrongProject && (
             <div className={styles.overrideWarn}>
               <strong>⚠ Possible Wrong Project</strong>
               <span>This invoice's filename and/or content suggests it may belong to a different project.</span>
@@ -950,7 +991,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
               </label>
             </div>
           )}
-          {weakQbMatch && (
+          {!isEditMode && weakQbMatch && (
             <div className={styles.overrideWarn}>
               <strong>⚠ No verified QB match</strong>
               <span>This invoice has no high-confidence QB transaction link. Confirming without one means the Audit table will show it as unmatched.</span>
@@ -966,9 +1007,9 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
           </label>
           {saveError && <div className={styles.reviewSaveError}>{saveError}</div>}
           <div className={styles.reviewActions}>
-            <button className={styles.discardBtn} onClick={onDiscard} disabled={saving}>Discard</button>
+            {!isEditMode && <button className={styles.discardBtn} onClick={onDiscard} disabled={saving}>Discard</button>}
             <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!canConfirm}>
-              {saving ? 'Saving…' : 'Confirm & Save'}
+              {saving ? 'Saving…' : isEditMode ? 'Save Changes' : 'Confirm & Save'}
             </button>
           </div>
         </div>
@@ -1516,5 +1557,141 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
         </div>{/* end queueView */}
       </div>
     </>
+  );
+}
+
+// ── Invoice Edit Overlay ──────────────────────────────────────────────────────
+// Loads an existing invoice and renders the same ReviewOverlay used for import,
+// pre-populated from saved data. One component for both import review and editing.
+
+export function InvoiceEditOverlay({
+  invoiceId, phaseId, budgetLines, qbAccounts, contracts, onClose, onSaved,
+}: {
+  invoiceId: number;
+  phaseId: number;
+  budgetLines: any[];
+  qbAccounts: QbAccount[];
+  contracts: any[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [saving, setSaving] = useState(false);
+
+  const { data: invoice, isLoading, error } = useQuery<any>({
+    queryKey: ['invoice', invoiceId],
+    queryFn: () => api.getInvoice(invoiceId),
+  });
+
+  if (isLoading) {
+    return (
+      <div className={styles.reviewOverlay} style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ color: '#888', fontSize: 14 }}>Loading invoice…</div>
+      </div>
+    );
+  }
+
+  if (error || !invoice) {
+    return (
+      <div className={styles.reviewOverlay} style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ color: '#dc2626', fontSize: 14 }}>Failed to load invoice</div>
+      </div>
+    );
+  }
+
+  // Adapt the saved invoice into the ImportItem shape ReviewOverlay expects
+  const syntheticItem: ImportItem = {
+    id: invoice.id,
+    phase_id: invoice.phase_id ?? phaseId,
+    original_filename: `Invoice #${invoice.invoice_number || invoice.id}`,
+    file_reference: invoice.file_reference ?? null,
+    doc_type: 'invoice',
+    doc_type_confidence: null,
+    extracted_data: {
+      vendor_name:    invoice.vendor_name,
+      invoice_number: invoice.invoice_number,
+      amount:         invoice.amount,
+      invoice_date:   invoice.invoice_date ? String(invoice.invoice_date).slice(0, 10) : '',
+      description:    invoice.description,
+      line_items: (invoice.invoice_line_items ?? []).map((li: any) => ({
+        billing_type:             li.billing_type ?? 'fixed',
+        description:              li.description ?? '',
+        amount:                   li.amount,
+        person:                   li.person ?? null,
+        hours:                    li.hours ?? null,
+        rate:                     li.rate ?? null,
+        qb_account_id:            li.qb_account_id ?? null,
+        suggested_budget_line_id: li.phase_budget_line_id ?? null,
+      })),
+    },
+    suggested_budget_line_id: invoice.phase_budget_line_id ?? null,
+    suggested_line_name: null,
+    match_confidence: null,
+    status: 'confirmed',
+    error_message: null,
+    suggested_qb_txn_id: null,
+    qb_match_confidence: null,
+    qb_match_reason: null,
+    identified_project: null,
+    project_match: null,
+    qb_vendor: null,
+    qb_ref_number: null,
+    qb_amount: null,
+    qb_txn_date: null,
+    qb_gl_code: null,
+    qb_gl_name: null,
+    qb_is_paid: null,
+    qb_open_balance: null,
+  };
+
+  async function handleSave(formData: any) {
+    setSaving(true);
+    try {
+      const types = new Set((formData.line_items ?? []).map((li: any) => li.billing_type));
+      const invoiceType = types.has('tm') ? 'tm' : types.has('expense') ? 'expense' : (formData.invoice_type || 'fixed');
+
+      await api.updateInvoice(invoiceId, {
+        vendor_name:    formData.vendor_name,
+        invoice_number: formData.invoice_number,
+        amount:         Number(formData.amount) || 0,
+        invoice_date:   formData.invoice_date ?? null,
+        description:    formData.description ?? null,
+        invoice_type:   invoiceType,
+        contract_id:    formData.contract_id ?? null,
+        status:         formData.status,
+        invoice_line_items: (formData.line_items ?? []).map((li: any, i: number) => ({
+          billing_type:         li.billing_type ?? 'fixed',
+          description:          li.description ?? null,
+          person:               li.person ?? null,
+          hours:                li.hours  != null ? Number(li.hours)  : null,
+          rate:                 li.rate   != null ? Number(li.rate)   : null,
+          amount:               Number(li.amount) || 0,
+          qb_account_id:        li.qb_account_id ?? null,
+          phase_budget_line_id: li.phase_budget_line_id ?? null,
+          sort_order:           i,
+        })),
+      });
+      queryClient.invalidateQueries({ queryKey: ['invoices',       phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['budget',         phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['phaseContracts', phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['invoice',        invoiceId] });
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ReviewOverlay
+      item={syntheticItem}
+      budgetLines={budgetLines}
+      qbAccounts={qbAccounts}
+      contracts={contracts}
+      onConfirm={handleSave}
+      onDiscard={onClose}
+      onBack={onClose}
+      saving={saving}
+      editMode={{ invoiceId, contractId: invoice.contract_id ?? null, status: invoice.status ?? 'pending' }}
+    />
   );
 }

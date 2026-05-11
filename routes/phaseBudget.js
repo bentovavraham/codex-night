@@ -1319,19 +1319,20 @@ router.get('/phases/:phaseId/budget/cross-check', requireAuth, async (req, res, 
       SELECT
 
         -- CONTRACTED: sum of contract line items (or total_value when no line items)
-        -- for all non-voided contracts belonging to this phase.
+        -- for all live contracts (active/pending/completed) belonging to this phase.
+        -- Draft and voided contracts are excluded — drafts have no FA rows.
         COALESCE((
           SELECT SUM(contribution) FROM (
             SELECT cli.budgeted_amount AS contribution
             FROM contracts c
             JOIN contract_line_items cli ON cli.contract_id = c.id
             WHERE c.phase_id = $1
-              AND c.status NOT IN ('voided')
+              AND c.status NOT IN ('voided', 'draft')
             UNION ALL
             SELECT c.total_value AS contribution
             FROM contracts c
             WHERE c.phase_id = $1
-              AND c.status NOT IN ('voided')
+              AND c.status NOT IN ('voided', 'draft')
               AND NOT EXISTS (SELECT 1 FROM contract_line_items x WHERE x.contract_id = c.id)
           ) sub
         ), 0)::float AS raw_contracted,

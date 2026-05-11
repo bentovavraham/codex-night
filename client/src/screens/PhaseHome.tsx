@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './PhaseHome.module.css';
 import { UploadPanel as ContractUploadPanel } from './ContractsTab';
-import { UploadPanel as InvoiceUploadPanel } from './InvoicesTab';
+import { ImportDrawer } from './ImportDrawer';
 
 const TABS = [
   { to: 'budget',      label: 'Budget' },
@@ -40,20 +40,6 @@ export default function PhaseHome() {
     queryKey: ['qbAccounts'],
     queryFn: () => api.listQbAccounts(),
     staleTime: 300_000,
-  });
-
-  const { data: phaseContracts = [] } = useQuery({
-    queryKey: ['phaseContracts', pid],
-    queryFn: () => api.listContracts(pid),
-    enabled: !!pid,
-    staleTime: 30_000,
-  });
-
-  const { data: budgetLines = [] } = useQuery({
-    queryKey: ['budgetLines', pid],
-    queryFn: () => api.listBudgetLines(pid),
-    enabled: !!pid,
-    staleTime: 60_000,
   });
 
   const phase = (phases as any[]).find((p: any) => p.id === pid);
@@ -125,19 +111,13 @@ export default function PhaseHome() {
         </div>
       )}
 
-      {/* Global invoice upload panel */}
+      {/* Global invoice import drawer */}
       {showInvoiceUpload && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'var(--bg)' }}>
-          <InvoiceUploadPanel
-            contracts={phaseContracts as any[]}
-            budgetLines={budgetLines as any[]}
-            qbAccounts={qbAccounts as any[]}
-            projectId={proj}
-            phaseIdNum={pid}
-            onClose={() => setShowInvoiceUpload(false)}
-            onSaved={() => { setShowInvoiceUpload(false); invalidateAfterUpload(); }}
-          />
-        </div>
+        <ImportDrawer
+          phaseId={pid}
+          onClose={() => setShowInvoiceUpload(false)}
+          onConfirmed={() => { setShowInvoiceUpload(false); invalidateAfterUpload(); }}
+        />
       )}
     </div>
   );
