@@ -425,7 +425,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   );
   // Invoice GL code (top-level, used when no line items)
   const [glAccountId, setGlAccountId] = useState<number | null>(null);
-  const [reviewed, setReviewed] = useState(false);
+  const [reviewed, setReviewed] = useState(() => !!editMode);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Resizable form pane — default 65%, min 600px, max 92%
@@ -1001,10 +1001,12 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
               </label>
             </div>
           )}
-          <label className={styles.reviewCheck}>
-            <input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
-            <span>I have reviewed this document and confirm all details are correct</span>
-          </label>
+          {!isEditMode && (
+            <label className={styles.reviewCheck}>
+              <input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
+              <span>I have reviewed this document and confirm all details are correct</span>
+            </label>
+          )}
           {saveError && <div className={styles.reviewSaveError}>{saveError}</div>}
           <div className={styles.reviewActions}>
             {!isEditMode && <button className={styles.discardBtn} onClick={onDiscard} disabled={saving}>Discard</button>}
