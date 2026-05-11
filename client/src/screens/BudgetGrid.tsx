@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import styles from './BudgetGrid.module.css';
 import { LineItemPanel } from './LineItemPanel';
-import { UploadPanel as InvoicePanel } from './InvoicesTab';
+import { InvoiceEditOverlay } from './ImportDrawer';
 import { UploadPanel as ContractPanel } from './ContractsTab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -985,13 +985,9 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
 
       {/* Full invoice / contract editors opened from unassigned tray */}
       {editInvoiceId !== null && (
-        <InvoicePanel
-          contracts={contracts}
-          budgetLines={rows}
-          qbAccounts={qbAccounts}
-          projectId={Number(projectId)}
-          phaseIdNum={phaseIdNum}
-          editId={editInvoiceId}
+        <InvoiceEditOverlay
+          invoiceId={editInvoiceId}
+          phaseId={phaseIdNum}
           onClose={() => setEditInvoiceId(null)}
           onSaved={handleUnassignedSaved}
         />

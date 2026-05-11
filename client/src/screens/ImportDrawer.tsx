@@ -1565,13 +1565,10 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
 // pre-populated from saved data. One component for both import review and editing.
 
 export function InvoiceEditOverlay({
-  invoiceId, phaseId, budgetLines, qbAccounts, contracts, onClose, onSaved,
+  invoiceId, phaseId, onClose, onSaved,
 }: {
   invoiceId: number;
   phaseId: number;
-  budgetLines: any[];
-  qbAccounts: QbAccount[];
-  contracts: any[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -1581,6 +1578,21 @@ export function InvoiceEditOverlay({
   const { data: invoice, isLoading, error } = useQuery<any>({
     queryKey: ['invoice', invoiceId],
     queryFn: () => api.getInvoice(invoiceId),
+  });
+
+  const { data: budgetLines = [] } = useQuery<any[]>({
+    queryKey: ['budgetLines', phaseId],
+    queryFn: () => api.listBudgetLines(phaseId),
+  });
+
+  const { data: qbAccounts = [] } = useQuery<QbAccount[]>({
+    queryKey: ['qb-accounts'],
+    queryFn: () => api.listQbAccounts(),
+  });
+
+  const { data: contracts = [] } = useQuery<any[]>({
+    queryKey: ['phaseContracts', phaseId],
+    queryFn: () => api.listContracts(phaseId),
   });
 
   if (isLoading) {
