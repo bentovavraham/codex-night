@@ -480,7 +480,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   const [invoiceNumber, setInvoiceNumber] = useState(ext.invoice_number || '');
   const [amount, setAmount] = useState(ext.amount ? String(ext.amount) : '');
   const [invoiceDate, setInvoiceDate] = useState(ext.invoice_date || '');
-  const [invoiceType, setInvoiceType] = useState('fixed');
+  const [invoiceType, setInvoiceType] = useState(ext.invoice_type || 'fixed');
   const invoiceStatus = 'pending';
   const [invoiceLines, setInvoiceLines] = useState<InvLineItem[]>(() =>
     (ext.line_items || []).map((li: any) => {
@@ -1624,6 +1624,7 @@ export function InvoiceEditOverlay({
     extracted_data: {
       vendor_name:    invoice.vendor_name,
       invoice_number: invoice.invoice_number,
+      invoice_type:   invoice.invoice_type ?? 'fixed',
       amount:         invoice.amount,
       invoice_date:   invoice.invoice_date ? String(invoice.invoice_date).slice(0, 10) : '',
       description:    invoice.description,
