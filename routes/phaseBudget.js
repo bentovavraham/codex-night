@@ -2184,4 +2184,25 @@ router.patch('/phases/:phaseId/snapshots/:snapshotId', requireAuth, async (req, 
   } catch (err) { next(err); }
 });
 
+// POST /api/phases/:phaseId/budget/repair-fa
+// Voids orphaned FA rows whose source_line_id no longer exists in invoice_line_items.
+// Safe to run at any time — only touches rows that are already data-integrity failures.
+router.post('/phases/:phaseId/budget/repair-fa', requireAuth, async (req, res, next) => {
+  try {
+    const phaseId = Number(req.params.phaseId);
+    const { rowCount } = await pool.query(`
+      UPDATE financial_allocations fa
+      SET allocation_status = 'voided', updated_at = NOW()
+      WHERE fa.source_type = 'invoice_line'
+        AND fa.source_line_id IS NOT NULL
+        AND fa.allocation_status IN ('confirmed','approved')
+        AND NOT EXISTS (SELECT 1 FROM invoice_line_items ili WHERE ili.id = fa.source_line_id)
+        AND EXISTS (
+          SELECT 1 FROM invoices i WHERE i.id = fa.source_document_id AND i.phase_id = $1
+        )
+    `, [phaseId]);
+    res.json({ ok: true, voided: rowCount });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

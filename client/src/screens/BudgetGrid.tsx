@@ -1313,7 +1313,21 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
             <CcCell label="Amt Paid"         gridFmt={usd.format(grand.paid)}       rawFmt={usd.format(rawPaid)}        mismatch={ccPaid} />
             <span className={styles.reconDivider} />
             {anyMismatch
-              ? <span className={styles.reconWarnNote}>Grid totals do not match raw DB — aggregation bug detected</span>
+              ? <>
+                  <span className={styles.reconWarnNote}>Grid totals do not match raw DB — aggregation bug detected</span>
+                  <button
+                    className={styles.reconRepairBtn}
+                    onClick={async () => {
+                      const res = await api.repairFa(phaseIdNum);
+                      if (res.voided > 0) {
+                        qc.invalidateQueries({ queryKey: ['budget', phaseIdNum] });
+                        qc.invalidateQueries({ queryKey: ['budget-crosscheck', phaseIdNum] });
+                      }
+                      alert(res.voided > 0 ? `Repaired: ${res.voided} orphaned FA row${res.voided > 1 ? 's' : ''} voided.` : 'No orphaned FA rows found.');
+                    }}>
+                    Repair FA
+                  </button>
+                </>
               : allocOk
                 ? <span className={styles.reconOkNote}>All columns match DB</span>
                 : <span className={styles.reconWarnNote}>

@@ -49,6 +49,7 @@ export const api = {
     raw_fixed: number; raw_tm: number; raw_expense: number;
     raw_budgeted: number;
   }>('GET', `/api/phases/${phaseId}/budget/cross-check`),
+  repairFa: (phaseId: number) => request<{ ok: boolean; voided: number }>('POST', `/api/phases/${phaseId}/budget/repair-fa`),
   downloadBudgetExcel: (phaseId: number) => {
     window.location.href = `/api/phases/${phaseId}/budget/export-excel`;
   },
