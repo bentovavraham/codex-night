@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { requireAuth, hasMinRole } = require('../middleware/auth');
 const projects = require('./projects');
+const { syncChangeOrderFA } = require('../lib/financials');
 
 const router = express.Router();
 
@@ -97,6 +98,7 @@ router.post('/contracts/:id/change-orders', requireAuth, async (req, res, next) 
            i]);
       }
     }
+    await syncChangeOrderFA(client, co.id, req.session.userId);
     await logCO(client, co.id, 'created',
       `Created CO${co_number ? ' ' + co_number : ''}: ${description} for $${amt.toFixed(2)} (${lines.length} line items)`,
       req.session.userId);
@@ -181,6 +183,7 @@ router.put('/change-orders/:id', requireAuth, async (req, res, next) => {
            i]);
       }
     }
+    await syncChangeOrderFA(client, coId, req.session.userId);
     await logCO(client, coId, 'edited',
       lines ? `Updated CO + ${lines.length} line items` : 'Updated change order',
       req.session.userId);

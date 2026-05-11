@@ -834,15 +834,26 @@ router.get('/contracts/:id/g703', requireAuth, async (req, res, next) => {
 
 // DELETE /api/invoices/:id — permanently remove an invoice and its line items.
 router.delete('/invoices/:id', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const invId = Number(req.params.id);
     const inv = await getInvoiceWithProject(invId);
     if (!inv) return res.status(404).json({ error: 'Not found' });
     if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
-    await pool.query('DELETE FROM invoices WHERE id = $1', [invId]);
+    await client.query('BEGIN');
+    await client.query(`UPDATE invoices SET status = 'voided', updated_at = NOW() WHERE id = $1`, [invId]);
+    await client.query(
+      `UPDATE financial_allocations SET allocation_status = 'voided', updated_at = NOW()
+       WHERE source_type = 'invoice_line' AND source_document_id = $1
+         AND allocation_status != 'voided'`,
+      [invId]
+    );
+    await logInvoice(client, invId, 'voided', 'Invoice voided', req.session.userId);
+    await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (err) { next(err); }
+  } catch (err) { await client.query('ROLLBACK'); next(err); }
+  finally { client.release(); }
 });
 
 module.exports = router;
