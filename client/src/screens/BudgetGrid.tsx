@@ -396,6 +396,21 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
                             </button>
                           </td>
                         </tr>
+                        {(inv.fa_lines ?? []).map((fl: any) => (
+                          <tr key={fl.fa_id} className={styles.drillLineRow}>
+                            <td />
+                            <td colSpan={4} className={styles.drillLineDesc}>
+                              {fl.line_description
+                                ? <span>{fl.line_description}</span>
+                                : <span className={styles.drillLineFallback}>invoice-level allocation</span>}
+                            </td>
+                            <td>
+                              <span className={styles.drillLineBadge}>{fl.fa_billing_type}</span>
+                            </td>
+                            <td className={`${styles.drillAmt} ${styles.drillLineAmt}`}>{usd.format(fl.fa_amount)}</td>
+                            <td colSpan={2} />
+                          </tr>
+                        ))}
                         {hOpen && (
                           <tr key={`${hKey}-history`} className={styles.drillHistoryRow}>
                             <td colSpan={9}><InlineHistory source="invoice" id={inv.id} /></td>

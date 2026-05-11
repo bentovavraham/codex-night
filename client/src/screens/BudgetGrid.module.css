@@ -934,6 +934,34 @@
   padding: 0 !important;
 }
 
+/* ── Trace: FA line item sub-rows ─────────────────────────────────────────── */
+.drillLineRow { background: #f8f9fa; border-bottom: 1px solid #f1f3f4; }
+.drillLineRow:last-of-type { border-bottom: 1px solid var(--border); }
+.drillLineDesc {
+  padding: 4px 12px 4px 28px !important;
+  font-size: 11px;
+  color: var(--text-2);
+  font-style: italic;
+}
+.drillLineFallback { color: var(--text-4); }
+.drillLineBadge {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #5f6368;
+  background: #e8eaed;
+}
+.drillLineAmt {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  padding: 4px 12px !important;
+}
+
 .historyList {
   padding: 8px 16px;
   display: flex;

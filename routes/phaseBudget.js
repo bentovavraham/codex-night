@@ -493,7 +493,32 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
                  i.amount, c.reference_number
         ORDER BY i.invoice_date DESC NULLS LAST, i.id
       `, [qbAccountId, phaseId]);
-      return res.json({ contracts: [], invoices: invoicesQ.rows, is_general_unassigned: true, qb_account_id: qbAccountId });
+      const invIds = invoicesQ.rows.map(i => i.id);
+      let unassignedLines = [];
+      if (invIds.length > 0) {
+        const ulQ = await pool.query(`
+          SELECT fa.source_document_id AS invoice_id,
+                 fa.id AS fa_id, fa.amount::float AS fa_amount, fa.billing_type AS fa_billing_type,
+                 ili.id AS line_item_id, ili.description AS line_description
+          FROM financial_allocations fa
+          LEFT JOIN invoice_line_items ili ON ili.id = fa.source_line_id
+          WHERE fa.phase_id = $2 AND fa.qb_account_id = $1
+            AND fa.phase_budget_line_id IS NULL AND fa.source_type = 'invoice_line'
+            AND fa.allocation_status IN ('confirmed','approved')
+            AND fa.source_document_id = ANY($3)
+          ORDER BY fa.source_document_id, fa.id
+        `, [qbAccountId, phaseId, invIds]);
+        unassignedLines = ulQ.rows;
+      }
+      const ulByInvoice = new Map();
+      for (const l of unassignedLines) {
+        if (!ulByInvoice.has(l.invoice_id)) ulByInvoice.set(l.invoice_id, []);
+        ulByInvoice.get(l.invoice_id).push(l);
+      }
+      return res.json({
+        contracts: [], is_general_unassigned: true, qb_account_id: qbAccountId,
+        invoices: invoicesQ.rows.map(i => ({ ...i, fa_lines: ulByInvoice.get(i.id) ?? [] })),
+      });
     }
 
     // Contract commitments
@@ -583,7 +608,33 @@ router.get('/phases/:phaseId/budget-lines/:lineId/drill', requireAuth, async (re
       ORDER BY i.invoice_date DESC NULLS LAST, i.id
     `, [lineId, billingType, paidOnly, unpaidOnly]);
 
-    res.json({ contracts: [], invoices: invoicesQ.rows });
+    const invIds = invoicesQ.rows.map(i => i.id);
+    let faLines = [];
+    if (invIds.length > 0) {
+      const faLinesQ = await pool.query(`
+        SELECT fa.source_document_id AS invoice_id,
+               fa.id AS fa_id, fa.amount::float AS fa_amount, fa.billing_type AS fa_billing_type,
+               ili.id AS line_item_id, ili.description AS line_description
+        FROM financial_allocations fa
+        LEFT JOIN invoice_line_items ili ON ili.id = fa.source_line_id
+        WHERE fa.phase_budget_line_id = $1
+          AND fa.source_type = 'invoice_line'
+          AND fa.source_document_id = ANY($2)
+          AND fa.allocation_status IN ('confirmed','approved')
+          AND ($3::text IS NULL OR fa.billing_type = $3)
+        ORDER BY fa.source_document_id, fa.id
+      `, [lineId, invIds, billingType]);
+      faLines = faLinesQ.rows;
+    }
+    const linesByInvoice = new Map();
+    for (const l of faLines) {
+      if (!linesByInvoice.has(l.invoice_id)) linesByInvoice.set(l.invoice_id, []);
+      linesByInvoice.get(l.invoice_id).push(l);
+    }
+    res.json({
+      contracts: [],
+      invoices: invoicesQ.rows.map(i => ({ ...i, fa_lines: linesByInvoice.get(i.id) ?? [] })),
+    });
   } catch (err) { next(err); }
 });
 
