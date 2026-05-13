@@ -4,8 +4,32 @@ const multer = require('multer');
 const XLSX = require('xlsx');
 const pool = require('../db/pool');
 const { extractQbTransactions } = require('../lib/extract');
+const { requireAuth } = require('../middleware/auth');
+const projects = require('./projects');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+router.use(requireAuth);
+
+async function userCanAccessPhase(userId, phaseId) {
+  const r = await pool.query('SELECT project_id FROM phases WHERE id = $1', [phaseId]);
+  if (!r.rows[0]) return { ok: false, status: 404 };
+  if (!(await projects.userCanAccess(userId, r.rows[0].project_id))) return { ok: false, status: 403 };
+  return { ok: true, projectId: r.rows[0].project_id };
+}
+
+async function userCanAccessInvoice(userId, invoiceId) {
+  const r = await pool.query(
+    `SELECT COALESCE(i.project_id, c.project_id) AS project_id
+     FROM invoices i
+     LEFT JOIN contracts c ON c.id = i.contract_id
+     WHERE i.id = $1`,
+    [invoiceId]
+  );
+  if (!r.rows[0]) return { ok: false, status: 404 };
+  if (!(await projects.userCanAccess(userId, r.rows[0].project_id))) return { ok: false, status: 403 };
+  return { ok: true, projectId: r.rows[0].project_id };
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -60,6 +84,8 @@ router.post('/:phaseId/audit/qb-import', upload.single('file'), async (req, res)
   const userId  = req.session?.userId;
 
   try {
+    const access = await userCanAccessPhase(userId, phaseId);
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Phase not found' : 'Forbidden' });
     // Build a normalized array of row objects regardless of source format
     let normalizedRows;
 
@@ -166,6 +192,8 @@ router.post('/:phaseId/audit/qb-import', upload.single('file'), async (req, res)
 router.get('/:phaseId/audit', async (req, res) => {
   const phaseId = Number(req.params.phaseId);
   try {
+    const access = await userCanAccessPhase(req.session.userId, phaseId);
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Phase not found' : 'Forbidden' });
     // Matched invoices + their QB data
     const invoicesRes = await pool.query(
       `SELECT
@@ -257,6 +285,8 @@ router.get('/:phaseId/audit', async (req, res) => {
 router.get('/:phaseId/audit/transaction-report', async (req, res) => {
   const phaseId = Number(req.params.phaseId);
   try {
+    const access = await userCanAccessPhase(req.session.userId, phaseId);
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Phase not found' : 'Forbidden' });
     const txns = await pool.query(
       `SELECT
          qt.id, qt.txn_date, qt.vendor_name, qt.ref_number, qt.memo,
@@ -324,6 +354,8 @@ router.post('/invoices/:id/validate-gl', async (req, res) => {
   const { gl_account_id } = req.body;
   const invoiceId = Number(req.params.id);
   try {
+    const access = await userCanAccessInvoice(req.session.userId, invoiceId);
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Invoice not found' : 'Forbidden' });
     // Recompute GL mismatch status
     const result = await pool.query(
       `UPDATE invoices i
@@ -355,6 +387,8 @@ router.post('/invoices/:id/validate-gl', async (req, res) => {
 router.get('/:phaseId/audit/correction-report', async (req, res) => {
   const phaseId = Number(req.params.phaseId);
   try {
+    const access = await userCanAccessPhase(req.session.userId, phaseId);
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Phase not found' : 'Forbidden' });
     const result = await pool.query(
       `SELECT
          i.invoice_number                     AS "Invoice #",

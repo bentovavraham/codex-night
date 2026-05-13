@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "concurrently -n api,ui -c cyan,magenta \"node server.js\" \"npm run dev --prefix client\"",
     "start": "node server.js",
+    "test": "node --test",
     "migrate": "node db/migrate.js",
     "seed": "node db/seed.js"
   },

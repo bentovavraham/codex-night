@@ -1,13 +1,26 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
+const projects = require('./projects');
 
 const router = express.Router();
+
+async function userCanAccessPhase(userId, phaseId) {
+  const r = await pool.query('SELECT project_id FROM phases WHERE id = $1', [phaseId]);
+  if (!r.rows[0]) return { ok: false, status: 404 };
+  if (!(await projects.userCanAccess(userId, r.rows[0].project_id))) {
+    return { ok: false, status: 403 };
+  }
+  return { ok: true, projectId: r.rows[0].project_id };
+}
 
 // GET /api/projects/:projectId/phases
 router.get('/:projectId/phases', requireAuth, async (req, res, next) => {
   try {
     const { projectId } = req.params;
+    if (!(await projects.userCanAccess(req.session.userId, Number(projectId)))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     const result = await pool.query(
       `SELECT id, project_id, name, phase_number, status, start_date, end_date, notes, sort_order
        FROM phases
@@ -23,6 +36,9 @@ router.get('/:projectId/phases', requireAuth, async (req, res, next) => {
 router.post('/:projectId/phases', requireAuth, async (req, res, next) => {
   try {
     const { projectId } = req.params;
+    if (!(await projects.userCanAccess(req.session.userId, Number(projectId)))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     const { name, phase_number, status = 'planning', start_date, end_date, notes } = req.body;
 
     const sortResult = await pool.query(
@@ -45,6 +61,8 @@ router.post('/:projectId/phases', requireAuth, async (req, res, next) => {
 router.get('/phases/:phaseId', requireAuth, async (req, res, next) => {
   try {
     const { phaseId } = req.params;
+    const access = await userCanAccessPhase(req.session.userId, Number(phaseId));
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Phase not found' : 'Forbidden' });
     const result = await pool.query(
       `SELECT p.*, proj.name AS project_name, proj.project_type
        FROM phases p
@@ -61,6 +79,8 @@ router.get('/phases/:phaseId', requireAuth, async (req, res, next) => {
 router.patch('/phases/:phaseId', requireAuth, async (req, res, next) => {
   try {
     const { phaseId } = req.params;
+    const access = await userCanAccessPhase(req.session.userId, Number(phaseId));
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Phase not found' : 'Forbidden' });
     const fields = ['name', 'phase_number', 'status', 'start_date', 'end_date', 'notes', 'sort_order'];
     const updates = [];
     const values = [];
@@ -86,6 +106,8 @@ router.patch('/phases/:phaseId', requireAuth, async (req, res, next) => {
 router.delete('/phases/:phaseId', requireAuth, async (req, res, next) => {
   try {
     const { phaseId } = req.params;
+    const access = await userCanAccessPhase(req.session.userId, Number(phaseId));
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Phase not found' : 'Forbidden' });
     await pool.query('DELETE FROM phases WHERE id = $1', [phaseId]);
     res.json({ ok: true });
   } catch (err) { next(err); }

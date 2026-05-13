@@ -652,6 +652,13 @@ export function UploadPanel({ qbAccounts, projectId, phaseId, onClose, onSaved, 
           if (matching.length === 1) return { ...li, phase_budget_line_id: matching[0].id };
           return li;
         });
+      if (usableLines.length === 0) {
+        return setSaveError('At least one contract task is required.');
+      }
+      const missingAssignment = usableLines.findIndex(li => li.phase_budget_line_id == null);
+      if (missingAssignment >= 0) {
+        return setSaveError(`Pick a budget task for contract task ${missingAssignment + 1}.`);
+      }
       if (isChangeOrder) {
         const coPayload = {
           co_number:      form.reference_number || null,

@@ -38,8 +38,8 @@ function DrillPanel({ phaseId, target, onClose }: {
   onClose: () => void;
 }) {
   const { data, isLoading } = useQuery({
-    queryKey: ['drill', phaseId, target.rowId],
-    queryFn: () => api.drillBudgetLine(phaseId, target.rowId),
+    queryKey: ['drill', phaseId, target.rowId, target.cell],
+    queryFn: () => api.drillBudgetLine(phaseId, target.rowId, target.cell),
     staleTime: 30_000,
   });
 

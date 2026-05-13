@@ -31,6 +31,76 @@ CREATE TABLE IF NOT EXISTS projects (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+DO $$ BEGIN ALTER TABLE projects ADD COLUMN project_type TEXT DEFAULT 'industrial'; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE projects ADD COLUMN address TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE projects ADD COLUMN notes TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- Phases are the primary unit of budget and reconciliation work inside a project.
+CREATE TABLE IF NOT EXISTS phases (
+    id           SERIAL PRIMARY KEY,
+    project_id   INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name         TEXT    NOT NULL,
+    phase_number INTEGER,
+    status       TEXT    NOT NULL DEFAULT 'active',
+    start_date   DATE,
+    end_date     DATE,
+    notes        TEXT,
+    sort_order   INTEGER NOT NULL DEFAULT 0,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_phases_project ON phases(project_id);
+DO $$ BEGIN ALTER TABLE phases ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- QuickBooks Chart of Accounts. This is the GL spine used by budgets,
+-- contract line items, invoice line items, allocations, and reconciliation.
+CREATE TABLE IF NOT EXISTS qb_accounts (
+    id             SERIAL PRIMARY KEY,
+    account_number TEXT    NOT NULL UNIQUE,
+    full_name      TEXT    NOT NULL,
+    short_name     TEXT    NOT NULL,
+    parent_id      INTEGER REFERENCES qb_accounts(id),
+    category       TEXT,
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    is_leaf        BOOLEAN NOT NULL DEFAULT true,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_qb_accounts_parent ON qb_accounts(parent_id);
+CREATE INDEX IF NOT EXISTS idx_qb_accounts_number ON qb_accounts(account_number);
+
+-- Phase budget lines. A phase can intentionally have multiple PM tasks under
+-- one GL account; writes must therefore store both qb_account_id and the exact
+-- phase_budget_line_id when allocating dollars.
+CREATE TABLE IF NOT EXISTS phase_budget_lines (
+    id                  SERIAL PRIMARY KEY,
+    phase_id            INTEGER NOT NULL REFERENCES phases(id) ON DELETE CASCADE,
+    task_name           TEXT NOT NULL DEFAULT '',
+    discipline          TEXT,
+    section             TEXT,
+    sub_group           TEXT,
+    calculation_method  TEXT,
+    calc_hint           TEXT,
+    budgeted_amount     NUMERIC(14,2) NOT NULL DEFAULT 0,
+    consultant          TEXT,
+    notes               TEXT,
+    sort_order          INTEGER NOT NULL DEFAULT 0,
+    source              VARCHAR(16) NOT NULL DEFAULT 'template',
+    amount_modified     BOOLEAN NOT NULL DEFAULT FALSE,
+    qb_account_id       INTEGER REFERENCES qb_accounts(id) ON DELETE SET NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_phase_budget_phase ON phase_budget_lines(phase_id);
+CREATE INDEX IF NOT EXISTS idx_phase_budget_qba ON phase_budget_lines(qb_account_id);
+
+DO $$ BEGIN ALTER TABLE phase_budget_lines ADD COLUMN task_name TEXT NOT NULL DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE phase_budget_lines ADD COLUMN discipline TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE phase_budget_lines ADD COLUMN section TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE phase_budget_lines ADD COLUMN sub_group TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE phase_budget_lines ADD COLUMN calc_hint TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE phase_budget_lines ADD COLUMN qb_account_id INTEGER REFERENCES qb_accounts(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE phase_budget_lines ALTER COLUMN qb_account_id DROP NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
+
 CREATE TABLE IF NOT EXISTS project_members (
     id SERIAL PRIMARY KEY,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -79,6 +149,12 @@ CREATE TABLE IF NOT EXISTS contracts (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_contracts_project ON contracts(project_id);
+
+DO $$ BEGIN ALTER TABLE contracts ADD COLUMN phase_id INTEGER REFERENCES phases(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE contracts ADD COLUMN phase_budget_line_id INTEGER REFERENCES phase_budget_lines(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE contracts ADD COLUMN source_batch TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+CREATE INDEX IF NOT EXISTS idx_contracts_phase ON contracts(phase_id);
+CREATE INDEX IF NOT EXISTS idx_contracts_pbl ON contracts(phase_budget_line_id);
 
 CREATE TABLE IF NOT EXISTS contract_lines (
     id SERIAL PRIMARY KEY,
@@ -182,6 +258,11 @@ DO $$ BEGIN
     ALTER TABLE invoices ADD COLUMN qb_code_id INTEGER REFERENCES qb_codes(id);
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
+
+DO $$ BEGIN ALTER TABLE invoices ADD COLUMN phase_id INTEGER REFERENCES phases(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE invoices ADD COLUMN qb_account_id INTEGER REFERENCES qb_accounts(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE invoices ADD COLUMN source_batch TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+CREATE INDEX IF NOT EXISTS idx_invoices_phase ON invoices(phase_id);
 
 -- Audit trail for invoices (who did what, when, and why).
 CREATE TABLE IF NOT EXISTS invoice_logs (
@@ -427,6 +508,19 @@ CREATE TABLE IF NOT EXISTS invoice_line_items (
 );
 CREATE INDEX IF NOT EXISTS idx_ili_invoice      ON invoice_line_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_ili_contract_line ON invoice_line_items(contract_line_item_id);
+
+-- Legacy invoice-to-GL split table kept for old endpoints/data. New writes use
+-- invoice_line_items + financial_allocations.
+CREATE TABLE IF NOT EXISTS invoice_qb_lines (
+    id SERIAL PRIMARY KEY,
+    invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    qb_account_id INTEGER NOT NULL REFERENCES qb_accounts(id) ON DELETE RESTRICT,
+    amount NUMERIC(14,2) NOT NULL,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_iql_invoice ON invoice_qb_lines(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_iql_qba ON invoice_qb_lines(qb_account_id);
 
 -- Per-line budget line on invoice_line_items (mirrors contract_line_items.phase_budget_line_id)
 DO $$ BEGIN ALTER TABLE invoice_line_items ADD COLUMN phase_budget_line_id INTEGER REFERENCES phase_budget_lines(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;

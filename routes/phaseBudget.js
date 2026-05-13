@@ -14,8 +14,36 @@ const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const TEMPLATE = require('../db/budget-template');
 const { suggestLineBudgets } = require('../lib/extract');
+const projects = require('./projects');
 
 const router = express.Router();
+
+async function userCanAccessPhase(userId, phaseId) {
+  const r = await pool.query('SELECT project_id FROM phases WHERE id = $1', [phaseId]);
+  if (!r.rows[0]) return { ok: false, status: 404 };
+  if (!(await projects.userCanAccess(userId, r.rows[0].project_id))) return { ok: false, status: 403 };
+  return { ok: true };
+}
+
+router.param('phaseId', async (req, res, next, phaseId) => {
+  try {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const access = await userCanAccessPhase(req.session.userId, Number(phaseId));
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Phase not found' : 'Forbidden' });
+    next();
+  } catch (err) { next(err); }
+});
+
+router.param('lineId', async (req, res, next, lineId) => {
+  try {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const r = await pool.query('SELECT phase_id FROM phase_budget_lines WHERE id = $1', [Number(lineId)]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Budget line not found' });
+    const access = await userCanAccessPhase(req.session.userId, Number(r.rows[0].phase_id));
+    if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
+    next();
+  } catch (err) { next(err); }
+});
 
 // GET /api/phases/:phaseId/qb-transactions?gl_code=1720.01
 // Lists QB transactions for a specific GL code in this phase. Used by the

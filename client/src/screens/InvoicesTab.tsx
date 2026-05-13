@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import styles from './InvoicesTab.module.css';
 import { ContractPanel } from './ContractPanel';
 import { InvoiceEditOverlay } from './ImportDrawer';
+import { useUserStore } from '../store/userStore';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -15,6 +16,17 @@ const STATUS_CSS: Record<string, string> = {
   pending: 'sPending', pm_approved: 'sPm', partner_approved: 'sPartner',
   approved: 'sApproved', pushed: 'sPushed', paid: 'sPaid',
   rejected: 'sRejected', on_hold: 'sHold',
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'Pending',
+  pm_approved: 'PM Approved',
+  partner_approved: 'Partner Approved',
+  approved: 'Approved',
+  pushed: 'Pushed',
+  paid: 'Paid',
+  rejected: 'Rejected',
+  on_hold: 'On Hold',
 };
 
 
@@ -29,6 +41,8 @@ function InvoiceList({ invoices, phaseId, onEdit }: {
   const [panelContractId, setPanelContractId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const qc = useQueryClient();
+  const user = useUserStore(s => s.user);
+  const roleLevel = user?.role === 'admin' ? 3 : user?.role === 'partner' ? 2 : 1;
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.deleteInvoice(id),
@@ -39,14 +53,53 @@ function InvoiceList({ invoices, phaseId, onEdit }: {
     },
   });
 
-  const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: string }) =>
-      api.updateInvoice(id, { status }),
+  const actionMutation = useMutation({
+    mutationFn: ({ id, action }: { id: number; action: string }) => {
+      if (action === 'pm') return api.pmApproveInvoice(id);
+      if (action === 'partner') return api.partnerApproveInvoice(id);
+      if (action === 'final') return api.approveInvoice(id);
+      if (action === 'pushed') return api.markInvoicePushed(id);
+      if (action === 'paid') {
+        const paidDate = window.prompt('Paid date (YYYY-MM-DD). Leave blank for today.', '');
+        return api.markInvoicePaid(id, paidDate || undefined);
+      }
+      if (action === 'hold') {
+        const note = window.prompt('Hold reason (optional)', '');
+        return api.holdInvoice(id, note || undefined);
+      }
+      if (action === 'reject') {
+        const note = window.prompt('Rejection reason');
+        if (!note?.trim()) throw new Error('Rejection reason is required.');
+        return api.rejectInvoice(id, note.trim());
+      }
+      if (action === 'revert') return api.revertInvoice(id);
+      throw new Error('Unknown invoice action');
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['invoices', phaseId] });
       qc.invalidateQueries({ queryKey: ['budget',   phaseId] });
+      qc.invalidateQueries({ queryKey: ['audit',    phaseId] });
+      qc.invalidateQueries({ queryKey: ['txnReport', phaseId] });
     },
   });
+
+  function actionsFor(inv: any) {
+    const actions: { key: string; label: string; minRole?: number }[] = [];
+    if (inv.status === 'pending') {
+      actions.push({ key: 'pm', label: 'PM Approve' }, { key: 'hold', label: 'Hold' }, { key: 'reject', label: 'Reject' });
+    } else if (inv.status === 'pm_approved') {
+      actions.push({ key: 'partner', label: 'Partner Approve', minRole: 2 }, { key: 'reject', label: 'Reject' }, { key: 'revert', label: 'Revert' });
+    } else if (inv.status === 'partner_approved') {
+      actions.push({ key: 'final', label: 'Final Approve', minRole: 3 }, { key: 'reject', label: 'Reject' }, { key: 'revert', label: 'Revert' });
+    } else if (inv.status === 'approved') {
+      actions.push({ key: 'pushed', label: 'Pushed' }, { key: 'paid', label: 'Paid' }, { key: 'hold', label: 'Hold' }, { key: 'revert', label: 'Revert' });
+    } else if (inv.status === 'pushed') {
+      actions.push({ key: 'paid', label: 'Paid' }, { key: 'revert', label: 'Revert' });
+    } else if (inv.status === 'rejected' || inv.status === 'on_hold') {
+      actions.push({ key: 'revert', label: 'Revert' });
+    }
+    return actions.filter(a => !a.minRole || roleLevel >= a.minRole);
+  }
 
   return (
     <div className={styles.listWrap}>
@@ -101,23 +154,22 @@ function InvoiceList({ invoices, phaseId, onEdit }: {
                   </td>
                   <td className={`${styles.ltd} ${styles.mono} ${styles.right}`}>{usd.format(Number(inv.amount))}</td>
                   <td className={`${styles.ltd} ${styles.center}`}>
-                    <select
-                      className={`${styles.statusSelect} ${styles[STATUS_CSS[inv.status] ?? 'sPending']}`}
-                      value={inv.status}
-                      disabled={statusMutation.isPending}
-                      onChange={e => statusMutation.mutate({ id: inv.id, status: e.target.value })}
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="pm_approved">PM ✓</option>
-                      <option value="partner_approved">Partner ✓</option>
-                      <option value="approved">Approved</option>
-                      <option value="pushed">Pushed</option>
-                      <option value="paid">Paid</option>
-                      <option value="on_hold">On Hold</option>
-                      <option value="rejected">Rejected</option>
-                    </select>
+                    <span className={`${styles.badge} ${styles[STATUS_CSS[inv.status] ?? 'sPending']}`}>
+                      {STATUS_LABEL[inv.status] ?? inv.status}
+                    </span>
                   </td>
                   <td className={`${styles.ltd} ${styles.actionCell}`}>
+                    {actionsFor(inv).map(a => (
+                      <button
+                        key={a.key}
+                        className={styles.editBtn}
+                        onClick={() => actionMutation.mutate({ id: inv.id, action: a.key })}
+                        disabled={actionMutation.isPending}
+                        title={a.label}
+                      >
+                        {a.label}
+                      </button>
+                    ))}
                     {inv.contract_id && (
                       <button className={styles.contractBtn} onClick={() => setPanelContractId(inv.contract_id)} title="View contract">
                         ↑ Contract

@@ -414,17 +414,18 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   const isContract = item.doc_type === 'contract';
   const isEditMode = !!editMode;
   const [contractId, setContractId] = useState<number | null>(editMode?.contractId ?? null);
-  const [editStatus, setEditStatus] = useState(editMode?.status ?? 'pending');
 
   // Common fields
   const [vendor, setVendor] = useState(ext.vendor_name || '');
   const [description, setDescription] = useState(ext.description || ext.summary || '');
   // Contract budget line (contracts only)
   const [budgetLineId, setBudgetLineId] = useState<number | null>(
-    isContract ? (ext.suggested_primary_budget_line_id ?? item.suggested_budget_line_id ?? null) : null
+    isContract
+      ? (ext.suggested_primary_budget_line_id ?? item.suggested_budget_line_id ?? null)
+      : (ext.phase_budget_line_id ?? item.suggested_budget_line_id ?? null)
   );
   // Invoice GL code (top-level, used when no line items)
-  const [glAccountId, setGlAccountId] = useState<number | null>(null);
+  const [glAccountId, setGlAccountId] = useState<number | null>(ext.qb_account_id ?? ext.pm_validated_gl_id ?? null);
   const [reviewed, setReviewed] = useState(() => !!editMode);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -529,11 +530,6 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
     .reduce((s, li) => s + (Number(li.budgeted_amount) || 0), 0);
   const hasTm = lineItems.some(li => li.billing_type === 'tm');
 
-  const isWrongProject = item.project_match === 'mismatch';
-  const weakQbMatch = !isContract && (item.qb_match_confidence === 'low' || item.qb_match_confidence === 'none');
-  const [qbOverrideAcked, setQbOverrideAcked] = useState(false);
-  const [wrongProjectAcked, setWrongProjectAcked] = useState(false);
-
   const dupBlocked = dupMatches.length > 0 && !dupAcked;
   const canConfirm = reviewed && !!vendor.trim() && !saving
     && (isEditMode || !dupBlocked);
@@ -556,6 +552,15 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
     setSaveError(null);
     if (!vendor.trim()) return setSaveError('Vendor name is required.');
     if (isContract && !hasLineItems && !budgetLineId) return setSaveError('Budget line is required when there are no contract tasks.');
+    if (isContract && hasLineItems && lineItems.some(li => li.description.trim() && li.phase_budget_line_id == null)) {
+      return setSaveError('Every contract task needs a budget line before saving.');
+    }
+    if (!isContract && invoiceLines.length === 0 && (!glAccountId || !budgetLineId)) {
+      return setSaveError('Header-only invoices need both a GL code and a budget task.');
+    }
+    if (!isContract && invoiceLines.some(li => Number(li.amount) > 0 && (!li.qb_account_id || !li.phase_budget_line_id))) {
+      return setSaveError('Every invoice line needs both a GL code and a budget task before saving.');
+    }
     if (!reviewed) return setSaveError('Please confirm you have reviewed the details.');
     if (dupBlocked) return setSaveError('Please acknowledge the duplicate warning.');
 
@@ -580,7 +585,8 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
           amount: invoiceLines.length > 0 ? lineItemsTotal : (Number(amount) || 0),
           invoice_date: invoiceDate || null,
           invoice_type: invoiceType,
-          status: isEditMode ? editStatus : invoiceStatus,
+          phase_budget_line_id: budgetLineId,
+          status: invoiceStatus,
           contract_id: contractId,
           line_items: invoiceLines.map(li => ({
             billing_type: li.billing_type,
@@ -862,23 +868,6 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                 </div>
               )}
 
-              {/* Status picker — edit mode only */}
-              {isEditMode && (
-                <div className={styles.rGroup}>
-                  <label className={styles.rLabel}>Status</label>
-                  <select className={styles.rInput} value={editStatus} onChange={e => setEditStatus(e.target.value)}>
-                    <option value="pending">Pending</option>
-                    <option value="pm_approved">PM Approved</option>
-                    <option value="partner_approved">Partner Approved</option>
-                    <option value="approved">Approved</option>
-                    <option value="pushed">Pushed</option>
-                    <option value="paid">Paid</option>
-                    <option value="on_hold">On Hold</option>
-                    <option value="rejected">Rejected</option>
-                  </select>
-                </div>
-              )}
-
               <div className={styles.rGroup}>
                 <label className={styles.rLabel}>Description</label>
                 <textarea className={styles.rTextarea} value={description}
@@ -994,9 +983,28 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                 </div>
               ) : (
                 /* No line items — single top-level GL code */
-                <div className={styles.rGroup}>
-                  <label className={styles.rLabel}>GL Code</label>
-                  <InlineGlPicker accounts={qbAccounts} value={glAccountId} onChange={setGlAccountId} />
+                <div className={styles.rRow}>
+                  <div className={styles.rGroup}>
+                    <label className={styles.rLabel}>GL Code</label>
+                    <InlineGlPicker
+                      accounts={qbAccounts}
+                      value={glAccountId}
+                      onChange={id => {
+                        setGlAccountId(id);
+                        const matches = id ? budgetLines.filter((bl: any) => bl.qb_account_id === id) : [];
+                        setBudgetLineId(matches.length === 1 ? matches[0].id : null);
+                      }}
+                    />
+                  </div>
+                  <div className={styles.rGroup}>
+                    <label className={styles.rLabel}>Budget Task</label>
+                    <InlineBudgetLinePicker
+                      lines={budgetLines}
+                      value={budgetLineId}
+                      filterByGlId={glAccountId}
+                      onChange={setBudgetLineId}
+                    />
+                  </div>
                 </div>
               )}
             </>
@@ -1640,6 +1648,8 @@ export function InvoiceEditOverlay({
       amount:         invoice.amount,
       invoice_date:   invoice.invoice_date ? String(invoice.invoice_date).slice(0, 10) : '',
       description:    invoice.description,
+      qb_account_id:  invoice.qb_account_id ?? invoice.pm_validated_gl_id ?? null,
+      phase_budget_line_id: invoice.phase_budget_line_id ?? null,
       line_items: (invoice.invoice_line_items ?? []).map((li: any) => ({
         billing_type:             li.billing_type ?? 'fixed',
         description:              li.description ?? '',
@@ -1685,7 +1695,9 @@ export function InvoiceEditOverlay({
         description:    formData.description ?? null,
         invoice_type:   invoiceType,
         contract_id:    formData.contract_id ?? null,
-        status:         formData.status,
+        phase_budget_line_id: formData.phase_budget_line_id ?? null,
+        qb_account_id:  formData.qb_account_id ?? null,
+        pm_validated_gl_id: formData.qb_account_id ?? null,
         invoice_line_items: (formData.line_items ?? []).map((li: any, i: number) => ({
           billing_type:         li.billing_type ?? 'fixed',
           description:          li.description ?? null,
@@ -1716,7 +1728,7 @@ export function InvoiceEditOverlay({
       qbAccounts={qbAccounts}
       contracts={contracts}
       onConfirm={handleSave}
-      onDiscard={onClose}
+      onDiscard={async () => { onClose(); }}
       onBack={onClose}
       saving={saving}
       editMode={{ invoiceId, contractId: invoice.contract_id ?? null, status: invoice.status ?? 'pending' }}

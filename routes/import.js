@@ -21,9 +21,37 @@ const fileStorage = require('../lib/storage');
 const { requireAuth } = require('../middleware/auth');
 const { classifyDocument, extractContract, extractInvoice, suggestLineBudgets, suggestInvoiceLineCodes, matchQbTransaction, matchProject } = require('../lib/extract');
 const { createContract, createInvoice } = require('../lib/financials');
+const projects = require('./projects');
 
 // Use memory storage — save to Postgres immediately so files survive restarts + Render deploys
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+async function userCanAccessPhase(userId, phaseId) {
+  const r = await pool.query('SELECT project_id FROM phases WHERE id = $1', [phaseId]);
+  if (!r.rows[0]) return { ok: false, status: 404 };
+  if (!(await projects.userCanAccess(userId, r.rows[0].project_id))) return { ok: false, status: 403 };
+  return { ok: true };
+}
+
+router.param('phaseId', async (req, res, next, phaseId) => {
+  try {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const access = await userCanAccessPhase(req.session.userId, Number(phaseId));
+    if (!access.ok) return res.status(access.status).json({ error: access.status === 404 ? 'Phase not found' : 'Forbidden' });
+    next();
+  } catch (err) { next(err); }
+});
+
+router.param('id', async (req, res, next, id) => {
+  try {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const item = (await pool.query('SELECT id, phase_id FROM import_queue WHERE id = $1', [Number(id)])).rows[0];
+    if (!item) return res.status(404).json({ error: 'Not found' });
+    const access = await userCanAccessPhase(req.session.userId, Number(item.phase_id));
+    if (!access.ok) return res.status(access.status).json({ error: 'Forbidden' });
+    next();
+  } catch (err) { next(err); }
+});
 
 // Budget line matching — simple keyword overlap
 function matchBudgetLine(description, vendorName, budgetLines) {
@@ -542,6 +570,7 @@ router.post('/import-queue/:id/confirm', requireAuth, async (req, res, next) => 
         reference_number: formData.reference_number || null,
         file_reference: item.file_reference,
         source_batch: item.source_batch || null,
+        phase_budget_line_id: formData.phase_budget_line_id || item.suggested_budget_line_id || null,
         qb_account_id: formData.qb_account_id || null,
         line_items: formData.line_items || [],
       }, req.session.userId);
@@ -920,6 +949,7 @@ router.post('/phases/:phaseId/import/confirm-batch-high', requireAuth, async (re
             reference_number: ext.reference_number || null,
             file_reference: item.file_reference,
             source_batch: item.source_batch || null,
+            phase_budget_line_id: ext.suggested_primary_budget_line_id || item.suggested_budget_line_id || null,
             qb_account_id: ext.qb_account_id || null,
             line_items: (ext.line_items || []).map(li => ({
               ...li,

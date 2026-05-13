@@ -48,6 +48,7 @@ export const api = {
     raw_billed: number; raw_paid: number;
     raw_fixed: number; raw_tm: number; raw_expense: number;
     raw_budgeted: number;
+    invoice_header_total: number; invoice_lines_total: number;
   }>('GET', `/api/phases/${phaseId}/budget/cross-check`),
   repairFa: (phaseId: number) => request<{ ok: boolean; voided: number }>('POST', `/api/phases/${phaseId}/budget/repair-fa`),
   downloadBudgetExcel: (phaseId: number) => {
@@ -103,8 +104,14 @@ export const api = {
   getInvoice:   (id: number)          => request<any>('GET',    `/api/invoices/${id}`),
   updateInvoice:(id: number, data: any) => request<any>('PUT',  `/api/invoices/${id}`, data),
   deleteInvoice:(id: number)          => request<any>('DELETE', `/api/invoices/${id}`),
+  pmApproveInvoice:(id: number)       => request<any>('POST', `/api/invoices/${id}/pm-approve`),
+  partnerApproveInvoice:(id: number)  => request<any>('POST', `/api/invoices/${id}/partner-approve`),
   approveInvoice:(id: number)         => request<any>('POST', `/api/invoices/${id}/approve`),
   rejectInvoice:(id: number, note: string) => request<any>('POST', `/api/invoices/${id}/reject`, { note }),
+  revertInvoice:(id: number)          => request<any>('POST', `/api/invoices/${id}/revert`),
+  holdInvoice:(id: number, note?: string) => request<any>('POST', `/api/invoices/${id}/hold`, { note }),
+  markInvoicePushed:(id: number)      => request<any>('POST', `/api/invoices/${id}/mark-pushed`),
+  markInvoicePaid:(id: number, paid_date?: string) => request<any>('POST', `/api/invoices/${id}/mark-paid`, { paid_date }),
 
   // Change Orders
   listChangeOrders:(contractId: number) => request<any[]>('GET', `/api/contracts/${contractId}/change-orders`),

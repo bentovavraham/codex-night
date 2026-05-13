@@ -194,7 +194,7 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
   try {
     const { contract_id, contracts: contractAllocs, project_id, invoice_number, vendor_name, amount,
             invoice_date, description, file_reference, qb_code_id, invoice_type: invoiceTypeRaw,
-            phase_budget_line_id } = req.body || {};
+            phase_budget_line_id, phase_id } = req.body || {};
     if (!invoice_number || amount == null) return res.status(400).json({ error: 'invoice_number and amount required' });
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'amount must be > 0' });
@@ -295,8 +295,8 @@ router.post('/invoices', requireAuth, async (req, res, next) => {
       }
     }
 
-    // Resolve phase_id from primary contract
-    let resolvedPhaseId = null;
+    // Resolve phase_id from primary contract, or accept explicit phase_id for standalone invoices.
+    let resolvedPhaseId = phase_id ? Number(phase_id) : null;
     if (allocs.length > 0) {
       const phRes = await pool.query('SELECT phase_id FROM contracts WHERE id = $1', [allocs[0].contract_id]);
       resolvedPhaseId = phRes.rows[0]?.phase_id || null;
@@ -466,14 +466,36 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
     if (!(await projects.userCanAccess(req.session.userId, inv.project_id)))
       return res.status(403).json({ error: 'Forbidden' });
 
+    const body = req.body || {};
+    const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
     const {
       invoice_number, vendor_name, amount, invoice_date, description,
       status, file_reference, phase_budget_line_id, contract_id,
       invoice_type: invoiceTypeRaw, invoice_line_items: lineItems,
-    } = req.body || {};
+      qb_account_id, pm_validated_gl_id,
+    } = body;
+
+    if (has('status') && status !== inv.status) {
+      return res.status(400).json({
+        error: 'Invoice status changes must use the approval, push, paid, hold, reject, or revert endpoints.',
+      });
+    }
 
     const invoiceType = ['fixed', 'tm', 'expense'].includes(invoiceTypeRaw)
       ? invoiceTypeRaw : (inv.invoice_type || 'fixed');
+    const lineItemsProvided = Array.isArray(lineItems);
+    const lineItemTotal = lineItemsProvided
+      ? lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0)
+      : null;
+    const headerAmount = has('amount') ? Number(amount) : null;
+    if (has('amount') && (!Number.isFinite(headerAmount) || headerAmount < 0)) {
+      return res.status(400).json({ error: 'amount must be a valid non-negative number' });
+    }
+    if (lineItemsProvided && lineItems.length > 0 && has('amount') && Math.abs(headerAmount - lineItemTotal) > 0.01) {
+      return res.status(400).json({
+        error: `Invoice amount must equal line item total ($${lineItemTotal.toFixed(2)}).`,
+      });
+    }
 
     const changes = [];
     if (invoice_number && invoice_number !== inv.invoice_number) changes.push(`number: ${inv.invoice_number} → ${invoice_number}`);
@@ -483,29 +505,33 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
     await client.query('BEGIN');
     const result = await client.query(
       // Amount is computed from line items by syncInvoiceFA after lines are written.
-      // Do not trust the caller's amount field — omit it here.
+      // For header-only invoices, amount is allowed and is validated above.
       `UPDATE invoices SET
-         invoice_number       = COALESCE($2, invoice_number),
-         vendor_name          = COALESCE($3, vendor_name),
-         invoice_date         = $4,
-         description          = $5,
-         status               = COALESCE($6, status),
-         file_reference       = COALESCE($7, file_reference),
-         phase_budget_line_id = $8,
-         contract_id          = $9,
-         invoice_type         = $10,
+         invoice_number       = CASE WHEN $2::boolean  THEN $3  ELSE invoice_number END,
+         vendor_name          = CASE WHEN $4::boolean  THEN $5  ELSE vendor_name END,
+         amount               = CASE WHEN $6::boolean  THEN $7  ELSE amount END,
+         invoice_date         = CASE WHEN $8::boolean  THEN $9  ELSE invoice_date END,
+         description          = CASE WHEN $10::boolean THEN $11 ELSE description END,
+         file_reference       = CASE WHEN $12::boolean THEN $13 ELSE file_reference END,
+         phase_budget_line_id = CASE WHEN $14::boolean THEN $15 ELSE phase_budget_line_id END,
+         contract_id          = CASE WHEN $16::boolean THEN $17 ELSE contract_id END,
+         invoice_type         = CASE WHEN $18::boolean THEN $19 ELSE invoice_type END,
+         qb_account_id        = CASE WHEN $20::boolean THEN $21 ELSE qb_account_id END,
+         pm_validated_gl_id   = CASE WHEN $22::boolean THEN $23 ELSE pm_validated_gl_id END,
          updated_at           = NOW()
        WHERE id = $1 RETURNING *`,
       [invId,
-       invoice_number ?? null,
-       vendor_name ?? null,
-       invoice_date ?? null,
-       description ?? null,
-       status ?? null,
-       file_reference ?? null,
-       phase_budget_line_id != null ? Number(phase_budget_line_id) : null,
-       contract_id != null ? Number(contract_id) : null,
-       invoiceType]);
+       has('invoice_number'), invoice_number ?? null,
+       has('vendor_name'), vendor_name ?? null,
+       has('amount') && (!lineItemsProvided || lineItems.length === 0), headerAmount,
+       has('invoice_date'), invoice_date ?? null,
+       has('description'), description ?? null,
+       has('file_reference'), file_reference ?? null,
+       has('phase_budget_line_id'), phase_budget_line_id != null ? Number(phase_budget_line_id) : null,
+       has('contract_id'), contract_id != null ? Number(contract_id) : null,
+       has('invoice_type'), invoiceType,
+       has('qb_account_id'), qb_account_id != null ? Number(qb_account_id) : null,
+       has('pm_validated_gl_id'), pm_validated_gl_id != null ? Number(pm_validated_gl_id) : null]);
 
     // Replace line items when provided (full replace)
     if (Array.isArray(lineItems)) {
@@ -513,7 +539,9 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
       for (let idx = 0; idx < lineItems.length; idx++) {
         const li = lineItems[idx];
         const liAmt = Number(li.amount);
-        if (!liAmt) continue;
+        if (!Number.isFinite(liAmt) || liAmt <= 0) {
+          throw Object.assign(new Error(`invoice line ${idx + 1} amount must be greater than 0`), { status: 400 });
+        }
         const liType = ['fixed', 'tm', 'expense'].includes(li.billing_type) ? li.billing_type : invoiceType;
         // CRITICAL: include qb_account_id and phase_budget_line_id in the INSERT.
         // Without these the GL code (the source of truth for budget allocation)
