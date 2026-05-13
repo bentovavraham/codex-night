@@ -10,7 +10,7 @@
 
 const bcrypt = require('bcryptjs');
 const pool = require('./pool');
-const { insertRealCodes } = require('./qb-codes');
+const { insertRealCodes, insertQbAccounts } = require('./qb-codes');
 
 async function seedQbCodes(client) {
   const existing = await client.query('SELECT COUNT(*)::int AS n FROM qb_codes');
@@ -20,6 +20,14 @@ async function seedQbCodes(client) {
   }
   const n = await insertRealCodes(client);
   console.log(`Seeded ${n} QB codes from the real chart of accounts.`);
+}
+
+async function seedQbAccounts(client) {
+  const existing = await client.query('SELECT COUNT(*)::int AS n FROM qb_accounts');
+  const n = await insertQbAccounts(client);
+  console.log(existing.rows[0].n > 0
+    ? `QB accounts already present (${existing.rows[0].n}). Refreshed ${n} records.`
+    : `Seeded ${n} QB accounts from the real chart of accounts.`);
 }
 
 async function seedAdminUser(client) {
@@ -44,6 +52,7 @@ async function main() {
   try {
     await client.query('BEGIN');
     await seedQbCodes(client);
+    await seedQbAccounts(client);
     await seedAdminUser(client);
     await client.query('COMMIT');
     console.log('Seed complete.');

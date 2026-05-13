@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS qb_accounts (
 );
 CREATE INDEX IF NOT EXISTS idx_qb_accounts_parent ON qb_accounts(parent_id);
 CREATE INDEX IF NOT EXISTS idx_qb_accounts_number ON qb_accounts(account_number);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_qb_accounts_account_number_unique ON qb_accounts(account_number);
 
 -- Phase budget lines. A phase can intentionally have multiple PM tasks under
 -- one GL account; writes must therefore store both qb_account_id and the exact
@@ -506,6 +507,11 @@ CREATE TABLE IF NOT EXISTS invoice_line_items (
     sort_order            INTEGER NOT NULL DEFAULT 0,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+DO $$ BEGIN
+  ALTER TABLE invoice_line_items
+    ADD COLUMN contract_line_item_id INTEGER REFERENCES contract_line_items(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_ili_invoice      ON invoice_line_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_ili_contract_line ON invoice_line_items(contract_line_item_id);
 

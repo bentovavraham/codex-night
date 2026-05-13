@@ -5,7 +5,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../db/pool');
-const { insertRealCodes } = require('../db/qb-codes');
+const { insertRealCodes, insertQbAccounts } = require('../db/qb-codes');
 
 const router = express.Router();
 
@@ -33,6 +33,7 @@ router.get('/status', requireToken, async (_req, res, next) => {
     const r = await pool.query(`
       SELECT
         (SELECT COUNT(*) FROM qb_codes)::int   AS qb_codes,
+        (SELECT COUNT(*) FROM qb_accounts)::int AS qb_accounts,
         (SELECT COUNT(*) FROM users)::int      AS users,
         (SELECT COUNT(*) FROM projects)::int   AS projects,
         (SELECT COUNT(*) FROM budget_lines)::int AS budget_lines,
@@ -139,7 +140,7 @@ router.post('/create-user', requireToken, async (req, res, next) => {
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'name, email, password required' });
     }
-    const validRoles = ['pm', 'admin', 'bookkeeper'];
+    const validRoles = ['pm', 'partner', 'admin', 'bookkeeper'];
     const resolvedRole = validRoles.includes(role) ? role : 'pm';
     const hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
@@ -172,23 +173,29 @@ router.post('/reset-password', requireToken, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// (Old /seed-qb-codes endpoint kept for backwards compat: it now also
-// loads the real codes, but refuses if any are present.)
+// (Old /seed-qb-codes endpoint kept for backwards compat: it now seeds both
+// legacy qb_codes and the newer qb_accounts table used by phase budgets.)
 router.post('/seed-qb-codes', requireToken, async (_req, res, next) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const existing = await client.query('SELECT COUNT(*)::int AS n FROM qb_codes');
+    const existingAccounts = await client.query('SELECT COUNT(*)::int AS n FROM qb_accounts');
     if (existing.rows[0].n > 0) {
-      await client.query('ROLLBACK');
+      const accountsInserted = await insertQbAccounts(client);
+      await client.query('COMMIT');
       return res.json({
         seeded: false,
-        message: `Already ${existing.rows[0].n} codes present. Use /replace-qb-codes with {force:true} to overwrite.`,
+        qb_codes: existing.rows[0].n,
+        qb_accounts_before: existingAccounts.rows[0].n,
+        qb_accounts_upserted: accountsInserted,
+        message: `Already ${existing.rows[0].n} legacy codes present. Refreshed qb_accounts.`,
       });
     }
     const inserted = await insertRealCodes(client);
+    const accountsInserted = await insertQbAccounts(client);
     await client.query('COMMIT');
-    res.json({ seeded: true, count: inserted });
+    res.json({ seeded: true, qb_codes_inserted: inserted, qb_accounts_upserted: accountsInserted });
   } catch (err) {
     await client.query('ROLLBACK');
     next(err);

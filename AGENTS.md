@@ -6,6 +6,8 @@ These instructions apply to this repository only:
 
 Do not work in, edit, commit from, or otherwise touch the older local repo/folder. This repo is intentionally separate.
 
+Do not touch the original Render project named `My project`. That is the Claude/original app and is off-limits for Render changes, local work, deploys, database changes, environment variables, or debugging.
+
 ## Repository Identity
 
 - Current working repo: `/Users/avrahambentov/Documents/active-main-clone`
@@ -13,6 +15,22 @@ Do not work in, edit, commit from, or otherwise touch the older local repo/folde
 - Upstream reference only: `https://github.com/bentovavraham/active.git`
 
 Treat `origin` as the active repo for this work. Treat `upstream` as read-only context unless the user explicitly says otherwise.
+
+## Render Boundaries
+
+There are separate Render projects/services:
+
+- `My project`: original Claude app. Never touch.
+- `Codex 2 the webserver`: Codex app web service. This is the Render web target for this repo.
+- `Codex2 The Database`: Codex app database. This is the Render database target for this repo.
+
+Keep the Codex app fully separate from the original Claude app:
+
+- Do not reuse the original app's Render service.
+- Do not reuse the original app's Render database.
+- Do not change the original app's Render environment variables.
+- Do not deploy this repo to the original app's Render service.
+- The Codex web service should use only the Codex database internal URL.
 
 ## Primary Mission
 

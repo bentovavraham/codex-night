@@ -9,6 +9,7 @@ const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
 
 const pool = require('./db/pool');
+const { insertQbAccounts } = require('./db/qb-codes');
 
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
@@ -125,9 +126,23 @@ async function applyMigrationsOnStartup() {
     const sql = fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
     await pool.query(sql);
     console.log('Schema migrations applied.');
+    if (process.env.AUTO_SEED_REFERENCE_DATA !== '0') {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const count = await insertQbAccounts(client);
+        await client.query('COMMIT');
+        console.log(`Reference QB accounts ready (${count}).`);
+      } catch (seedErr) {
+        await client.query('ROLLBACK');
+        throw seedErr;
+      } finally {
+        client.release();
+      }
+    }
   } catch (err) {
     console.error('Startup migration failed:', err);
-    // Don't crash the server — health check will surface the DB issue.
+    process.exit(1);
   }
 }
 

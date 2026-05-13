@@ -143,4 +143,52 @@ async function insertRealCodes(client) {
   return rows.length;
 }
 
-module.exports = { REAL_QB_CODES, insertRealCodes };
+async function insertQbAccounts(client) {
+  const rows = REAL_QB_CODES.map(([account_number, hierarchy], index) => {
+    const parts = hierarchy.split(':');
+    return {
+      account_number,
+      hierarchy,
+      short_name: parts[parts.length - 1],
+      parent_hierarchy: parts.length > 1 ? parts.slice(0, -1).join(':') : null,
+      category: parts[0].toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+      sort_order: (index + 1) * 10,
+    };
+  });
+  const parentPaths = new Set(rows.map(r => r.parent_hierarchy).filter(Boolean));
+  rows.sort((a, b) => a.hierarchy.split(':').length - b.hierarchy.split(':').length || a.sort_order - b.sort_order);
+
+  const idByPath = new Map();
+  for (const r of rows) {
+    const parentId = r.parent_hierarchy ? idByPath.get(r.parent_hierarchy) : null;
+    if (r.parent_hierarchy && !parentId) {
+      throw new Error(`Orphan QB account ${r.account_number}: parent path "${r.parent_hierarchy}" not found`);
+    }
+    const result = await client.query(
+      `INSERT INTO qb_accounts
+         (account_number, full_name, short_name, parent_id, category, sort_order, is_leaf)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (account_number) DO UPDATE
+         SET full_name = EXCLUDED.full_name,
+             short_name = EXCLUDED.short_name,
+             parent_id = EXCLUDED.parent_id,
+             category = EXCLUDED.category,
+             sort_order = EXCLUDED.sort_order,
+             is_leaf = EXCLUDED.is_leaf
+       RETURNING id`,
+      [
+        r.account_number,
+        r.hierarchy,
+        r.short_name,
+        parentId,
+        r.category,
+        r.sort_order,
+        !parentPaths.has(r.hierarchy),
+      ]
+    );
+    idByPath.set(r.hierarchy, result.rows[0].id);
+  }
+  return rows.length;
+}
+
+module.exports = { REAL_QB_CODES, insertRealCodes, insertQbAccounts };
