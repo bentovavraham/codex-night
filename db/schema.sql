@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS phases (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_phases_project ON phases(project_id);
+DO $$ BEGIN ALTER TABLE phases ADD COLUMN phase_number INTEGER; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE phases ADD COLUMN start_date DATE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE phases ADD COLUMN end_date DATE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE phases ADD COLUMN notes TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE phases ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE phases ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- QuickBooks Chart of Accounts. This is the GL spine used by budgets,

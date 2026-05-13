@@ -40,8 +40,9 @@ router.get('/status', requireToken, async (_req, res, next) => {
         (SELECT COUNT(*) FROM contracts)::int  AS contracts,
         (SELECT COUNT(*) FROM invoices)::int   AS invoices,
         (SELECT COUNT(*) FROM vendors)::int    AS vendors,
-        (SELECT COUNT(*) FROM customers)::int  AS customers
-    `);
+        (SELECT COUNT(*) FROM customers)::int  AS customers,
+        ($1::boolean)                          AS ai_extraction_configured
+    `, [Boolean(process.env.ANTHROPIC_API_KEY)]);
     res.json(r.rows[0]);
   } catch (err) { next(err); }
 });
