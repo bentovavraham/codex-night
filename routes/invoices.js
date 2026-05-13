@@ -482,23 +482,23 @@ router.put('/invoices/:id', requireAuth, async (req, res, next) => {
 
     await client.query('BEGIN');
     const result = await client.query(
+      // Amount is computed from line items by syncInvoiceFA after lines are written.
+      // Do not trust the caller's amount field — omit it here.
       `UPDATE invoices SET
          invoice_number       = COALESCE($2, invoice_number),
          vendor_name          = COALESCE($3, vendor_name),
-         amount               = COALESCE($4, amount),
-         invoice_date         = $5,
-         description          = $6,
-         status               = COALESCE($7, status),
-         file_reference       = COALESCE($8, file_reference),
-         phase_budget_line_id = $9,
-         contract_id          = $10,
-         invoice_type         = $11,
+         invoice_date         = $4,
+         description          = $5,
+         status               = COALESCE($6, status),
+         file_reference       = COALESCE($7, file_reference),
+         phase_budget_line_id = $8,
+         contract_id          = $9,
+         invoice_type         = $10,
          updated_at           = NOW()
        WHERE id = $1 RETURNING *`,
       [invId,
        invoice_number ?? null,
        vendor_name ?? null,
-       amount != null ? Number(amount) : null,
        invoice_date ?? null,
        description ?? null,
        status ?? null,

@@ -294,8 +294,9 @@ function ContractList({ contracts, phaseId, onEdit, onEditCo }: {
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.deleteContract(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['phaseContracts', phaseId] });
-      qc.invalidateQueries({ queryKey: ['budget',         phaseId] });
+      qc.invalidateQueries({ queryKey: ['phaseContracts',    phaseId] });
+      qc.invalidateQueries({ queryKey: ['budget',            phaseId] });
+      qc.invalidateQueries({ queryKey: ['budget-crosscheck', phaseId] });
       setConfirmDeleteId(null);
     },
   });
@@ -303,8 +304,9 @@ function ContractList({ contracts, phaseId, onEdit, onEditCo }: {
   const patchMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: any }) => api.updateContract(id, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['phaseContracts', phaseId] });
-      qc.invalidateQueries({ queryKey: ['budget',         phaseId] });
+      qc.invalidateQueries({ queryKey: ['phaseContracts',    phaseId] });
+      qc.invalidateQueries({ queryKey: ['budget',            phaseId] });
+      qc.invalidateQueries({ queryKey: ['budget-crosscheck', phaseId] });
     },
   });
 
@@ -1034,6 +1036,7 @@ export default function ContractsTab() {
     // here), and any open contract detail drawer.
     qc.invalidateQueries({ queryKey: ['phaseContracts',      phaseIdNum] });
     qc.invalidateQueries({ queryKey: ['budget',              phaseIdNum] });
+    qc.invalidateQueries({ queryKey: ['budget-crosscheck',   phaseIdNum] });
     qc.invalidateQueries({ queryKey: ['contractChangeOrders'] });
     qc.invalidateQueries({ queryKey: ['contractDetail'] });
     qc.invalidateQueries({ queryKey: ['drill',               phaseIdNum] });

@@ -481,6 +481,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
   const [amount, setAmount] = useState(ext.amount ? String(ext.amount) : '');
   const [invoiceDate, setInvoiceDate] = useState(ext.invoice_date || '');
   const [invoiceType, setInvoiceType] = useState(ext.invoice_type || 'fixed');
+
   const invoiceStatus = 'pending';
   const [invoiceLines, setInvoiceLines] = useState<InvLineItem[]>(() =>
     (ext.line_items || []).map((li: any) => {
@@ -501,6 +502,9 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
       };
     })
   );
+
+  // Invoice total is always the sum of line items — never entered separately.
+  const lineItemsTotal = invoiceLines.reduce((s, li) => s + (Number(li.amount) || 0), 0);
 
   // Duplicate check
   const [dupMatches, setDupMatches] = useState<any[]>([]);
@@ -532,9 +536,7 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
 
   const dupBlocked = dupMatches.length > 0 && !dupAcked;
   const canConfirm = reviewed && !!vendor.trim() && !saving
-    && (isEditMode || !dupBlocked)
-    && (isEditMode || !isWrongProject || wrongProjectAcked)
-    && (isEditMode || !weakQbMatch || qbOverrideAcked);
+    && (isEditMode || !dupBlocked);
 
   function addLine() {
     setLineItems(li => [...li, { billing_type: 'fixed', description: '', budgeted_amount: '', phase_budget_line_id: null }]);
@@ -575,11 +577,11 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
           vendor_name: vendor.trim(), description,
           qb_account_id: glAccountId,
           invoice_number: invoiceNumber,
-          amount: Number(amount) || 0,
+          amount: invoiceLines.length > 0 ? lineItemsTotal : (Number(amount) || 0),
           invoice_date: invoiceDate || null,
           invoice_type: invoiceType,
           status: isEditMode ? editStatus : invoiceStatus,
-          ...(isEditMode ? { contract_id: contractId } : {}),
+          contract_id: contractId,
           line_items: invoiceLines.map(li => ({
             billing_type: li.billing_type,
             description: li.description,
@@ -717,8 +719,10 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
               <div className={styles.rRow}>
                 <div className={styles.rGroup}>
                   <label className={styles.rLabel}>Total Value</label>
-                  <input className={`${styles.rInput} ${styles.mono}`} value={totalValue}
-                    onChange={e => setTotalValue(e.target.value)} type="number" min="0" step="0.01" placeholder="0.00" />
+                  <input className={`${styles.rInput} ${styles.mono}`}
+                    value={Number(totalValue) > 0 ? Number(totalValue).toLocaleString('en-US') : totalValue}
+                    onChange={e => setTotalValue(e.target.value.replace(/,/g, ''))}
+                    type="text" inputMode="decimal" placeholder="0" />
                 </div>
                 <div className={styles.rGroup}>
                   <label className={styles.rLabel}>Contract Date</label>
@@ -815,8 +819,17 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
                 </div>
                 <div className={styles.rGroup}>
                   <label className={styles.rLabel}>Amount</label>
-                  <input className={`${styles.rInput} ${styles.mono}`} value={amount}
-                    onChange={e => setAmount(e.target.value)} type="number" min="0" step="0.01" placeholder="0.00" />
+                  {invoiceLines.length > 0
+                    ? <div className={`${styles.rInput} ${styles.mono}`} style={{ background: '#f5f3f0', color: '#5a4a3a', cursor: 'default', display: 'flex', alignItems: 'center' }}>
+                        {lineItemsTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <span style={{ fontSize: 10, marginLeft: 6, color: '#9a8a7a' }}>from line items</span>
+                      </div>
+                    : <input className={`${styles.rInput} ${styles.mono}`}
+                        value={amount}
+                        onChange={e => setAmount(e.target.value.replace(/,/g, ''))}
+                        onBlur={e => { const n = Number(e.target.value); if (n > 0) setAmount(String(n)); }}
+                        type="text" inputMode="decimal" placeholder="0.00" />
+                  }
                 </div>
                 <div className={styles.rGroup}>
                   <label className={styles.rLabel}>Invoice Date</label>
@@ -876,97 +889,108 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
               {invoiceLines.length > 0 ? (
                 <div className={styles.rSection}>
                   <div className={styles.rSectionTitle}>
-                    Line Items — assign GL code &amp; budget task
+                    Line Items
                     {invoiceLines.some(l => l.is_ai_suggested) && (
-                      <span className={styles.aiLegend}>✦ AI suggestion — hover for reason, click to override</span>
+                      <span className={styles.aiLegend}>✦ AI suggestion</span>
                     )}
                   </div>
-                  <table className={styles.rTable}>
-                    <thead>
-                      <tr className={styles.rThead}>
-                        <th className={styles.rColType}>TYPE</th>
-                        <th className={styles.rColGl}>GL CODE</th>
-                        <th className={styles.rColBudgetLine}>BUDGET TASK</th>
-                        <th className={styles.rColDesc}>DESCRIPTION</th>
-                        <th className={`${styles.rColAmt} ${styles.right}`}>AMOUNT</th>
-                        <th style={{ width: 28 }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {invoiceLines.map((li, i) => (
-                        <tr key={i} className={styles.rTrow}>
-                          <td className={styles.rColType}>
-                            <span className={`${styles.rTypeBadge} ${li.billing_type === 'tm' ? styles.rTypeBadgeTm : li.billing_type === 'expense' ? styles.rTypeBadgeExp : styles.rTypeBadgeFixed}`}>
-                              {li.billing_type === 'tm' ? 'T&M' : li.billing_type.toUpperCase()}
-                            </span>
-                          </td>
-                          <td className={styles.rColGl}>
-                            <InlineGlPicker
-                              accounts={qbAccounts}
-                              value={li.qb_account_id}
-                              isSuggested={li.is_ai_suggested}
-                              suggestionReason={li.suggestion_reason}
-                              suggestionConfidence={li.suggestion_confidence}
-                              onChange={id => setInvoiceLines(lines => {
+                  <div className={styles.invLineList}>
+                    {invoiceLines.map((li, i) => (
+                      <div key={i} className={styles.invLineRow}>
+                        {/* Assignment: GL + budget task stacked */}
+                        <div className={styles.invLineAssign}>
+                          <InlineGlPicker
+                            accounts={qbAccounts}
+                            value={li.qb_account_id}
+                            isSuggested={li.is_ai_suggested}
+                            suggestionReason={li.suggestion_reason}
+                            suggestionConfidence={li.suggestion_confidence}
+                            onChange={id => setInvoiceLines(lines => {
+                              const n = [...lines];
+                              const matches = id ? budgetLines.filter((bl: any) => bl.qb_account_id === id) : [];
+                              const currentTask = n[i].phase_budget_line_id;
+                              const taskStillValid = currentTask && matches.some((bl: any) => bl.id === currentTask);
+                              n[i] = {
+                                ...n[i],
+                                qb_account_id: id,
+                                is_ai_suggested: false,
+                                phase_budget_line_id: matches.length === 1
+                                  ? matches[0].id
+                                  : (taskStillValid ? currentTask : null),
+                              };
+                              return n;
+                            })}
+                          />
+                          <InlineBudgetLinePicker
+                            lines={budgetLines}
+                            value={li.phase_budget_line_id}
+                            filterByGlId={li.qb_account_id}
+                            onChange={id => setInvoiceLines(lines => {
+                              const n = [...lines];
+                              n[i] = { ...n[i], phase_budget_line_id: id };
+                              return n;
+                            })}
+                          />
+                        </div>
+
+                        {/* Description */}
+                        <div className={styles.invLineDesc}>
+                          {li.person && <span className={styles.invLinePerson}>{li.person}</span>}
+                          <span className={styles.invLineDescText}>{li.description}</span>
+                          {li.billing_type === 'tm' && Number(li.hours) > 0 && (
+                            <span className={styles.invLineTmSub}>{li.hours}h @ ${li.rate}/h</span>
+                          )}
+                        </div>
+
+                        {/* Amount + type */}
+                        <div className={styles.invLineAmtCol}>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className={styles.invLineAmtInput}
+                            value={li.amount}
+                            onBlur={e => {
+                              const raw = e.target.value.replace(/,/g, '');
+                              const n = Number(raw);
+                              if (n > 0) setInvoiceLines(lines => {
+                                const next = [...lines];
+                                next[i] = { ...next[i], amount: String(n) };
+                                return next;
+                              });
+                            }}
+                            onChange={e => {
+                              const raw = e.target.value.replace(/,/g, '');
+                              setInvoiceLines(lines => {
                                 const n = [...lines];
-                                const matches = id ? budgetLines.filter((bl: any) => bl.qb_account_id === id) : [];
-                                const currentTask = n[i].phase_budget_line_id;
-                                const taskStillValid = currentTask && matches.some((bl: any) => bl.id === currentTask);
-                                n[i] = {
-                                  ...n[i],
-                                  qb_account_id: id,
-                                  is_ai_suggested: false,
-                                  phase_budget_line_id: matches.length === 1
-                                    ? matches[0].id
-                                    : (taskStillValid ? currentTask : null),
-                                };
+                                n[i] = { ...n[i], amount: raw };
                                 return n;
-                              })}
-                            />
-                          </td>
-                          <td className={styles.rColBudgetLine}>
-                            <InlineBudgetLinePicker
-                              lines={budgetLines}
-                              value={li.phase_budget_line_id}
-                              filterByGlId={li.qb_account_id}
-                              onChange={id => setInvoiceLines(lines => {
-                                const n = [...lines];
-                                n[i] = { ...n[i], phase_budget_line_id: id };
-                                return n;
-                              })}
-                            />
-                          </td>
-                          <td className={styles.rColDesc}>
-                            <span style={{ fontSize: 12, color: '#1a1714', lineHeight: 1.4, display: 'block', fontWeight: 450 }}>
-                              {li.person && <span style={{ fontWeight: 700, marginRight: 6, color: '#3d2e27' }}>{li.person}</span>}
-                              {li.description}
-                            </span>
-                            {li.billing_type === 'tm' && Number(li.hours) > 0 && <span style={{ fontSize: 10.5, color: '#8a7f74', marginTop: 1, display: 'block' }}>{li.hours}h @ ${li.rate}/h</span>}
-                          </td>
-                          <td className={`${styles.rColAmt} ${styles.right}`}>
-                            <input
-                              type="number"
-                              className={styles.rAmtInput}
-                              value={li.amount}
-                              onChange={e => setInvoiceLines(lines => {
-                                const n = [...lines];
-                                n[i] = { ...n[i], amount: e.target.value };
-                                return n;
-                              })}
-                              style={{ textAlign: 'right', width: '100%' }}
-                            />
-                          </td>
-                          <td style={{ width: 28, textAlign: 'center' }}>
-                            <button
-                              className={styles.rDelBtn}
-                              onClick={() => setInvoiceLines(lines => lines.filter((_, j) => j !== i))}
-                              title="Remove line"
-                            >✕</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                              });
+                            }}
+                          />
+                          <select
+                            className={styles.invLineTypeSelect}
+                            value={li.billing_type}
+                            onChange={e => setInvoiceLines(lines => {
+                              const n = [...lines];
+                              n[i] = { ...n[i], billing_type: e.target.value };
+                              return n;
+                            })}
+                          >
+                            <option value="fixed">Fixed</option>
+                            <option value="tm">T&amp;M</option>
+                            <option value="expense">Expense</option>
+                          </select>
+                        </div>
+
+                        {/* Delete — visible on row hover */}
+                        <button
+                          className={styles.invLineDelete}
+                          onClick={() => setInvoiceLines(lines => lines.filter((_, j) => j !== i))}
+                          title="Remove"
+                        >✕</button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 /* No line items — single top-level GL code */
@@ -981,26 +1005,6 @@ function ReviewOverlay({ item, budgetLines, qbAccounts, onConfirm, onDiscard, on
 
         {/* Sticky footer */}
         <div className={styles.reviewFormFooter}>
-          {!isEditMode && isWrongProject && (
-            <div className={styles.overrideWarn}>
-              <strong>⚠ Possible Wrong Project</strong>
-              <span>This invoice's filename and/or content suggests it may belong to a different project.</span>
-              <label className={styles.reviewCheck} style={{ marginTop: 6 }}>
-                <input type="checkbox" checked={wrongProjectAcked} onChange={e => setWrongProjectAcked(e.target.checked)} />
-                <span>I understand — this invoice belongs to this project, confirm anyway</span>
-              </label>
-            </div>
-          )}
-          {!isEditMode && weakQbMatch && (
-            <div className={styles.overrideWarn}>
-              <strong>⚠ No verified QB match</strong>
-              <span>This invoice has no high-confidence QB transaction link. Confirming without one means the Audit table will show it as unmatched.</span>
-              <label className={styles.reviewCheck} style={{ marginTop: 6 }}>
-                <input type="checkbox" checked={qbOverrideAcked} onChange={e => setQbOverrideAcked(e.target.checked)} />
-                <span>I understand — confirm anyway without a QB match</span>
-              </label>
-            </div>
-          )}
           {!isEditMode && (
             <label className={styles.reviewCheck}>
               <input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
@@ -1194,6 +1198,11 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
     queryFn: () => api.listQbAccounts(),
   });
 
+  const { data: contracts = [] } = useQuery<any[]>({
+    queryKey: ['phaseContracts', phaseId],
+    queryFn: () => api.listContracts(phaseId),
+  });
+
   const pending = queue.filter(i => i.status !== 'confirmed' && i.status !== 'discarded');
   const confirmed = queue.filter(i => i.status === 'confirmed');
   const discarded = queue.filter(i => i.status === 'discarded');
@@ -1259,9 +1268,10 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
     try {
       await api.confirmImportItem(reviewItem.id, formData);
       await refetch();
-      queryClient.invalidateQueries({ queryKey: ['budget', phaseId] });
-      queryClient.invalidateQueries({ queryKey: ['phaseContracts', phaseId] });
-      queryClient.invalidateQueries({ queryKey: ['invoices', phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['budget',            phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['budget-crosscheck', phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['phaseContracts',    phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['invoices',          phaseId] });
       onConfirmed?.();
       setReviewItem(null);
     } catch (err: any) {
@@ -1278,8 +1288,9 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
     try {
       const r = await api.confirmBatchHighConfidence(phaseId);
       await refetch();
-      queryClient.invalidateQueries({ queryKey: ['budget', phaseId] });
-      queryClient.invalidateQueries({ queryKey: ['invoices', phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['budget',            phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['budget-crosscheck', phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['invoices',          phaseId] });
       onConfirmed?.();
       setBatchMsg(`Confirmed ${r.confirmed} of ${r.total}${r.failed ? ` (${r.failed} failed)` : ''}.`);
     } catch (err: any) {
@@ -1318,6 +1329,7 @@ export function ImportDrawer({ phaseId, onClose, onConfirmed }: Props) {
           item={liveReviewItem}
           budgetLines={budgetLines}
           qbAccounts={qbAccounts as QbAccount[]}
+          contracts={liveReviewItem.doc_type === 'invoice' ? contracts : undefined}
           onConfirm={handleConfirm}
           onDiscard={handleDiscard}
           onBack={() => setReviewItem(null)}
@@ -1686,10 +1698,11 @@ export function InvoiceEditOverlay({
           sort_order:           i,
         })),
       });
-      queryClient.invalidateQueries({ queryKey: ['invoices',       phaseId] });
-      queryClient.invalidateQueries({ queryKey: ['budget',         phaseId] });
-      queryClient.invalidateQueries({ queryKey: ['phaseContracts', phaseId] });
-      queryClient.invalidateQueries({ queryKey: ['invoice',        invoiceId] });
+      queryClient.invalidateQueries({ queryKey: ['invoices',          phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['budget',            phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['budget-crosscheck', phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['phaseContracts',    phaseId] });
+      queryClient.invalidateQueries({ queryKey: ['invoice',           invoiceId] });
       onSaved();
     } finally {
       setSaving(false);

@@ -536,6 +536,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     raw_billed: number; raw_paid: number;
     raw_fixed: number; raw_tm: number; raw_expense: number;
     raw_budgeted: number;
+    invoice_header_total: number; invoice_lines_total: number;
   }>({
     queryKey: ['budget-crosscheck', phaseIdNum],
     queryFn: () => api.crossCheckBudget(phaseIdNum),
@@ -1277,8 +1278,11 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         const ccFixed          = Math.abs((grand.fixed    ?? 0) - (cc?.raw_fixed   ?? (grand.fixed    ?? 0))) > EPS;
         const ccTm             = Math.abs((grand.tm       ?? 0) - (cc?.raw_tm      ?? (grand.tm       ?? 0))) > EPS;
         const ccExpense        = Math.abs((grand.expenses ?? 0) - (cc?.raw_expense ?? (grand.expenses ?? 0))) > EPS;
+        // Invoice header vs line items consistency — catches line items saved with wrong amounts
+        const ccInvoiceConsist = cc ? Math.abs(cc.invoice_header_total - cc.invoice_lines_total) > EPS : false;
         const anyMismatch      = ccBudgeted || ccRemBudget || ccRemBudgetPct || ccContracted || ccCoValue ||
-                                 ccTotalCommit || ccCommitUnbilled || ccRemCommitPct || ccBilled || ccPaid || ccFixed || ccTm || ccExpense;
+                                 ccTotalCommit || ccCommitUnbilled || ccRemCommitPct || ccBilled || ccPaid ||
+                                 ccFixed || ccTm || ccExpense || ccInvoiceConsist;
 
         const CcCell = ({ label, gridFmt, rawFmt, mismatch }: {
           label: string; gridFmt: string; rawFmt: string; mismatch: boolean;
@@ -1311,10 +1315,15 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
             <CcCell label="Expense"          gridFmt={usd.format(grand.expenses ?? 0)} rawFmt={usd.format(cc?.raw_expense ?? 0)} mismatch={ccExpense} />
             <CcCell label="Total Invoiced"   gridFmt={usd.format(grand.billed)}     rawFmt={usd.format(rawBilled)}      mismatch={ccBilled} />
             <CcCell label="Amt Paid"         gridFmt={usd.format(grand.paid)}       rawFmt={usd.format(rawPaid)}        mismatch={ccPaid} />
+            {ccInvoiceConsist && cc && (
+              <span className={styles.reconMismatch} style={{ fontSize: 11, padding: '0 8px' }}>
+                ⚠ Invoice line items ({usd.format(cc.invoice_lines_total)}) ≠ invoice headers ({usd.format(cc.invoice_header_total)}) — line item amounts were saved incorrectly
+              </span>
+            )}
             <span className={styles.reconDivider} />
             {anyMismatch
               ? <>
-                  <span className={styles.reconWarnNote}>Grid totals do not match raw DB — aggregation bug detected</span>
+                  <span className={styles.reconWarnNote}>{ccInvoiceConsist ? 'Invoice line item amounts do not match invoice totals — edit the affected invoices to fix' : 'Grid totals do not match raw DB — aggregation bug detected'}</span>
                   <button
                     className={styles.reconRepairBtn}
                     onClick={async () => {

@@ -744,8 +744,15 @@ router.post('/phases/:phaseId/budget', requireAuth, async (req, res, next) => {
 
 // PATCH /api/budget-lines/:lineId
 router.patch('/budget-lines/:lineId', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const { lineId } = req.params;
+    const userId = req.session.userId;
+
+    const before = await client.query('SELECT * FROM phase_budget_lines WHERE id = $1', [lineId]);
+    if (!before.rows.length) return res.status(404).json({ error: 'Line not found' });
+    const old = before.rows[0];
+
     const allowed = ['task_name','discipline','section','sub_group','calculation_method','budgeted_amount','consultant','notes','sort_order'];
     const updates = []; const values = []; let i = 1;
     for (const f of allowed) {
@@ -755,30 +762,68 @@ router.patch('/budget-lines/:lineId', requireAuth, async (req, res, next) => {
     if (req.body.budgeted_amount !== undefined) { updates.push(`amount_modified = TRUE`); }
     values.push(lineId);
 
-    // Fetch old values for audit log before update
-    const before = await pool.query('SELECT * FROM phase_budget_lines WHERE id = $1', [lineId]);
-    if (!before.rows.length) return res.status(404).json({ error: 'Line not found' });
-    const old = before.rows[0];
+    await client.query('BEGIN');
 
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE phase_budget_lines SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING *`,
       values
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Line not found' });
+    if (!result.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Line not found' }); }
 
-    // Log each changed field
-    const loggable = ['task_name','discipline','budgeted_amount','consultant','notes'];
-    for (const f of loggable) {
-      if (req.body[f] !== undefined && String(req.body[f]) !== String(old[f] ?? '')) {
-        pool.query(
-          `INSERT INTO phase_budget_line_logs (line_id, changed_by, field, old_value, new_value)
-           VALUES ($1,$2,$3,$4,$5)`,
-          [lineId, req.session.userId, f, old[f] ?? null, req.body[f] ?? null]
-        ).catch(() => {});
+    // Write immutable amendment record when budget amount changes
+    if (req.body.budgeted_amount !== undefined) {
+      const newAmt  = Number(req.body.budgeted_amount) || 0;
+      const prevAmt = Number(old.budgeted_amount) || 0;
+      if (newAmt !== prevAmt) {
+        await client.query(
+          `INSERT INTO phase_budget_line_amendments
+             (line_id, amendment_type, amount, previous_amount, reason, changed_by)
+           VALUES ($1, 'revision', $2, $3, $4, $5)`,
+          [lineId, newAmt, prevAmt, req.body.reason || null, userId]
+        );
       }
     }
 
+    // Legacy field log (belt-and-suspenders for non-amount fields)
+    const loggable = ['task_name','discipline','budgeted_amount','consultant','notes'];
+    for (const f of loggable) {
+      if (req.body[f] !== undefined && String(req.body[f]) !== String(old[f] ?? '')) {
+        await client.query(
+          `INSERT INTO phase_budget_line_logs (line_id, changed_by, field, old_value, new_value)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [lineId, userId, f, old[f] ?? null, req.body[f] ?? null]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
     res.json(result.rows[0]);
+  } catch (err) { await client.query('ROLLBACK').catch(() => {}); next(err); }
+  finally { client.release(); }
+});
+
+// GET /api/budget-lines/:lineId/amendments
+// Full immutable amendment history for a budget line — every amount change ever made.
+router.get('/budget-lines/:lineId/amendments', requireAuth, async (req, res, next) => {
+  try {
+    const { lineId } = req.params;
+    const result = await pool.query(
+      `SELECT
+         a.id,
+         a.amendment_type,
+         a.amount::float         AS amount,
+         a.previous_amount::float AS previous_amount,
+         a.reason,
+         a.created_at,
+         u.name                  AS changed_by_name,
+         u.email                 AS changed_by_email
+       FROM phase_budget_line_amendments a
+       LEFT JOIN users u ON u.id = a.changed_by
+       WHERE a.line_id = $1
+       ORDER BY a.created_at ASC`,
+      [lineId]
+    );
+    res.json(result.rows);
   } catch (err) { next(err); }
 });
 
@@ -1476,7 +1521,30 @@ router.get('/phases/:phaseId/budget/cross-check', requireAuth, async (req, res, 
         -- Independent of any aggregation — just reads the stored PM inputs.
         COALESCE((
           SELECT SUM(budgeted_amount) FROM phase_budget_lines WHERE phase_id = $1
-        ), 0)::float AS raw_budgeted
+        ), 0)::float AS raw_budgeted,
+
+        -- INVOICE CONSISTENCY: sum of invoice header amounts vs sum of line item amounts.
+        -- If these differ, a line item was saved with the wrong amount.
+        -- invoices with no line items use invoice.amount for both sides.
+        COALESCE((
+          SELECT SUM(inv.amount)
+          FROM invoices inv
+          WHERE inv.phase_id = $1 AND inv.status NOT IN ('voided','rejected')
+        ), 0)::float AS invoice_header_total,
+
+        COALESCE((
+          SELECT SUM(contribution) FROM (
+            SELECT ili.amount AS contribution
+            FROM invoices inv
+            JOIN invoice_line_items ili ON ili.invoice_id = inv.id
+            WHERE inv.phase_id = $1 AND inv.status NOT IN ('voided','rejected')
+            UNION ALL
+            SELECT inv.amount AS contribution
+            FROM invoices inv
+            WHERE inv.phase_id = $1 AND inv.status NOT IN ('voided','rejected')
+              AND NOT EXISTS (SELECT 1 FROM invoice_line_items x WHERE x.invoice_id = inv.id)
+          ) sub
+        ), 0)::float AS invoice_lines_total
     `, [phaseId]);
 
     res.json(result.rows[0]);

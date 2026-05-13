@@ -292,30 +292,11 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
     } = req.body || {};
 
     await client.query('BEGIN');
-    const result = await client.query(
-      `UPDATE contracts SET
-         vendor_name      = COALESCE($2, vendor_name),
-         description      = $3,
-         total_value      = COALESCE($4, total_value),
-         contract_date    = $5,
-         reference_number = $6,
-         status           = COALESCE($7, status),
-         file_reference   = COALESCE($8, file_reference),
-         updated_at       = NOW()
-       WHERE id = $1 RETURNING *`,
-      [contractId,
-       vendor_name ?? null,
-       description ?? null,
-       total_value != null ? Number(total_value) : null,
-       contract_date ?? null,
-       reference_number ?? null,
-       status ?? null,
-       file_reference ?? null]);
 
-    // Replace line items when provided (full replace) then sync FA rows.
+    // Replace line items first so we can compute total_value from them.
+    const phaseIdForPbl = phase_id ? Number(phase_id) : (old.phase_id || null);
     if (Array.isArray(lineItems)) {
       await client.query('DELETE FROM contract_line_items WHERE contract_id = $1', [contractId]);
-      const phaseIdForPbl = phase_id ? Number(phase_id) : (old.phase_id || null);
       for (let i = 0; i < lineItems.length; i++) {
         const li = lineItems[i];
         const qbAccountId = li.qb_account_id ? Number(li.qb_account_id) : null;
@@ -333,6 +314,31 @@ router.put('/contracts/:id', requireAuth, async (req, res, next) => {
       }
       await syncContractFA(client, contractId, phaseIdForPbl, req.session.userId);
     }
+
+    // total_value is always computed from line items — never trust the caller's value.
+    const computedTotal = Array.isArray(lineItems) && lineItems.length > 0
+      ? lineItems.reduce((s, li) => s + (Number(li.budgeted_amount) || 0), 0)
+      : (total_value != null ? Number(total_value) : null);
+
+    const result = await client.query(
+      `UPDATE contracts SET
+         vendor_name      = COALESCE($2, vendor_name),
+         description      = $3,
+         total_value      = COALESCE($4, total_value),
+         contract_date    = $5,
+         reference_number = $6,
+         status           = COALESCE($7, status),
+         file_reference   = COALESCE($8, file_reference),
+         updated_at       = NOW()
+       WHERE id = $1 RETURNING *`,
+      [contractId,
+       vendor_name ?? null,
+       description ?? null,
+       computedTotal,
+       contract_date ?? null,
+       reference_number ?? null,
+       status ?? null,
+       file_reference ?? null]);
 
     const changes = [];
     if (vendor_name && vendor_name !== old.vendor_name) changes.push(`vendor: ${old.vendor_name} → ${vendor_name}`);

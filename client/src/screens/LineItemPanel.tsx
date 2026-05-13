@@ -68,6 +68,12 @@ export function LineItemPanel({ row, onClose, source = 'pm' }: Props) {
   const qbTxns: any[] = qbQuery.data?.transactions ?? [];
   const qbTotals = qbQuery.data?.totals;
 
+  const { data: amendments = [] } = useQuery<any[]>({
+    queryKey: ['lineAmendments', row.id],
+    queryFn: () => api.getLineAmendments(row.id),
+    staleTime: 30_000,
+  });
+
   const totalCommitted = contracts
     .filter(c => c.status !== 'voided')
     .reduce((s, c) => s + Number(c.total_value || 0), 0);
@@ -124,6 +130,45 @@ export function LineItemPanel({ row, onClose, source = 'pm' }: Props) {
           </div>
         ) : (
           <div className={styles.body}>
+
+            {/* Budget Amendment History */}
+            <div className={styles.section}>
+              <div className={styles.sectionHead}>
+                Budget History
+                {amendments.length > 0 && <span className={styles.sectionCount}>{amendments.length}</span>}
+              </div>
+              {amendments.length === 0 ? (
+                <div className={styles.empty}>No budget changes recorded.</div>
+              ) : (
+                <div className={styles.amendmentList}>
+                  {amendments.map((a: any, i: number) => {
+                    const isFirst = i === 0;
+                    const delta = a.amount - a.previous_amount;
+                    return (
+                      <div key={a.id} className={styles.amendmentRow}>
+                        <div className={styles.amendmentLeft}>
+                          <span className={`${styles.amendmentBadge} ${isFirst ? styles.amendmentOriginal : styles.amendmentRevision}`}>
+                            {isFirst ? 'Original' : 'Revised'}
+                          </span>
+                          <span className={styles.amendmentAmt}>{usd.format(a.amount)}</span>
+                          {!isFirst && delta !== 0 && (
+                            <span className={`${styles.amendmentDelta} ${delta > 0 ? styles.deltaPos : styles.deltaNeg}`}>
+                              {delta > 0 ? '+' : ''}{usd.format(delta)}
+                            </span>
+                          )}
+                          {a.reason && <span className={styles.amendmentReason}>{a.reason}</span>}
+                        </div>
+                        <div className={styles.amendmentMeta}>
+                          {a.changed_by_name || a.changed_by_email || 'System'}
+                          {' · '}
+                          {new Date(a.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             {/* Contracts */}
             <div className={styles.section}>

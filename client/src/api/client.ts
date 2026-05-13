@@ -54,7 +54,8 @@ export const api = {
     window.location.href = `/api/phases/${phaseId}/budget/export-excel`;
   },
   updateBudgetLine: (id: number, data: any) => request<any>('PATCH', `/api/budget-lines/${id}`, data),
-  getLineActivity: (lineId: number)          => request<any>('GET',  `/api/budget-lines/${lineId}/activity`),
+  getLineActivity:    (lineId: number) => request<any>('GET',  `/api/budget-lines/${lineId}/activity`),
+  getLineAmendments:  (lineId: number) => request<any[]>('GET', `/api/budget-lines/${lineId}/amendments`),
   getQbTransactionsForGl: (phaseId: number, glCode: string) =>
     request<{ transactions: any[]; totals: { total: number; paid: number; open_balance: number }; gl_code: string }>(
       'GET', `/api/phases/${phaseId}/qb-transactions?gl_code=${encodeURIComponent(glCode)}`),
