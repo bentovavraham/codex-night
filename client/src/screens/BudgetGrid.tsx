@@ -50,6 +50,7 @@ export interface BudgetRow {
   qb_parent_name: string | null;
   qb_parent_sort: number;
   qb_category: string | null;
+  contract_vendors: string;
 }
 
 interface QbAccount {
@@ -91,11 +92,12 @@ const TAB_FIELDS = ['task_name', 'budgeted_amount', 'consultant', 'calculation_m
 
 // ─── Editable cell ────────────────────────────────────────────────────────────
 
-function EditCell({ value, rowId, field, numeric, isActive, onActivate, onCommit, onTabNext, className }: {
+function EditCell({ value, rowId, field, numeric, isActive, onActivate, onCommit, onTabNext, className, subLabel }: {
   value: string | number | null; rowId: number; field: string; numeric?: boolean;
   isActive: boolean; onActivate: (rowId: number, field: string) => void;
   onCommit: (rowId: number, field: string, val: string) => void;
   onTabNext: (rowId: number, field: string) => void; className?: string;
+  subLabel?: React.ReactNode;
 }) {
   const [draft, setDraft] = useState('');
   const ref = useRef<HTMLInputElement>(null);
@@ -117,6 +119,7 @@ function EditCell({ value, rowId, field, numeric, isActive, onActivate, onCommit
   return (
     <td className={`${styles.cell} ${styles.editableCell} ${className ?? ''} ${!display ? styles.cellEmpty : ''}`} onClick={open}>
       {display || null}
+      {subLabel}
     </td>
   );
 }
@@ -449,13 +452,25 @@ function DrillPanel({ phaseId, projectId, target, onClose, onEditContract }: {
 
 // ─── Drillable read-only cell ──────────────────────────────────────────────────
 
+const CELL_COLOR: Partial<Record<DrillCell, string>> = {
+  committed: styles.numCommitted,
+  co:        styles.numCommitted,
+  fixed:     styles.numInvoiced,
+  tm:        styles.numInvoiced,
+  expense:   styles.numInvoiced,
+  billed:    styles.numInvoiced,
+  paid:      styles.numInvoiced,
+  due:       styles.numInvoiced,
+};
+
 function DC({ value, row, cell, active, onDrill, className, showDash }: {
   value: number; row: BudgetRow; cell: DrillCell;
   active: boolean; onDrill: (t: DrillTarget) => void; className?: string; showDash?: boolean;
 }) {
   const has = value !== 0;
+  const colorCls = has ? (CELL_COLOR[cell] ?? '') : '';
   return (
-    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${className ?? ''} ${has ? styles.drillable : ''} ${active ? styles.drillActive : ''}`}
+    <td className={`${styles.cell} ${styles.tdMoney} ${styles.ro} ${colorCls} ${className ?? ''} ${has ? styles.drillable : ''} ${active ? styles.drillActive : ''}`}
       onClick={has ? () => onDrill({ rowId: row.id, rowName: row.task_name, cell }) : undefined}
       title={has ? 'Click to see breakdown' : undefined}>
       {value === 0 ? (showDash ? '—' : '') : usd.format(value)}
@@ -550,11 +565,6 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     staleTime: Infinity,
   });
 
-  const { data: contracts = [] } = useQuery<any[]>({
-    queryKey: ['contracts', phaseIdNum],
-    queryFn: () => api.listContracts(phaseIdNum),
-    enabled: !!phaseIdNum,
-  });
 
   const { data: snapshots = [], refetch: refetchSnapshots } = useQuery<any[]>({
     queryKey: ['snapshots', phaseIdNum],
@@ -599,13 +609,14 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
   });
 
   const addRowMutation = useMutation({
-    mutationFn: (data: { task_name: string; budgeted_amount: number }) =>
+    mutationFn: (data: { task_name: string; budgeted_amount: number; qb_account_id?: number | null }) =>
       api.addBudgetLine(phaseIdNum, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['budget', phaseIdNum] });
       setNewRowName('');
       setNewRowAmt('');
       setShowAddRow(false);
+
     },
   });
 
@@ -837,23 +848,32 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
     </>;
   };
 
-  const renderRow = (row: BudgetRow) => {
+  const renderRow = (row: BudgetRow, inGlGroup = false) => {
     const isA = (f: string) => active.rowId === row.id && active.field === f;
     const isDrillActive = drillTarget?.rowId === row.id;
+    const vendors = row.contract_vendors ? row.contract_vendors.split('|||').filter(Boolean) : [];
+    const vendorLabel = vendors.length > 0
+      ? <span className={styles.taskVendor}>{vendors[0]}{vendors.length > 1 ? ` +${vendors.length - 1} more` : ''}</span>
+      : null;
     return (
-      <tr key={row.id} className={`${styles.dataRow} ${row.source === 'user' ? styles.rowUserAdded : ''} ${isDrillActive ? styles.drillActiveRow : ''}`}
+      <tr key={row.id} className={`${styles.dataRow} ${inGlGroup ? styles.rowInGl : ''} ${row.source === 'user' ? styles.rowUserAdded : ''} ${isDrillActive ? styles.drillActiveRow : ''}`}
         style={(row as any).general_unassigned ? { background: '#fef9f3', fontStyle: 'italic' } : undefined}>
         <td className={styles.rowGutter} onClick={() => setPanelRow(row)} style={{ cursor: 'pointer' }}
           title={row.has_direct_invoices ? 'Has invoices billed directly (no contract)' : undefined}>
-          <span className={`${styles.rowArrow} ${row.has_direct_invoices ? styles.rowArrowDirect : ''}`}>›</span>
+          <span className={`${styles.rowArrow} ${row.has_direct_invoices ? styles.rowArrowDirect : ''}`}>▶</span>
         </td>
-        <td className={`${styles.cell} ${styles.tdAcct} ${styles.ro}`}>
-          <span className={styles.tdAcctNum}>{row.qb_account_number ?? '—'}</span>
-          {row.qb_short_name && <span className={styles.tdAcctDesc}>{row.qb_short_name}</span>}
-        </td>
+        {inGlGroup
+          ? <td className={`${styles.cell} ${styles.tdAcctBlank}`} />
+          : <td className={`${styles.cell} ${styles.tdAcct} ${styles.ro}`}>
+              <span className={styles.tdAcctNum}>{row.qb_account_number ?? '—'}</span>
+              {row.qb_short_name && <span className={styles.tdAcctDesc}>{row.qb_short_name}</span>}
+            </td>
+        }
         <EditCell value={row.task_name} rowId={row.id} field="task_name"
           isActive={isA('task_name')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
-          onCommit={handleCommit} onTabNext={handleTabNext} className={styles.tdTask} />
+          onCommit={handleCommit} onTabNext={handleTabNext}
+          className={`${styles.tdTask}${inGlGroup ? ` ${styles.tdTaskInGl}` : ''}`}
+          subLabel={vendorLabel} />
         <EditCell value={row.budgeted_amount} rowId={row.id} field="budgeted_amount" numeric
           isActive={isA('budgeted_amount')} onActivate={(id,f)=>setActive({rowId:id,field:f})}
           onCommit={handleCommit} onTabNext={handleTabNext}
@@ -932,8 +952,8 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         // Root: category band — numbers shown only when collapsed; subtotal row at bottom when expanded
         return [
           <tr key={`root:${key}`} className={styles.catRow} onClick={() => toggle(key)}>
-            <td className={styles.catGutter}><span className={styles.chevron}>{isOpen ? '▾' : '▸'}</span></td>
-            <td className={styles.catLabel} colSpan={2}>{acctTag}{label}</td>
+            <td className={styles.catGutter} />
+            <td className={styles.catLabel} colSpan={2}><span className={styles.catChevron}>{isOpen ? '▼' : '▶'}</span>{acctTag}{label}</td>
             <SumCells t={t} variant="root" blank={isOpen} />
           </tr>,
           ...(isOpen ? [
@@ -950,8 +970,8 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         // Sub-group: collapsible group row — numbers shown only when collapsed
         return [
           <tr key={`grp:${key}`} className={styles.secRow} onClick={() => toggle(key)}>
-            <td className={styles.secGutter}><span className={styles.chevron}>{isOpen ? '▾' : '▸'}</span></td>
-            <td className={styles.secLabel} colSpan={2}>{acctTag}{label}</td>
+            <td className={styles.secGutter} />
+            <td className={styles.secLabel} colSpan={2}><span className={styles.secChevron}>{isOpen ? '▼' : '▶'}</span>{acctTag}{label}</td>
             <SumCells t={t} variant="grp" blank={isOpen} />
           </tr>,
           ...(isOpen ? [
@@ -964,8 +984,22 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
         ];
       }
 
-      // Leaf account: task rows only
-      return leafRows.map(r => renderRow(blankActualsForShared(r)));
+      // Leaf account: GL code is the visual container; tasks nest inside
+      const glKey = `gl:${key}`;
+      const glOpen = !collapsed.has(glKey);
+      return [
+        <tr key={glKey} className={styles.glRow} onClick={() => toggle(glKey)}>
+          <td className={styles.glGutter} />
+          <td className={styles.glLabel} colSpan={2}>
+            <span className={styles.glChevron}>{glOpen ? '▼' : '▶'}</span>
+            {acctTag}{label}
+          </td>
+          <SumCells t={t} variant="leaf" blank={glOpen} />
+        </tr>,
+        ...(glOpen ? [
+          ...leafRows.map(r => renderRow(blankActualsForShared(r), true)),
+        ] : []),
+      ];
     });
   };
 
@@ -1020,7 +1054,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
       )}
 
       <div className={styles.toolbar}>
-        <span className={styles.toolLabel}>{viewMode === 'variance' ? 'Variance Report' : 'Budget'}</span>
+        {viewMode === 'variance' && <span className={styles.toolLabel}>Variance Report</span>}
         {drillTarget && viewMode === 'budget' && (
           <span className={styles.drillHint}>
             <strong>{drillTarget.rowName}</strong> · {DRILL_LABEL[drillTarget.cell]}
@@ -1300,49 +1334,53 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
               {anyMismatch ? '✗ Mismatch' : allocOk ? '✓ Reconciled' : '⚠ Unallocated'}
             </span>
             <span className={styles.reconDivider} />
-            <CcCell label="Budgeted"     gridFmt={usd.format(grand.budgeted)}   rawFmt={usd.format(rawBudgeted)}    mismatch={ccBudgeted} />
-            <CcCell label="Rem. Budget"  gridFmt={usd.format(gridRemBudget)}    rawFmt={usd.format(rawRemBudget)}   mismatch={ccRemBudget} />
-            <CcCell label="Rem. %"       gridFmt={pct(gridRemBudgetPct)}        rawFmt={pct(rawRemBudgetPct)}       mismatch={ccRemBudgetPct} />
-            <span className={styles.reconDivider} />
-            <CcCell label="Initial Contracts" gridFmt={usd.format(grand.committed)}  rawFmt={usd.format(rawContracted)}  mismatch={ccContracted} />
-            <CcCell label="COs"              gridFmt={usd.format(grand.co_value)}   rawFmt={usd.format(rawCoValue)}     mismatch={ccCoValue} />
-            <CcCell label="Total Commitment" gridFmt={usd.format(gridTotalCommit)}    rawFmt={usd.format(rawTotalCommit)}    mismatch={ccTotalCommit} />
-            <CcCell label="$ Rem. on Commit" gridFmt={usd.format(gridCommitUnbilled)} rawFmt={usd.format(rawCommitUnbilled)} mismatch={ccCommitUnbilled} />
-            <CcCell label="% Rem. of Commit" gridFmt={pct(gridRemCommitPct)}          rawFmt={pct(rawRemCommitPct)}          mismatch={ccRemCommitPct} />
-            <span className={styles.reconDivider} />
-            <CcCell label="Fixed"            gridFmt={usd.format(grand.fixed ?? 0)} rawFmt={usd.format(cc?.raw_fixed ?? 0)}   mismatch={ccFixed} />
-            <CcCell label="T&M"              gridFmt={usd.format(grand.tm ?? 0)}    rawFmt={usd.format(cc?.raw_tm ?? 0)}      mismatch={ccTm} />
-            <CcCell label="Expense"          gridFmt={usd.format(grand.expenses ?? 0)} rawFmt={usd.format(cc?.raw_expense ?? 0)} mismatch={ccExpense} />
-            <CcCell label="Total Invoiced"   gridFmt={usd.format(grand.billed)}     rawFmt={usd.format(rawBilled)}      mismatch={ccBilled} />
-            <CcCell label="Amt Paid"         gridFmt={usd.format(grand.paid)}       rawFmt={usd.format(rawPaid)}        mismatch={ccPaid} />
-            {ccInvoiceConsist && cc && (
-              <span className={styles.reconMismatch} style={{ fontSize: 11, padding: '0 8px' }}>
-                ⚠ Invoice line items ({usd.format(cc.invoice_lines_total)}) ≠ invoice headers ({usd.format(cc.invoice_header_total)}) — line item amounts were saved incorrectly
-              </span>
-            )}
+            {/* Clean mode: show only the 4 key totals */}
+            {!anyMismatch && <>
+              <CcCell label="Budgeted"         gridFmt={usd.format(grand.budgeted)}      rawFmt={usd.format(rawBudgeted)}      mismatch={false} />
+              <CcCell label="Total Commitment" gridFmt={usd.format(gridTotalCommit)}      rawFmt={usd.format(rawTotalCommit)}   mismatch={false} />
+              <CcCell label="Total Invoiced"   gridFmt={usd.format(grand.billed)}         rawFmt={usd.format(rawBilled)}        mismatch={false} />
+              <CcCell label="Amt Paid"         gridFmt={usd.format(grand.paid)}           rawFmt={usd.format(rawPaid)}          mismatch={false} />
+            </>}
+            {/* Mismatch mode: show all stats so the problem is visible */}
+            {anyMismatch && <>
+              <CcCell label="Budgeted"          gridFmt={usd.format(grand.budgeted)}        rawFmt={usd.format(rawBudgeted)}       mismatch={ccBudgeted} />
+              <CcCell label="Rem. Budget"       gridFmt={usd.format(gridRemBudget)}          rawFmt={usd.format(rawRemBudget)}      mismatch={ccRemBudget} />
+              <CcCell label="Rem. %"            gridFmt={pct(gridRemBudgetPct)}              rawFmt={pct(rawRemBudgetPct)}           mismatch={ccRemBudgetPct} />
+              <span className={styles.reconDivider} />
+              <CcCell label="Contracts"         gridFmt={usd.format(grand.committed)}        rawFmt={usd.format(rawContracted)}     mismatch={ccContracted} />
+              <CcCell label="COs"               gridFmt={usd.format(grand.co_value)}         rawFmt={usd.format(rawCoValue)}        mismatch={ccCoValue} />
+              <CcCell label="Total Commitment"  gridFmt={usd.format(gridTotalCommit)}         rawFmt={usd.format(rawTotalCommit)}    mismatch={ccTotalCommit} />
+              <span className={styles.reconDivider} />
+              <CcCell label="Fixed"             gridFmt={usd.format(grand.fixed ?? 0)}       rawFmt={usd.format(cc?.raw_fixed ?? 0)}   mismatch={ccFixed} />
+              <CcCell label="T&M"               gridFmt={usd.format(grand.tm ?? 0)}          rawFmt={usd.format(cc?.raw_tm ?? 0)}      mismatch={ccTm} />
+              <CcCell label="Expense"           gridFmt={usd.format(grand.expenses ?? 0)}    rawFmt={usd.format(cc?.raw_expense ?? 0)} mismatch={ccExpense} />
+              <CcCell label="Total Invoiced"    gridFmt={usd.format(grand.billed)}            rawFmt={usd.format(rawBilled)}        mismatch={ccBilled} />
+              <CcCell label="Amt Paid"          gridFmt={usd.format(grand.paid)}             rawFmt={usd.format(rawPaid)}          mismatch={ccPaid} />
+              {ccInvoiceConsist && cc && (
+                <span className={styles.reconMismatch} style={{ fontSize: 11, padding: '0 8px' }}>
+                  ⚠ Invoice lines ({usd.format(cc.invoice_lines_total)}) ≠ headers ({usd.format(cc.invoice_header_total)})
+                </span>
+              )}
+            </>}
             <span className={styles.reconDivider} />
             {anyMismatch
               ? <>
-                  <span className={styles.reconWarnNote}>{ccInvoiceConsist ? 'Invoice line item amounts do not match invoice totals — edit the affected invoices to fix' : 'Grid totals do not match raw DB — aggregation bug detected'}</span>
-                  <button
-                    className={styles.reconRepairBtn}
-                    onClick={async () => {
-                      const res = await api.repairFa(phaseIdNum);
-                      if (res.voided > 0) {
-                        qc.invalidateQueries({ queryKey: ['budget', phaseIdNum] });
-                        qc.invalidateQueries({ queryKey: ['budget-crosscheck', phaseIdNum] });
-                      }
-                      alert(res.voided > 0 ? `Repaired: ${res.voided} orphaned FA row${res.voided > 1 ? 's' : ''} voided.` : 'No orphaned FA rows found.');
-                    }}>
-                    Repair FA
-                  </button>
+                  <span className={styles.reconWarnNote}>{ccInvoiceConsist ? 'Edit affected invoices to fix' : 'Aggregation mismatch — repair FA'}</span>
+                  <button className={styles.reconRepairBtn} onClick={async () => {
+                    const res = await api.repairFa(phaseIdNum);
+                    if (res.voided > 0) {
+                      qc.invalidateQueries({ queryKey: ['budget', phaseIdNum] });
+                      qc.invalidateQueries({ queryKey: ['budget-crosscheck', phaseIdNum] });
+                    }
+                    alert(res.voided > 0 ? `Repaired: ${res.voided} orphaned FA row${res.voided > 1 ? 's' : ''} voided.` : 'No orphaned FA rows found.');
+                  }}>Repair FA</button>
                 </>
               : allocOk
                 ? <span className={styles.reconOkNote}>All columns match DB</span>
                 : <span className={styles.reconWarnNote}>
-                    {usd.format(unallocTotal)} outside budget lines
-                    {unallocContractAmt > 0 && ` · ${unassignedContracts.length} contract${unassignedContracts.length !== 1 ? 's' : ''} ${usd.format(unallocContractAmt)}`}
-                    {unallocInvoiceAmt  > 0 && ` · ${unassignedInvoices.length} invoice${unassignedInvoices.length !== 1 ? 's' : ''} ${usd.format(unallocInvoiceAmt)}`}
+                    {usd.format(unallocTotal)} unallocated
+                    {unallocContractAmt > 0 && ` · ${unassignedContracts.length} contract${unassignedContracts.length !== 1 ? 's' : ''}`}
+                    {unallocInvoiceAmt  > 0 && ` · ${unassignedInvoices.length} invoice${unassignedInvoices.length !== 1 ? 's' : ''}`}
                   </span>}
           </div>
         );
@@ -1428,7 +1466,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
                   </td>
                   <SumCells t={freeTotals} variant="root" />
                 </tr>
-                {freeRows.map(renderRow)}
+                {freeRows.map(r => renderRow(r))}
               </>
             )}
             {phantomRows.length > 0 && (
@@ -1440,7 +1478,7 @@ export default function BudgetGrid({ source = 'pm' }: { source?: BudgetSource } 
                   </td>
                   <SumCells t={phantomTotals} variant="root" />
                 </tr>
-                {phantomRows.map(renderRow)}
+                {phantomRows.map(r => renderRow(r))}
               </>
             )}
           </tbody>

@@ -25,18 +25,18 @@
   align-items: center;
   height: var(--toolbar-h);
   padding: 0 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid #000;
   flex-shrink: 0;
   gap: 8px;
-  background: var(--bg);
+  background: #1a1d21;
 }
 
 .toolLabel {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--text-3);
+  letter-spacing: .07em;
+  color: rgba(255,255,255,0.9);
   margin-right: auto;
 }
 
@@ -45,20 +45,20 @@
 .tbBtn {
   height: 26px;
   padding: 0 10px;
-  font-size: 11.5px;
-  font-weight: 500;
-  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(255,255,255,0.2);
   border-radius: 4px;
-  background: var(--surface);
-  color: var(--text-2);
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.85);
   cursor: pointer;
 }
-.tbBtn:hover { background: var(--surface-2); }
+.tbBtn:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.4); }
 
 .tbBtnActive {
-  background: #37474f !important;
-  color: #fff !important;
-  border-color: #37474f !important;
+  background: #ffffff !important;
+  color: #1a1d21 !important;
+  border-color: #ffffff !important;
 }
 
 /* ── Scroll area ─────────────────────────────────────────────────────────── */
@@ -97,14 +97,14 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .12em;
-  color: rgba(255,255,255,0.45);
+  color: rgba(255,255,255,0.75);
   text-align: center;
   border-bottom: 1px solid rgba(255,255,255,0.08);
   border-right: 1px solid rgba(255,255,255,0.1);
   white-space: nowrap;
   background: #1a1d21;
 }
-.thGroupAlt { color: rgba(255,255,255,0.45); }
+.thGroupAlt { color: rgba(255,255,255,0.75); }
 
 .thead {
   position: sticky;
@@ -114,8 +114,8 @@
 
 .th {
   padding: 9px 10px 8px;
-  height: 40px;
-  font-size: 11px;
+  height: 44px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .04em;
@@ -169,13 +169,13 @@
 
 .catGutter {
   padding: 0 0 0 8px;
-  height: 30px;
+  height: 36px;
 }
 
 .catLabel {
-  padding: 0 10px;
-  height: 30px;
-  font-size: 11px;
+  padding: 0 10px 0 4px;
+  height: 36px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .07em;
@@ -186,26 +186,25 @@
 }
 
 .catRow td { border-bottom: 1px solid #dadce0; }
-.catRow .chevron { color: #80868b; font-size: 9px; }
+.catChevron { display: inline-block; font-size: 11px; color: #202124; margin-right: 10px; vertical-align: middle; }
 
 /* account number tag inside catLabel / secLabel */
 .acctNum {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: .03em;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .02em;
   margin-right: 10px;
-  color: #80868b;
+  color: #3c4043;
 }
 
 /* number cells for root rows */
 .rootNum {
-  padding: 0 8px;
-  height: 30px;
+  padding: 0 14px;
+  height: 36px;
   text-align: right;
   font-family: 'Inter', system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: #202124;
   border-bottom: 1px solid #dadce0;
@@ -222,30 +221,30 @@
 
 .secGutter {
   padding: 0 0 0 18px;
-  height: 26px;
+  height: 32px;
 }
 
 .secLabel {
-  padding: 0 8px 0 16px;
-  height: 26px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: 0 8px 0 4px;
+  height: 32px;
+  font-size: 13px;
+  font-weight: 700;
   color: #ffffff;
   white-space: nowrap;
   vertical-align: middle;
 }
 
-.secRow .chevron { color: rgba(255,255,255,0.5); font-size: 9px; }
-.secRow .acctNum { color: rgba(255,255,255,0.45); }
+.secChevron { display: inline-block; font-size: 11px; color: #ffffff; margin-right: 10px; vertical-align: middle; }
+.secRow .acctNum { color: rgba(255,255,255,0.9); }
 
 /* number cells for sub-group rows */
 .grpNum {
-  padding: 0 8px;
-  height: 26px;
+  padding: 0 14px;
+  height: 32px;
   text-align: right;
   font-family: 'Inter', system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: rgba(255,255,255,0.85);
   white-space: nowrap;
@@ -256,24 +255,24 @@
 .secSubRow { background: #fff; }
 
 .secSubLabel {
-  padding: 0 8px 0 24px;
-  height: 22px;
-  font-size: 10px;
+  padding: 0 10px 0 24px;
+  height: 28px;
+  font-size: 12px;
   font-weight: 700;
-  font-style: italic;
-  color: #3c4043;
+  font-style: normal;
+  color: #202124;
   border-top: 1px solid #3c4043;
   white-space: nowrap;
   vertical-align: middle;
 }
 
 .secSubNum {
-  padding: 0 8px;
-  height: 22px;
+  padding: 0 14px;
+  height: 28px;
   text-align: right;
   font-family: 'Inter', system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: #202124;
   border-top: 1px solid #3c4043;
@@ -285,15 +284,110 @@
 .leafSubRow  { background: #fff; }
 .leafSubAcct { font-size: 10px; color: #5f6368; padding: 0 8px; }
 .leafSubLabel { font-size: 10px; color: #5f6368; font-style: italic; padding: 0 8px; }
-.sgSubNum    { padding: 0 8px; height: 22px; text-align: right; font-size: 12px; font-weight: 600; color: #3c4043; border-top: 1px solid #e0e0e0; white-space: nowrap; }
+.sgSubNum    { padding: 0 14px; height: 28px; text-align: right; font-size: 13px; font-weight: 600; color: #3c4043; border-top: 1px solid #e0e0e0; white-space: nowrap; }
+
+/* ── Level 3: Leaf GL account container rows ─────────────────────────────── */
+
+.glRow {
+  background: #e8eaed;
+  cursor: pointer;
+  border-bottom: 1px solid #c8cacd;
+}
+.glRow:hover { background: #dadce0; }
+
+.glGutter {
+  height: 30px;
+}
+
+.glLabel {
+  padding: 0 8px 0 18px;
+  height: 30px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #202124;
+  white-space: nowrap;
+  vertical-align: middle;
+  letter-spacing: .01em;
+}
+
+.glChevron {
+  display: inline-block;
+  font-size: 11px;
+  color: #202124;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.glRow .acctNum { color: #202124; font-family: Arial, sans-serif; font-weight: 800; }
+
+/* "+ Add task" button lives inside the GL label cell, invisible until row hover */
+.glAddBtn {
+  display: inline-block;
+  margin-left: 14px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #9aa0a6;
+  background: transparent;
+  border: 1px dashed #c4beb5;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.1s, border-color 0.1s;
+  vertical-align: middle;
+}
+.glRow:hover .glAddBtn { opacity: 1; }
+.glAddBtn:hover { color: #1a73e8; border-color: #1a73e8; }
+
+/* Add form row — only appears when actively typing a new task under a GL group */
+.glAddRow { background: #faf8f5; }
+.glAddRow td { border-bottom: 1px solid #e8e4de; }
+
+.glAddForm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 44px;
+}
+
+/* Task rows nested inside a GL container */
+.rowInGl .rowGutter { padding-left: 8px; }
+
+/* Blank acct cell for rows inside a GL container — collapse to thin indent guide */
+.tdAcctBlank {
+  width: 6px;
+  min-width: 6px;
+  max-width: 6px;
+  padding: 0;
+  border-right: 2px solid #dadce0;
+  background: #f1f3f4;
+}
+
+/* Task name cell with extra indent when inside a GL container */
+.tdTaskInGl {
+  padding-left: 20px;
+}
+
+/* Vendor sub-label under task name */
+.taskVendor {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: #4a90d9;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
 
 /* ── Chevron (shared) ────────────────────────────────────────────────────── */
 
 .chevron {
-  font-size: 9px;
+  font-size: 13px;
   vertical-align: middle;
   display: inline-block;
-  width: 12px;
+  width: 16px;
 }
 
 /* ── Row gutter ──────────────────────────────────────────────────────────── */
@@ -311,15 +405,16 @@
   background: #ffffff;
 }
 .dataRow:hover { background: #f8f9fa; }
-.rowArrow { font-size: 12px; color: #c8cacd; line-height: 1; }
-.dataRow:hover .rowArrow { color: #80868b; }
+.rowArrow { font-size: 10px; color: #9aa0a6; line-height: 1; }
+.dataRow:hover .rowArrow { color: #202124; }
 .rowArrowDirect { color: #f29900 !important; }
 
 /* ── Cells ───────────────────────────────────────────────────────────────── */
 
 .cell {
-  padding: 0 8px;
-  height: 30px;
+  padding: 0 14px;
+  height: 46px;
+  font-size: 13px;
   vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -329,12 +424,12 @@
 .cell:not(.ro):hover { cursor: text; }
 
 .tdTask  { font-weight: 500; }
-.tdCalc  { font-size: 11px; color: #5f6368; }
+.tdCalc  { font-size: 12px; color: #5f6368; }
 .tdMoney { text-align: right; font-family: 'Inter', system-ui, sans-serif; font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 500; color: #202124; }
 .tdPct   { text-align: right; font-family: 'Inter', system-ui, sans-serif; font-variant-numeric: tabular-nums; font-size: 13px; }
-.tdText  { font-size: 11.5px; }
-.tdQb    { font-family: var(--font-mono); font-size: 10.5px; color: #3c4043; white-space: normal; word-break: break-word; line-height: 1.4; padding-top: 4px; padding-bottom: 4px; }
-.tdNotes { font-size: 11px; color: #5f6368; }
+.tdText  { font-size: 13px; }
+.tdQb    { font-family: var(--font-mono); font-size: 11px; color: #3c4043; white-space: normal; word-break: break-word; line-height: 1.4; padding-top: 4px; padding-bottom: 4px; }
+.tdNotes { font-size: 12px; color: #5f6368; }
 
 /* account number column in data rows */
 .tdAcct {
@@ -345,18 +440,18 @@
 }
 
 .tdAcctNum {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 600;
-  color: #3c4043;
-  letter-spacing: .02em;
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  color: #202124;
+  letter-spacing: .01em;
   white-space: nowrap;
 }
 
 .tdAcctDesc {
-  font-size: 10px;
-  font-weight: 400;
-  color: #80868b;
+  font-size: 11px;
+  font-weight: 500;
+  color: #5f6368;
   white-space: normal;
   line-height: 1.2;
 }
@@ -386,11 +481,11 @@
 .editInput {
   width: 100%;
   height: 100%;
-  padding: 0 8px;
+  padding: 0 10px;
   border: none;
   background: transparent;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: #202124;
   outline: none;
 }
@@ -406,6 +501,13 @@
 /* user-added rows */
 .rowUserAdded { background: #e8f0fe !important; }
 .rowUserAdded:hover { background: #d2e3fc !important; }
+
+/* ── Financial figure color language ─────────────────────────────────────── */
+/* Teal = committed / contracted / obligation                                   */
+/* Amber = invoiced / billed / paid                                             */
+
+.numCommitted { color: #0a7c5c; }
+.numInvoiced  { color: #92400e; }
 
 /* ── Status colors ───────────────────────────────────────────────────────── */
 
@@ -434,7 +536,7 @@
 .drillable:hover { background: #e8f0fe !important; color: #1a73e8 !important; text-decoration: underline; text-underline-offset: 2px; }
 .drillActive { background: #d2e3fc !important; color: #1967d2 !important; font-weight: 700; outline: 2px solid #1a73e8; outline-offset: -2px; }
 .drillActiveRow { background: #f0f7ff !important; }
-.drillHdr { color: #7baaf7; }
+.drillHdr { color: #ffffff; }
 .drillHint { font-size: 11px; color: var(--text-2); display: flex; align-items: center; gap: 8px; flex: 1; margin-left: 16px; }
 .drillHint strong { color: var(--text-1); }
 .drillClearBtn { font-size: 10px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-2); cursor: pointer; color: var(--text-2); }
@@ -550,29 +652,32 @@
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 5px 14px;
-  font-size: 11px;
-  border-bottom: 1px solid;
+  gap: 20px;
+  padding: 7px 16px;
+  font-size: 12px;
+  border-bottom: 2px solid #000;
   flex-wrap: wrap;
+  background: #13151a;
+  color: rgba(255,255,255,0.85);
 }
-.reconOk    { background: #f0fdf4; border-color: #86efac; color: #166534; }
-.reconWarn  { background: #fffbeb; border-color: #fbbf24; color: #92400e; }
-.reconError { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+.reconOk    { border-color: #000; }
+.reconWarn  { border-bottom-color: #f59e0b; }
+.reconError { border-bottom-color: #ef4444; }
 
-.reconMismatch { outline: 1.5px solid #ef4444; border-radius: 3px; padding: 1px 4px; background: #fee2e2; }
-.reconRaw      { font-size: 9px; font-weight: 700; opacity: .85; }
+.reconMismatch { outline: 1.5px solid #ef4444; border-radius: 3px; padding: 1px 4px; background: rgba(239,68,68,0.2); color: #fca5a5; }
+.reconRaw      { font-size: 9px; font-weight: 700; opacity: .7; }
 
 .reconStatus {
   font-weight: 700;
-  font-size: 11px;
+  font-size: 13px;
   white-space: nowrap;
+  color: #ffffff;
+  letter-spacing: .01em;
 }
 .reconDivider {
   width: 1px;
   height: 14px;
-  background: currentColor;
-  opacity: .25;
+  background: rgba(255,255,255,0.2);
   flex-shrink: 0;
 }
 .reconStat {
@@ -582,16 +687,16 @@
   white-space: nowrap;
 }
 .reconLabel {
-  font-size: 8.5px;
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: .06em;
-  opacity: .65;
+  letter-spacing: .07em;
+  color: rgba(255,255,255,0.4);
 }
-.reconOkNote   { font-size: 11px; opacity: .8; }
-.reconWarnNote { font-size: 11px; font-weight: 600; }
-.reconRepairBtn { font-size: 10px; font-weight: 700; padding: 2px 8px; margin-left: 8px; border: 1px solid currentColor; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; opacity: .8; }
-.reconRepairBtn:hover { opacity: 1; }
+.reconOkNote   { font-size: 11px; color: rgba(255,255,255,0.7); }
+.reconWarnNote { font-size: 11px; font-weight: 700; color: #fbbf24; }
+.reconRepairBtn { font-size: 10px; font-weight: 700; padding: 2px 8px; margin-left: 8px; border: 1px solid rgba(255,255,255,0.3); border-radius: 3px; background: transparent; color: rgba(255,255,255,0.8); cursor: pointer; }
+.reconRepairBtn:hover { background: rgba(255,255,255,0.1); color: #fff; }
 
 /* ── Unassigned tray ─────────────────────────────────────────────────────── */
 
