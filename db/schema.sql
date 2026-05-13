@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS project_members (
     UNIQUE (project_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
+DO $$ BEGIN ALTER TABLE project_members ADD COLUMN id SERIAL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE project_members ADD COLUMN added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 CREATE TABLE IF NOT EXISTS budget_lines (
     id SERIAL PRIMARY KEY,
@@ -438,6 +440,8 @@ CREATE TABLE IF NOT EXISTS files (
     size INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+DO $$ BEGIN ALTER TABLE files ADD COLUMN size INTEGER NOT NULL DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE files ADD COLUMN size_bytes INTEGER; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- ── Vendor knowledge base ─────────────────────────────────────────────────────
 
@@ -582,6 +586,21 @@ DO $$ BEGIN
   );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE INDEX IF NOT EXISTS idx_import_queue_phase ON import_queue(phase_id);
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN original_filename VARCHAR(512); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN file_reference VARCHAR(1024); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN doc_type_confidence VARCHAR(16); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN suggested_budget_line_id INTEGER REFERENCES phase_budget_lines(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN match_confidence VARCHAR(16); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN source_batch TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN confirmed_contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN confirmed_invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN suggested_qb_txn_id INTEGER REFERENCES qb_transactions(id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN qb_match_confidence VARCHAR(16); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN qb_match_reason TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN identified_project TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE import_queue ADD COLUMN project_match VARCHAR(32); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN UPDATE import_queue SET original_filename = COALESCE(original_filename, 'upload.pdf'); END $$;
+DO $$ BEGIN ALTER TABLE import_queue ALTER COLUMN original_filename SET NOT NULL; EXCEPTION WHEN others THEN NULL; END $$;
 
 -- Per-line budget line allocation: allows one contract to span multiple budget lines.
 DO $$ BEGIN
@@ -973,6 +992,7 @@ CREATE TABLE IF NOT EXISTS budget_snapshots (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
+DO $$ BEGIN ALTER TABLE budget_snapshots ADD COLUMN snapshot_type VARCHAR(10) NOT NULL DEFAULT 'manual'; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 CREATE TABLE IF NOT EXISTS budget_snapshot_lines (
   id                    SERIAL PRIMARY KEY,
